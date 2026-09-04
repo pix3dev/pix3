@@ -79,9 +79,16 @@
   header .spacer{flex:1}
   #stageWrap{flex:1; overflow:auto; position:relative}
   #stage{
-    min-height:100%; padding:26px;
-    display:flex; flex-wrap:wrap; gap:22px; align-content:flex-start;
+    min-height:100%; padding:10px 26px 60px;
   }
+  #stage section.sec{margin-top:18px}
+  #stage section.sec>h3{
+    font-size:13px; font-weight:700; letter-spacing:.5px; color:rgba(255,255,255,.75);
+    text-transform:uppercase; margin:8px 0 14px; padding-bottom:6px;
+    border-bottom:1px solid rgba(255,255,255,.18);
+  }
+  #stage.bg-checker section.sec>h3, #stage.bg-dark section.sec>h3{color:#93a0b8; border-bottom-color:#39455c}
+  .secgrid{display:flex; flex-wrap:wrap; gap:14px; align-items:flex-start; align-content:flex-start}
   #stage.bg-game{background:linear-gradient(180deg,#0a5aa0 0%,#083b6e 100%)}
   #stage.bg-dark{background:#12151d}
   #stage.bg-checker{
@@ -204,12 +211,27 @@ function adj(hex,{dh=0,ds=0,dl=0}={}){
   return hslToHex(h+dh, s+ds, l+dl);
 }
 function lum(hex){ return hexToHsl(hex)[2]; }
+/* воспринимаемая яркость 0..1 (для адаптивного цвета текста) */
+function brightness(hex){
+  hex = hex.replace('#','');
+  if(hex.length===3) hex = hex.split('').map(c=>c+c).join('');
+  const r=parseInt(hex.slice(0,2),16)/255, g=parseInt(hex.slice(2,4),16)/255, b=parseInt(hex.slice(4,6),16)/255;
+  return 0.299*r + 0.587*g + 0.114*b;
+}
+/* цвет контента (текст/иконки) на данном фоне с учётом T.txtColor */
+function ink(bg){
+  const darkInk = () => adj(T.darkTone,{dh:(T.hue||0)*0.5, dl:-3});
+  if(bg && brightness(bg) > 0.9) return darkInk();               // почти белый фон — всегда тёмный
+  if(T.txtColor==="dark") return darkInk();
+  if(T.txtColor==="auto" && bg && brightness(bg) > 0.56) return darkInk();
+  return "#ffffff";
+}
 
 /* ---------- тема (глобальные параметры) ---------- */
 const DEFAULT_THEME = {
   hue:0, sat:0, light:0,
-  radius:7, bevel:5, outline:1.5, skew:0,
-  glossOn:1, glossH:51, glossA:15,
+  radius:7, bevel:5, outline:1.5, skew:0, pad:24,
+  glossOn:1, glossType:"strip", glossH:51, glossA:15, puffy:0,
   gradOn:0, gradK:11,
   shadowMode:0, shadowDx:3, shadowDy:6, shadowBlur:5, shadowA:40,
   font:"Nunito", txtOut:1, txtDrop:3, txtColor:"white",
@@ -265,8 +287,56 @@ function vGrad(color){
     fill:`url(#${id})`
   };
 }
+/* блик по типу: полоса / купол / уголки. Область (x,y,w,h,r) — лицо кнопки */
+function glossFor(x,y,w,h,r){
+  const A = T.glossA/100;
+  if(T.glossType==="dome"){
+    const id = uid("gd");
+    const gh = Math.max(6, h*(T.glossH/100));
+    return `<linearGradient id="${id}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="${Math.min(1,A*1.5)}"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0"/></linearGradient>
+      <rect x="${x+2}" y="${y+2}" width="${w-4}" height="${gh}" rx="${Math.max(0,r-2)}" fill="url(#${id})"/>`;
+  }
+  if(T.glossType==="corner"){
+    const rr = Math.min(w,h);
+    const op = Math.min(1, A*1.8);
+    const bx = x+w-Math.max(r*0.55,rr*0.14), by = y+Math.max(r*0.5,rr*0.16);
+    const sx = x+Math.max(r*0.55,rr*0.11), sy = y+Math.max(r*0.45,rr*0.14);
+    return `<ellipse cx="${bx}" cy="${by}" rx="${rr*0.13}" ry="${rr*0.08}" fill="#fff" opacity="${op}" transform="rotate(28 ${bx} ${by})"/>
+      <ellipse cx="${sx}" cy="${sy}" rx="${rr*0.08}" ry="${rr*0.05}" fill="#fff" opacity="${op*0.75}" transform="rotate(-28 ${sx} ${sy})"/>`;
+  }
+  // strip (полоса)
+  const gp = Math.max(2, r*0.45);
+  const gh = (h) * T.glossH/100;
+  return `<rect x="${x+gp}" y="${y+gp*0.7}" width="${w-gp*2}" height="${Math.max(4,gh)}" rx="${Math.max(0,r-gp)}" fill="#ffffff" opacity="${A}"/>`;
+}
+
+/* «подушка»: скруглённый прямоугольник, у которого грани выгнуты наружу на k px.
+   Дуги углов обычные, середина каждой грани раздувается квадратичной кривой. */
+function pillowPath(x,y,w,h,r,k){
+  r = Math.max(0, Math.min(r, w/2, h/2));
+  const q = 2*k;                       // контрольная точка: прогиб в середине = k
+  const cx = x+w/2, cy = y+h/2;
+  const hEdge = (w - 2*r) > 0.5;       // есть ли прямой участок по горизонтали
+  const vEdge = (h - 2*r) > 0.5;       // ...и по вертикали
+  const p = [];
+  p.push(`M ${x+r} ${y}`);
+  p.push(hEdge ? `Q ${cx} ${y-q} ${x+w-r} ${y}` : `L ${x+w-r} ${y}`);
+  p.push(r>0 ? `A ${r} ${r} 0 0 1 ${x+w} ${y+r}` : `L ${x+w} ${y}`);
+  p.push(vEdge ? `Q ${x+w+q} ${cy} ${x+w} ${y+h-r}` : `L ${x+w} ${y+h-r}`);
+  p.push(r>0 ? `A ${r} ${r} 0 0 1 ${x+w-r} ${y+h}` : `L ${x+w} ${y+h}`);
+  p.push(hEdge ? `Q ${cx} ${y+h+q} ${x+r} ${y+h}` : `L ${x+r} ${y+h}`);
+  p.push(r>0 ? `A ${r} ${r} 0 0 1 ${x} ${y+h-r}` : `L ${x} ${y+h}`);
+  p.push(vEdge ? `Q ${x-q} ${cy} ${x} ${y+r}` : `L ${x} ${y+r}`);
+  p.push(r>0 ? `A ${r} ${r} 0 0 1 ${x+r} ${y}` : `L ${x} ${y}`);
+  p.push("Z");
+  return p.join(" ");
+}
+
 /* фирменный «пухлый» прямоугольник: обводка + тёмная губа снизу + лицо с градиентом + блик.
-   При T.skew>0 вертикальные грани скашиваются (параллелограмм, как в Brawl Stars). */
+   При T.skew>0 вертикальные грани скашиваются (параллелограмм, как в Brawl Stars).
+   При T.puffy>0 грани выгибаются наружу — кнопка выглядит раздутой. */
 function bevelRect(x,y,w,h,color,{r=null, bevel=null, gloss=true}={}){
   r = r??T.radius; bevel = bevel??T.bevel;
   let pre="", post="";
@@ -283,15 +353,21 @@ function bevelRect(x,y,w,h,color,{r=null, bevel=null, gloss=true}={}){
   const dark = adj(color,{dl:-17, ds:-4});
   const g = vGrad(color);
   const pad = ow;
-  const fr = Math.max(0, r-pad);
-  const fh = h - pad*2 - bevel;
+  const k = Math.min(T.puffy||0, h*0.14);   // прогиб граней
   let s = g.def;
-  s += `<rect x="${x+ow/2}" y="${y+ow/2}" width="${w-ow}" height="${h-ow}" rx="${r}" fill="${dark}" stroke="${DARK()}" stroke-width="${ow}"/>`;
-  s += `<rect x="${x+pad}" y="${y+pad}" width="${w-pad*2}" height="${fh}" rx="${fr}" fill="${g.fill}"/>`;
-  if(gloss && T.glossOn){
-    const gh = fh * T.glossH/100;
-    const gp = Math.max(2, fr*0.45);
-    s += `<rect x="${x+pad+gp}" y="${y+pad+gp*0.7}" width="${w-pad*2-gp*2}" height="${Math.max(4,gh)}" rx="${Math.max(0,fr-gp)}" fill="#ffffff" opacity="${T.glossA/100}"/>`;
+  if(k>0.1){
+    // геометрия ужимается на k, чтобы раздутые грани остались в холсте
+    const ox=x+k, oy=y+k, w2=w-k*2, h2=h-k*2;
+    const fr = Math.max(0, r-pad);
+    s += `<path d="${pillowPath(ox+ow/2, oy+ow/2, w2-ow, h2-ow, r, k)}" fill="${dark}" stroke="${DARK()}" stroke-width="${ow}"/>`;
+    s += `<path d="${pillowPath(ox+pad, oy+pad, w2-pad*2, h2-pad*2-bevel, fr, k*0.9)}" fill="${g.fill}"/>`;
+    if(gloss && T.glossOn) s += glossFor(ox+pad+k*0.4, oy+pad, w2-pad*2-k*0.8, h2-pad*2-bevel, fr);
+  } else {
+    const fr = Math.max(0, r-pad);
+    const fh = h - pad*2 - bevel;
+    s += `<rect x="${x+ow/2}" y="${y+ow/2}" width="${w-ow}" height="${h-ow}" rx="${r}" fill="${dark}" stroke="${DARK()}" stroke-width="${ow}"/>`;
+    s += `<rect x="${x+pad}" y="${y+pad}" width="${w-pad*2}" height="${fh}" rx="${fr}" fill="${g.fill}"/>`;
+    if(gloss && T.glossOn) s += glossFor(x+pad, y+pad, w-pad*2, fh, fr);
   }
   return pre + s + post;
 }
@@ -311,10 +387,10 @@ function roundedPoly(pts, color, {cr=6, outline=true, translate="", fillOverride
    Тёмный текст (T.txtColor='dark' или тёмный fill) — без обводки и тени, как в Bombastic Brothers.
    При STRIP_TEXT=true (PNG-экспорт) текст не рисуется — его в игре выводит движок. */
 let STRIP_TEXT = false;
-function label(x,y,text,size,{fill=null, anchor="middle", outScale=1}={}){
+function label(x,y,text,size,{fill=null, bg=null, anchor="middle", outScale=1}={}){
   if(STRIP_TEXT) return "";
   const fam = `'${T.font}', 'Baloo 2', sans-serif`;
-  const resolved = fill || (T.txtColor==="dark" ? adj(DARK(),{dl:-3}) : "#ffffff");
+  const resolved = fill || ink(bg);
   const common = `x="${x}" y="${y}" font-family="${fam}" font-weight="${fontW()}" font-size="${size}" text-anchor="${anchor}" dominant-baseline="middle"`;
   if(lum(resolved) < 45){
     return `<text ${common} fill="${resolved}">${text}</text>`;
@@ -388,9 +464,8 @@ function icon(name, cx, cy, size, color){
 
 function compButton(colorId, text, w=250, h=88){
   const c = C(colorId);
-  const white = lum(c)>82;
   let s = bevelRect(0.5,0.5,w-1,h-1,c);
-  s += label(w/2, h/2-T.bevel/3, text, h*0.38, white? {fill:DARK()} : {});
+  s += label(w/2, h/2-T.bevel/3, text, h*0.38, {bg:c});
   return {svg:svgDoc(w,h,s), w, h};
 }
 
@@ -412,7 +487,7 @@ function compBannerButton(colorId, text, w=250, h=88){
     const gpts = face.map(p=>[p[0]*0.98+w*0.01, p[1]<=h/2 ? p[1]+cr*0.4 : h*0.44]);
     s += `<path d="M${gpts.map(p=>p.join(',')).join('L')}Z" fill="#fff" opacity="${T.glossA/100}" stroke="#fff" stroke-width="${cr}" stroke-linejoin="round"/>`;
   }
-  s += label(w/2, h/2-T.bevel/3, text, h*0.36);
+  s += label(w/2, h/2-T.bevel/3, text, h*0.36, {bg:c});
   return {svg:svgDoc(w,h,s), w, h};
 }
 
@@ -435,30 +510,30 @@ function compHexButton(colorId, iconName, size=110){
     const gl = face.map(p=>[cx+(p[0]-cx)*0.8, p[1]<cy? cy+(p[1]-cy)*0.85 : cy*0.92]);
     s += `<path d="M${gl.map(p=>p.join(',')).join('L')}Z" fill="#fff" opacity="${T.glossA/100}" stroke="#fff" stroke-width="${cr}" stroke-linejoin="round"/>`;
   }
-  s += icon(iconName, cx, cy - T.bevel*0.4, size*0.44);
+  s += icon(iconName, cx, cy - T.bevel*0.4, size*0.44, ink(c));
   return {svg:svgDoc(size,size,s), w:size, h:size};
 }
 
 function compSquareIcon(colorId, iconName, size=92){
   const c = C(colorId);
   let s = bevelRect(0.5,0.5,size-1,size-1,c);
-  s += icon(iconName, size/2, size/2 - T.bevel/3, size*0.5);
+  s += icon(iconName, size/2, size/2 - T.bevel/3, size*0.5, ink(c));
   return {svg:svgDoc(size,size,s), w:size, h:size};
 }
 
 function compBigButton(colorId, iconName, text, w=300, h=120){
   const c = C(colorId);
   let s = bevelRect(0.5,0.5,w-1,h-1,c,{r:T.radius*1.3});
-  s += icon(iconName, w*0.22, h/2 - T.bevel/3, h*0.52);
-  s += label(w*0.60, h/2 - T.bevel/3, text, h*0.34);
+  s += icon(iconName, w*0.22, h/2 - T.bevel/3, h*0.52, ink(c));
+  s += label(w*0.60, h/2 - T.bevel/3, text, h*0.34, {bg:c});
   return {svg:svgDoc(w,h,s), w, h};
 }
 
 function compIconTextButton(colorId, iconName, text, w=260, h=86){
   const c = C(colorId);
   let s = bevelRect(0.5,0.5,w-1,h-1,c);
-  s += icon(iconName, h*0.55, h/2 - T.bevel/3, h*0.46);
-  s += label(w*0.60, h/2 - T.bevel/3, text, h*0.36);
+  s += icon(iconName, h*0.55, h/2 - T.bevel/3, h*0.46, ink(c));
+  s += label(w*0.60, h/2 - T.bevel/3, text, h*0.36, {bg:c});
   return {svg:svgDoc(w,h,s), w, h};
 }
 
@@ -551,7 +626,7 @@ function compProgress(pct, text, colorId="yellow", w=560, h=64){
     s += `<rect x="${pad}" y="${pad}" width="${fw}" height="${h-pad*2-T.bevel*0.7}" rx="${(T.radius*0.55)}" fill="${g.fill}"/>`;
     if(T.glossOn) s += `<rect x="${pad+4}" y="${pad+3}" width="${fw-8}" height="${(h-pad*2)*0.3}" rx="${(T.radius*0.4)}" fill="#fff" opacity="${T.glossA/100}"/>`;
   }
-  if(text) s += label(w/2, h/2, text, h*0.42);
+  if(text) s += label(w/2, h/2, text, h*0.42, {bg: pct>=50? c : null});
   return {svg:svgDoc(w,h,s), w, h};
 }
 
@@ -604,7 +679,7 @@ function compShield(num, size=88, colorId="sky"){
     const gl=face.filter(p=>p[1]<h*0.55);
     if(gl.length>2) s += `<path d="M${gl.map(p=>p.join(',')).join('L')}Z" fill="#fff" opacity="${T.glossA/100}" stroke="#fff" stroke-width="${cr}" stroke-linejoin="round"/>`;
   }
-  s += label(w/2, h*0.47, String(num), size*0.5);
+  s += label(w/2, h*0.47, String(num), size*0.5, {bg:c});
   return {svg:svgDoc(w,Math.ceil(h),s), w, h:Math.ceil(h)};
 }
 
@@ -615,7 +690,7 @@ function compLevelBar(num, text, badgeColor, barColor, w=430, h=96){
   const g=vGrad(c); s+=g.def;
   s += `<rect x="${h*0.4}" y="${by}" width="${w-h*0.42-T.outline}" height="${bh-T.bevel*0.7}" rx="${Math.min(T.radius,bh/2)}" fill="${g.fill}"/>`;
   if(T.glossOn) s += `<rect x="${h*0.46}" y="${by+3}" width="${w-h*0.52}" height="${bh*0.28}" rx="${Math.min(T.radius*0.6,bh*0.2)}" fill="#fff" opacity="${T.glossA/100}"/>`;
-  s += label((w+h*0.4)/2, by+bh/2-T.bevel*0.2, text, bh*0.5);
+  s += label((w+h*0.4)/2, by+bh/2-T.bevel*0.2, text, bh*0.5, {bg:c});
   const badge = compShield(num, h*0.92, badgeColor);
   s += `<g transform="translate(0,${(h-h*0.92*1.08)/2})">${badge.svg.replace(/^<svg[^>]*>|<\/svg>$/g,'')}</g>`;
   return {svg:svgDoc(w,h,s), w, h};
@@ -627,7 +702,7 @@ function compResourceCounter(colorId, iconName, value, w=310, h=64){
   // кнопка "+"
   const bs=h*0.7, bx=h*0.14, by2=(h-bs)/2;
   s += bevelRect(bx,by2,bs,bs,c,{r:Math.min(T.radius*0.6,bs*0.3), bevel:T.bevel*0.6});
-  s += icon("plus", bx+bs/2, by2+bs/2-T.bevel*0.25, bs*0.55);
+  s += icon("plus", bx+bs/2, by2+bs/2-T.bevel*0.25, bs*0.55, ink(c));
   // значение
   s += label((w-h*0.3)/2 + h*0.15, h/2, value, h*0.42);
   // иконка ресурса справа
@@ -658,7 +733,7 @@ function compPanel(title, w=420, h=300){
   // шапка-плашка
   const hw=w*0.62, hh=h*0.17;
   s += bevelRect((w-hw)/2, -2, hw, hh+6, C("yellow"), {r:Math.min(T.radius,hh*0.45), bevel:T.bevel*0.7});
-  s += label(w/2, hh*0.5+2, title, hh*0.62);
+  s += label(w/2, hh*0.5+2, title, hh*0.62, {bg:C("yellow")});
   // кнопка закрытия
   const cs=h*0.155;
   s += `<g transform="translate(${w-cs*0.9},${-cs*0.1})">${bevelRect(0,0,cs,cs,C("red"),{r:Math.min(T.radius*0.7,cs*0.3),bevel:T.bevel*0.6})}${icon("close",cs/2,cs/2-T.bevel*0.25,cs*0.5)}</g>`;
@@ -689,25 +764,56 @@ function compTabBar(labels, active, w=520, h=84){
   return {svg:svgDoc(w,h,s), w, h};
 }
 
-/* ---------- тень компонента (пост-обработка): чёткая или размытая ---------- */
-function shadowPad(){
-  if(!T.shadowMode) return 0;
-  const off = Math.max(Math.abs(T.shadowDx||0), Math.abs(T.shadowDy||0));
-  return Math.ceil(off + (T.shadowMode===2 ? T.shadowBlur*2.2 : 0) + 2);
-}
+/* ---------- отступ холста + тень (пост-обработка) ----------
+   Отступ T.pad фиксированный и не зависит от параметров тени:
+   при изменении тени объекты остаются на месте и в превью, и в атласе. */
 function withShadow(comp){
-  if(!T.shadowMode) return comp;
-  const p = shadowPad();
+  const p = Math.max(0, Math.round(T.pad||0));
+  if(p===0 && !T.shadowMode) return comp;
   const inner = comp.svg.replace(/^<svg[^>]*>/,'').replace(/<\/svg>$/,'');
   const W = comp.w + p*2, H = comp.h + p*2;
-  const id = uid("sh");
-  const blur = T.shadowMode===2 ? T.shadowBlur : 0;
-  const filt = `<filter id="${id}" x="-45%" y="-45%" width="190%" height="190%">
-    <feDropShadow dx="${T.shadowDx}" dy="${T.shadowDy}" stdDeviation="${blur}" flood-color="${NAVY()}" flood-opacity="${(T.shadowA/100).toFixed(2)}"/></filter>`;
+  let filt="", gOpen=`<g transform="translate(${p},${p})">`;
+  if(T.shadowMode){
+    const id = uid("sh");
+    const blur = T.shadowMode===2 ? T.shadowBlur : 0;
+    filt = `<filter id="${id}" x="-45%" y="-45%" width="190%" height="190%">
+      <feDropShadow dx="${T.shadowDx}" dy="${T.shadowDy}" stdDeviation="${blur}" flood-color="${NAVY()}" flood-opacity="${(T.shadowA/100).toFixed(2)}"/></filter>`;
+    gOpen = `<g filter="url(#${id})" transform="translate(${p},${p})">`;
+  }
   return {
     name: comp.name, w: W, h: H,
-    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${filt}<g filter="url(#${id})" transform="translate(${p},${p})">${inner}</g></svg>`
+    svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${filt}${gOpen}${inner}</g></svg>`
   };
+}
+
+function compRibbon(colorId, text, w=460, h=150){
+  const c = C(colorId);
+  const dark = adj(c,{dl:-13, ds:2});
+  const darker = adj(c,{dl:-27, ds:-2});
+  const ow = Math.max(1.5, T.outline);
+  const bandX = w*0.13, bandW = w-bandX*2;
+  const bandY = h*0.14, bandH = h*0.5;
+  const tailTop = bandY + bandH*0.42;
+  const tailH = bandH*0.95;
+  const notch = w*0.055;
+  const fold = w*0.035;
+  let s = "";
+  // хвосты с V-вырезом
+  const L = `M ${w*0.015} ${tailTop} L ${bandX+fold} ${tailTop} L ${bandX+fold} ${tailTop+tailH} L ${w*0.015} ${tailTop+tailH} L ${w*0.015+notch} ${tailTop+tailH/2} Z`;
+  const R = `M ${w-w*0.015} ${tailTop} L ${w-bandX-fold} ${tailTop} L ${w-bandX-fold} ${tailTop+tailH} L ${w-w*0.015} ${tailTop+tailH} L ${w-w*0.015-notch} ${tailTop+tailH/2} Z`;
+  s += `<path d="${L}" fill="${dark}" stroke="${DARK()}" stroke-width="${ow}" stroke-linejoin="round"/>`;
+  s += `<path d="${R}" fill="${dark}" stroke="${DARK()}" stroke-width="${ow}" stroke-linejoin="round"/>`;
+  // складки под центральной плашкой
+  s += `<path d="M ${bandX} ${bandY+bandH} L ${bandX+fold} ${bandY+bandH} L ${bandX+fold} ${tailTop+tailH} Z" fill="${darker}"/>`;
+  s += `<path d="M ${w-bandX} ${bandY+bandH} L ${w-bandX-fold} ${bandY+bandH} L ${w-bandX-fold} ${tailTop+tailH} Z" fill="${darker}"/>`;
+  // центральная лента
+  const g = vGrad(c);
+  s += g.def;
+  const rr = Math.min(T.radius*0.5, 8);
+  s += `<rect x="${bandX}" y="${bandY}" width="${bandW}" height="${bandH}" rx="${rr}" fill="${g.fill}" stroke="${DARK()}" stroke-width="${ow}"/>`;
+  if(T.glossOn) s += glossFor(bandX+ow, bandY+ow, bandW-ow*2, bandH-ow*2, rr);
+  s += label(w/2, bandY+bandH/2, text, bandH*0.46, {bg:c});
+  return {svg:svgDoc(w,h,s), w, h};
 }
 
 /* сборка всех компонентов; strip=true — без текста (для PNG: текст рисует движок) */
@@ -774,6 +880,9 @@ const TABS = [
   {id:"panels", name:"Панели и ресурсы", build(){
     return [
       {name:"panel_window", ...compPanel("Settings")},
+      {name:"ribbon_yellow", ...compRibbon("yellow","Title text")},
+      {name:"ribbon_green",  ...compRibbon("green","Title text")},
+      {name:"ribbon_orange", ...compRibbon("orange","Title text")},
       {name:"tabbar_1", ...compTabBar(["Tab1","Tab2","Tab3"], 0)},
       {name:"tabbar_2", ...compTabBar(["Shop","Heroes","Battle","Clan"], 2, 640, 84)},
       {name:"badge_shield_9",  ...compShield(9)},
@@ -796,10 +905,10 @@ const PRESETS = {
     font:"Lilita One", txtOut:3.5, txtDrop:1.5, txtColor:"white"
   },
   "Bombastic": {
-    sat:8, radius:4, bevel:5, outline:4, skew:0,
-    gradOn:1, gradK:13, glossOn:1, glossH:45, glossA:20,
-    shadowMode:1, shadowDx:2, shadowDy:5, shadowA:60,
-    font:"Rubik", txtColor:"dark"
+    sat:8, radius:0, bevel:9, outline:4, skew:0,
+    gradOn:0, gradK:13, glossOn:0, glossType:"strip", glossH:45, glossA:20, puffy:0,
+    shadowMode:1, shadowDx:2, shadowDy:5, shadowBlur:5, shadowA:60,
+    font:"Rubik", txtOut:0, txtDrop:0, txtColor:"auto"
   },
   "Candy Pop": {
     hue:38, sat:10, light:4, radius:24, bevel:8, outline:2,
@@ -809,6 +918,12 @@ const PRESETS = {
   },
   "Мягкая тень": {
     shadowMode:2, shadowDx:2, shadowDy:5, shadowBlur:6, shadowA:32
+  },
+  "Пухлый (капсула)": {
+    radius:44, bevel:4, outline:2.5, puffy:6,
+    gradOn:1, gradK:12, glossOn:1, glossType:"corner", glossA:38,
+    shadowMode:2, shadowDx:0, shadowDy:5, shadowBlur:5, shadowA:30,
+    font:"Baloo 2", txtOut:2.5, txtDrop:2, txtColor:"white"
   },
   "Плоский": {
     gradOn:0, glossOn:0, bevel:0, outline:2, radius:10,
@@ -833,14 +948,17 @@ const CONTROLS = [
   {k:"sat",   t:"range", label:"Насыщенность", min:-40,  max:30,  step:1},
   {k:"light", t:"range", label:"Яркость",      min:-20,  max:20,  step:1},
   {grp:"Форма"},
-  {k:"radius",  t:"range", label:"Скругление", min:0,  max:30, step:1},
+  {k:"radius",  t:"range", label:"Скругление", min:0,  max:50, step:1},
   {k:"bevel",   t:"range", label:"Фаска",      min:0,  max:16, step:1},
   {k:"outline", t:"range", label:"Обводка",    min:0,  max:8,  step:0.5},
   {k:"skew",    t:"range", label:"Скос",       min:0,  max:14, step:0.5},
+  {k:"puffy",   t:"range", label:"Выпуклость", min:0,  max:10, step:0.5},
+  {k:"pad",     t:"range", label:"Отступ холста", min:0, max:48, step:1},
   {grp:"Эффекты"},
   {k:"gradOn",  t:"check", label:"Градиент"},
   {k:"gradK",   t:"range", label:"Контраст",   min:0, max:24, step:1},
   {k:"glossOn", t:"check", label:"Блик"},
+  {k:"glossType", t:"select", label:"Тип блика", options:["Полоса","Купол","Уголки"], values:["strip","dome","corner"]},
   {k:"glossH",  t:"range", label:"Высота блика", min:10, max:60, step:1},
   {k:"glossA",  t:"range", label:"Яркость блика",min:5,  max:60, step:1},
   {grp:"Тень"},
@@ -851,7 +969,7 @@ const CONTROLS = [
   {k:"shadowA",    t:"range", label:"Плотность", min:0, max:80, step:1},
   {grp:"Типографика"},
   {k:"font",    t:"select", label:"Шрифт", options:FONTS.map(f=>f.f)},
-  {k:"txtColor",t:"select", label:"Цвет текста", options:["Белый","Тёмный"], values:["white","dark"]},
+  {k:"txtColor",t:"select", label:"Цвет текста", options:["Белый","Тёмный","Адаптивный"], values:["white","dark","auto"]},
   {k:"txtOut",  t:"range", label:"Обводка текста", min:0, max:8, step:0.5},
   {k:"txtDrop", t:"range", label:"Тень текста",    min:0, max:8, step:0.5},
   {grp:"Превью"},
@@ -915,35 +1033,62 @@ function applyBg(){
 }
 
 /* ---------- рендер табов и сцены ---------- */
-let currentComps = []; // [{name, svg, w, h}]
+/* ---------- рендер: все секции на одной странице, вкладки скроллят ---------- */
 function buildTabs(){
   const el=document.getElementById("tabs");
   el.innerHTML="";
   for(const t of TABS){
     const d=document.createElement("div");
     d.className="tab"+(t.id===activeTab?" on":"");
+    d.dataset.id=t.id;
     d.textContent=t.name;
-    d.onclick=()=>{ activeTab=t.id; buildTabs(); render(); };
+    d.onclick=()=>{
+      activeTab=t.id;
+      markActiveTab();
+      const sec=document.getElementById("sec_"+t.id);
+      if(sec) sec.scrollIntoView({behavior:"smooth", block:"start"});
+    };
     el.appendChild(d);
   }
   const sp=document.createElement("div"); sp.className="spacer"; el.appendChild(sp);
 }
+function markActiveTab(){
+  document.querySelectorAll("#tabs .tab").forEach(d=>d.classList.toggle("on", d.dataset.id===activeTab));
+}
 function render(){
-  const tab = TABS.find(t=>t.id===activeTab);
-  currentComps = tab.build().map(withShadow);
   const st=document.getElementById("stage");
   st.innerHTML="";
-  for(const comp of currentComps){
-    const card=document.createElement("div");
-    card.className="card";
-    card.innerHTML=`<div class="cv">${comp.svg}</div>
-      <div class="nm">${comp.name}
-        <a data-act="svg">SVG</a><a data-act="png">PNG</a></div>`;
-    card.querySelector('[data-act=svg]').onclick=()=>downloadSvg(comp);
-    card.querySelector('[data-act=png]').onclick=()=>downloadPng(comp);
-    st.appendChild(card);
+  for(const t of TABS){
+    const sec=document.createElement("section");
+    sec.className="sec";
+    sec.id="sec_"+t.id;
+    sec.innerHTML=`<h3>${t.name}</h3>`;
+    const grid=document.createElement("div");
+    grid.className="secgrid";
+    for(const comp of t.build().map(withShadow)){
+      const card=document.createElement("div");
+      card.className="card";
+      card.innerHTML=`<div class="cv">${comp.svg}</div>
+        <div class="nm">${comp.name}
+          <a data-act="svg">SVG</a><a data-act="png">PNG</a></div>`;
+      card.querySelector('[data-act=svg]').onclick=()=>downloadSvg(comp);
+      card.querySelector('[data-act=png]').onclick=()=>downloadPng(comp);
+      grid.appendChild(card);
+    }
+    sec.appendChild(grid);
+    st.appendChild(sec);
   }
 }
+/* подсветка вкладки при скролле */
+document.getElementById("stageWrap").addEventListener("scroll", ()=>{
+  const wrap=document.getElementById("stageWrap");
+  let cur=TABS[0].id;
+  for(const t of TABS){
+    const sec=document.getElementById("sec_"+t.id);
+    if(sec && sec.offsetTop - wrap.scrollTop <= 90) cur=t.id;
+  }
+  if(cur!==activeTab){ activeTab=cur; markActiveTab(); }
+});
 
 /* ---------- рандомизация и тема ---------- */
 const rnd=(a,b)=>a+Math.random()*(b-a);
@@ -958,12 +1103,14 @@ function randomize(){
   T.skew=Math.random()>0.6 ? +(rnd(3,10)).toFixed(1) : 0;
   T.gradOn=Math.random()>0.35?1:0; T.gradK=rndi(5,18);
   T.glossOn=Math.random()>0.25?1:0;
+  T.glossType=["strip","dome","corner"][rndi(0,2)];
+  T.puffy=Math.random()>0.6 ? +(rnd(3,8)).toFixed(1) : 0;
   T.glossH=rndi(18,55); T.glossA=rndi(10,40);
   const sm=Math.random();
   T.shadowMode = sm<0.35?0 : sm<0.7?1 : 2;
   T.shadowDx=rndi(-5,8); T.shadowDy=rndi(3,10); T.shadowBlur=rndi(3,8); T.shadowA=rndi(25,60);
   T.font=FONTS[rndi(0,FONTS.length-1)].f;
-  T.txtColor=Math.random()>0.8 ? "dark" : "white";
+  T.txtColor=["white","white","auto","auto","dark"][rndi(0,4)];
   T.txtOut=+(rnd(1,5)).toFixed(1);
   T.txtDrop=+(rnd(1,4)).toFixed(1);
   currentPreset="Стандарт";
@@ -1043,12 +1190,7 @@ function downloadSvg(comp){
 async function downloadPng(comp){
   const scale=parseFloat(document.getElementById("expScale").value);
   // пересобираем этот компонент без текста — надписи в игре рисует движок
-  let bare = comp;
-  STRIP_TEXT = true;
-  try{
-    const tab = TABS.find(t=>t.id===activeTab);
-    bare = tab.build().map(withShadow).find(c=>c.name===comp.name) || comp;
-  } finally { STRIP_TEXT = false; }
+  const bare = buildAll(true).find(c=>c.name===comp.name) || comp;
   const cv=await rasterize(bare.svg, bare.w, bare.h, scale);
   cv.toBlob(b=>download(comp.name+".png", b), "image/png");
 }
