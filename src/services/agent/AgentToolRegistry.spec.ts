@@ -141,6 +141,7 @@ describe('AgentToolRegistry', () => {
         'analyze_image',
         'generate_asset',
         'generate_sfx',
+        'skin_ui',
         'process_asset',
       ])
     );
@@ -3491,5 +3492,264 @@ describe('AgentToolRegistry', () => {
     console.error('agent-tool-registry-test-error');
     const errs = (await registry.execute('read_errors')) as Array<{ message: string }>;
     expect(errs.some(e => e.message.includes('agent-tool-registry-test-error'))).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// skin_ui — the UI Kit Forge lane (plan Ф5)
+// ---------------------------------------------------------------------------
+
+describe('skin_ui', () => {
+  const KIT_ID = 'cafebabe';
+
+  /** A manifest with the parts a Button2D asks for, shaped like the writer's. */
+  const kitManifest = (kitId = KIT_ID) => {
+    const parts: Record<string, unknown> = {};
+    for (const state of ['normal', 'hover', 'pressed', 'disabled']) {
+      parts[`button/blue/${state}`] = {
+        path: `sprites/ui/${kitId}/btn_blue_${state}_250x88.png`,
+        w: 500,
+        h: 176,
+        sliceBorder: { left: 12, right: 12, top: 9, bottom: 22 },
+        role: 'blue',
+        component: 'button',
+        state,
+      };
+    }
+    return { kitId, parts } as unknown as Record<string, unknown>;
+  };
+
+  const themeServiceStub = () => {
+    const calls: { theme: unknown; preset?: string }[] = [];
+    return {
+      calls,
+      load: vi.fn(async () => false),
+      getTheme: () => ({ radius: 7, glossOn: 1 }),
+      getPresetName: () => 'Standard',
+      replaceTheme: vi.fn((theme: unknown, preset?: string) => {
+        calls.push({ theme, preset });
+        return theme;
+      }),
+    };
+  };
+
+  const writerStub = (over: Record<string, unknown> = {}) => ({
+    writeKit: vi.fn(async (_theme: unknown, _options?: unknown) => ({
+      kitId: KIT_ID,
+      scale: 2,
+      paths: [
+        `sprites/ui/${KIT_ID}/btn_blue_normal_250x88.png`,
+        `sprites/ui/${KIT_ID}/btn_blue_hover_250x88.png`,
+        'design/ui-kit.json',
+        'design/ui-theme.json',
+      ],
+      manifest: kitManifest(),
+      warnings: [],
+    })),
+    readManifest: vi.fn(async () => kitManifest()),
+    ...over,
+  });
+
+  /** A Button2D-shaped node the graph can hand back. */
+  const uiNode = (nodeId: string, name: string, type = 'Button2D') =>
+    makeNode({ nodeId, name, type });
+
+  const skinRegistry = (over: Record<string, unknown> = {}) => {
+    const theme = themeServiceStub();
+    const writer = writerStub();
+    // Named parameter so `mock.calls[n][0]` stays typed (a bare `async () =>` infers `[]`).
+    const dispatcher = { execute: vi.fn(async (_command: unknown) => true) };
+    const nodes = new Map<string, unknown>([
+      ['btn-1', uiNode('btn-1', 'PlayButton')],
+      ['mesh-1', uiNode('mesh-1', 'Ground', 'Node3D')],
+    ]);
+    const registry = buildRegistry({
+      dispatcher,
+      sceneManager: {
+        getActiveSceneGraph: () => ({ nodeMap: nodes }),
+        resolvePendingComponents: () => 0,
+      },
+      uiKitTheme: async () => theme,
+      uiKitWriter: async () => writer,
+      ...over,
+    });
+    return { registry, theme, writer, dispatcher, nodes };
+  };
+
+  it('registers a schema with the three actions and the palette roles', () => {
+    const spec = buildRegistry()
+      .specs()
+      .find(tool => tool.name === 'skin_ui');
+    expect(spec).toBeDefined();
+    const schema = spec!.inputSchema as {
+      required: string[];
+      properties: Record<string, { enum?: string[] }>;
+    };
+    expect(schema.required).toEqual(['action']);
+    expect(schema.properties.action.enum).toEqual(['bake', 'apply', 'restyle']);
+    expect(schema.properties.colorRole.enum).toContain('green');
+    expect(schema.properties.targets.enum).toEqual(['selection', 'scene']);
+    // The presets are the core's own list, so a stale name cannot reach the tool.
+    expect(schema.properties.preset.enum).toContain('Candy Pop');
+  });
+
+  it('refuses without an open project, and bakes nothing', async () => {
+    const { registry, writer } = skinRegistry();
+    appState.project.status = 'idle';
+
+    const result = (await registry.execute('skin_ui', { action: 'bake' })) as Record<
+      string,
+      unknown
+    >;
+
+    expect(result.ok).toBe(false);
+    expect(String(result.error)).toMatch(/No project is open/);
+    expect(writer.writeKit).not.toHaveBeenCalled();
+  });
+
+  it('bakes from a preset and reports the kit', async () => {
+    const { registry, theme, writer } = skinRegistry();
+    appState.project.status = 'ready';
+
+    const result = (await registry.execute('skin_ui', {
+      action: 'bake',
+      preset: 'Candy Pop',
+      theme: { radius: 30 },
+    })) as Record<string, unknown>;
+
+    appState.project.status = 'idle';
+    expect(result.ok).toBe(true);
+    expect(result.kitId).toBe(KIT_ID);
+    expect(result.sprites).toBe(2);
+    expect(result.manifestPath).toBe('design/ui-kit.json');
+    expect(result.themePath).toBe('design/ui-theme.json');
+    // The theme service is told BEFORE the bake — the writer saves what it holds.
+    expect(theme.replaceTheme).toHaveBeenCalled();
+    expect(theme.calls[0].preset).toBe('Candy Pop');
+    // The patch reached the recipe, normalized.
+    expect((theme.calls[0].theme as { radius: number }).radius).toBe(30);
+    expect(writer.writeKit).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects an unknown preset by name, without baking', async () => {
+    const { registry, writer } = skinRegistry();
+    appState.project.status = 'ready';
+
+    const result = (await registry.execute('skin_ui', {
+      action: 'bake',
+      preset: 'Neon Dream',
+    })) as Record<string, unknown>;
+
+    appState.project.status = 'idle';
+    expect(result.ok).toBe(false);
+    expect(String(result.error)).toMatch(/Unknown preset/);
+    expect(writer.writeKit).not.toHaveBeenCalled();
+  });
+
+  it('applies through ApplyUiKitSkinCommand with the resolved nodes and role', async () => {
+    const { registry, dispatcher } = skinRegistry();
+    appState.project.status = 'ready';
+
+    const result = (await registry.execute('skin_ui', {
+      action: 'apply',
+      nodeIds: ['btn-1'],
+      colorRole: 'green',
+    })) as Record<string, unknown>;
+
+    appState.project.status = 'idle';
+    expect(result.ok).toBe(true);
+    expect(dispatcher.execute).toHaveBeenCalledTimes(1);
+    const command = dispatcher.execute.mock.calls[0][0] as {
+      metadata: { id: string };
+      params: Record<string, unknown>;
+    };
+    expect(command.metadata.id).toBe('properties.apply-uikit-skin');
+    expect(command.params).toMatchObject({ nodeIds: ['btn-1'], colorRole: 'green' });
+  });
+
+  it('reports per node what it set, and why it skipped the rest', async () => {
+    const { registry } = skinRegistry();
+    appState.project.status = 'ready';
+
+    const result = (await registry.execute('skin_ui', {
+      action: 'apply',
+      targets: 'scene',
+    })) as Record<string, unknown>;
+
+    appState.project.status = 'idle';
+    // targets:'scene' takes the UI controls only — never the game's own 3D/sprite nodes.
+    const applied = result.applied as Record<string, unknown>[];
+    expect(applied).toHaveLength(1);
+    expect(applied[0]).toMatchObject({ nodeId: 'btn-1', type: 'Button2D' });
+    const textures = applied[0].textures as { property: string; value: string }[];
+    expect(textures.map(t => t.property).sort()).toEqual([
+      'textureDisabled',
+      'textureHover',
+      'textureNormal',
+      'texturePressed',
+    ]);
+    expect(textures[0].value).toContain(`sprites/ui/${KIT_ID}/`);
+    expect(applied[0].sliceBorder).toEqual({
+      sliceBorderLeft: 12,
+      sliceBorderRight: 12,
+      sliceBorderTop: 9,
+      sliceBorderBottom: 22,
+    });
+  });
+
+  it('tells the agent to bake first when the project has no kit', async () => {
+    const { registry, dispatcher } = skinRegistry({
+      uiKitWriter: async () => writerStub({ readManifest: vi.fn(async () => null) }),
+    });
+    appState.project.status = 'ready';
+
+    const result = (await registry.execute('skin_ui', {
+      action: 'apply',
+      nodeIds: ['btn-1'],
+    })) as Record<string, unknown>;
+
+    appState.project.status = 'idle';
+    expect(result.ok).toBe(false);
+    expect(String(result.error)).toMatch(/bake/);
+    expect(dispatcher.execute).not.toHaveBeenCalled();
+  });
+
+  it('restyles the nodes already wearing a kit texture', async () => {
+    const wearing = makeNode({
+      nodeId: 'btn-old',
+      name: 'OldButton',
+      type: 'Button2D',
+      textureNormal: { type: 'texture', url: 'res://sprites/ui/0badf00d/btn_blue_normal.png' },
+    });
+    const { registry, dispatcher, writer, nodes } = skinRegistry();
+    nodes.set('btn-old', wearing);
+    appState.project.status = 'ready';
+
+    const result = (await registry.execute('skin_ui', {
+      action: 'restyle',
+      theme: { radius: 30 },
+    })) as Record<string, unknown>;
+
+    appState.project.status = 'idle';
+    expect(result.ok).toBe(true);
+    expect(result.action).toBe('restyle');
+    expect(writer.writeKit).toHaveBeenCalledTimes(1);
+    const command = dispatcher.execute.mock.calls[0][0] as { params: { nodeIds: string[] } };
+    // Only the node that was already wearing a kit — a restyle re-themes, it does not spread.
+    expect(command.params.nodeIds).toEqual(['btn-old']);
+  });
+
+  it('rejects an unknown action', async () => {
+    const { registry } = skinRegistry();
+    appState.project.status = 'ready';
+
+    const result = (await registry.execute('skin_ui', { action: 'sprinkle' })) as Record<
+      string,
+      unknown
+    >;
+
+    appState.project.status = 'idle';
+    expect(result.ok).toBe(false);
+    expect(String(result.error)).toMatch(/Unknown action/);
   });
 });

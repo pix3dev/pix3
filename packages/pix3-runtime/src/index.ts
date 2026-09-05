@@ -44,6 +44,7 @@ export * from './core/shared-quad-geometry';
 export * from './core/batch-2d';
 export * from './core/label-text-layout';
 export * from './core/tiled-sprite-geometry';
+export * from './core/nine-slice-skin';
 export * from './core/spine/spine-module';
 export * from './core/spine/SpineAsset';
 export * from './core/spine/SpineSkeletonView';

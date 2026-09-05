@@ -94,6 +94,7 @@ import { SwitchWorkspaceModeCommand } from '@/features/editor/SwitchWorkspaceMod
 import { OpenSpriteEditorCommand } from '@/features/editor/OpenSpriteEditorCommand';
 import { OpenModelLabCommand } from '@/features/editor/OpenModelLabCommand';
 import { OpenUiKitForgeCommand } from '@/features/editor/OpenUiKitForgeCommand';
+import { ApplyUiKitSkinCommand } from '@/features/uikit/ApplyUiKitSkinCommand';
 import { isUiKitForgeHash } from '@/core/tool-routes';
 import { OpenAgentChatCommand } from '@/features/editor/OpenAgentChatCommand';
 import { OpenProjectHomeCommand } from '@/features/editor/OpenProjectHomeCommand';
@@ -443,6 +444,9 @@ export class Pix3EditorShell extends ComponentBase {
     const openSpriteEditorCommand = new OpenSpriteEditorCommand();
     const openModelLabCommand = new OpenModelLabCommand();
     const openUiKitForgeCommand = new OpenUiKitForgeCommand();
+    // `properties.`-prefixed, so the agent's `run_command` can reach it (AgentToolRegistry's
+    // allow-list). Zero-argument form = current selection, default role, kit from design/ui-kit.json.
+    const applyUiKitSkinCommand = new ApplyUiKitSkinCommand();
     const openAgentChatCommand = new OpenAgentChatCommand();
     const openProjectHomeCommand = new OpenProjectHomeCommand();
     const bakeAOCommand = new BakeAmbientOcclusionCommand();
@@ -503,6 +507,7 @@ export class Pix3EditorShell extends ComponentBase {
       openSpriteEditorCommand,
       openModelLabCommand,
       openUiKitForgeCommand,
+      applyUiKitSkinCommand,
       openAgentChatCommand,
       openProjectHomeCommand,
       bakeAOCommand,

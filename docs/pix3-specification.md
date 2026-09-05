@@ -1,14 +1,14 @@
 # Pix3 — Technical Specification
 
-Version: 1.35
+Version: 1.36
 
-Date: 2026-08-20
+Date: 2026-09-06
 
 > **Reading this doc economically (agents):** it is long — don't load the whole
 > file. `Grep` the heading *text* below, then `Read` with `offset`/`limit`.
 > **Reference sections by heading text, not by number** — the numbers are
 > historically inconsistent (`§8` precedes `§6`; the systems appended under
-> `6.15`–`6.22` are top-level, not children of Script Component System).
+> `6.15`–`6.23` are top-level, not children of Script Component System).
 
 ## Contents (document order — grep the heading text)
 
@@ -16,7 +16,7 @@ Date: 2026-08-20
 - Property Schema System · Script Component System
 - Group2D Sizing (Fit to Contents, Proportional Resize) · Project Templates, Target Platform and Agent Overlay
 - Autoload Scripts and Asset Browser Template Flow · Signals Engine · Groups Engine
-- Node Prefabs System · Keyframe Animation System · Localization (i18n)
+- Node Prefabs System · Keyframe Animation System · Localization (i18n) · UI Kit Assets
 - Scene File Format (\*.pix3scene) · MVP Plan · Non-Functional Requirements
 - Project Structure · Roadmap and Milestones · Change Log
 
@@ -916,6 +916,186 @@ Godot-inspired localization (`TranslationServer`/`tr()` adapted to Pix3): per-lo
 - `ProjectBuildService.collectAssetPaths` additionally enumerates the `locales/*.json` tables **declared in the effective localization config** (`defaultLocale` + `fallbackLocale` + `locales`) and every texture path in their `sprites` sections (invisible to the `res://` regex scan of scenes/scripts). Undeclared tables on disk — and the sprite variants only they reference — are excluded with a build warning: the exported runtime fetches `res://locales/<id>.json` solely for ids in the baked config, so they are provably unreachable. A `null` config (localization inert) excludes the whole folder.
 - The generated `scene-manifest.ts` exports `runtimeLocalization` (the effective config or `null`); the runtime bootstrap calls `runner.setLocalizationConfig(...)` before `startScene`, so the first frame renders in `defaultLocale` and playable-HTML exports work offline via embedded tables.
 
+## 6.23 UI Kit Assets (theme, kit manifest, skins, templates)
+
+A **UI kit** is the project-side output of UI Kit Forge (`docs/nodes-and-systems.md`
+→ "2D UI kit generation"): one theme, baked into PNG skins plus a manifest that
+says how each picture is nine-sliced, and consumed by the skinned 2D UI controls
+of §7.2.2 and by prefabs (§6.20). Four locations, all under project root:
+
+| Path | Written by | What it is |
+| --- | --- | --- |
+| `design/ui-theme.json` | `UiKitThemeService.save()` | the project's `ForgeTheme` — the source of every skin |
+| `design/ui-kit.json` | `UiKitProjectWriter.writeKit()` | the manifest of the last bake |
+| `sprites/ui/<kitId>/*.png` | `UiKitProjectWriter.writeKit()` | the baked skins |
+| `prefabs/ui/<templateId>-<kitId>.pix3scene` | `UiKitPrefabBuilder` | dialog / settings templates as ordinary prefabs |
+
+`design/` is the same folder `design/style.md` lives in, deliberately: the theme is
+the machine-readable half of the style contract the brief writes for humans, and
+the two must not drift apart.
+
+### 6.23.1 `design/ui-theme.json`
+
+```json
+{
+  "version": "1.0",
+  "generator": "UI Kit Forge",
+  "preset": "Brawl Stars",
+  "lang": "en",
+  "theme": { "hue": 0, "sat": 0, "light": 0, "radius": 6, "bevel": 7, "outline": 3,
+             "skew": 7, "pad": 24, "glossOn": 0, "glossType": "strip",
+             "shadowMode": 1, "shadowDx": 3, "shadowDy": 7, "shadowA": 55,
+             "font": "Lilita One", "fontCyr": "Rubik", "txtOut": 3.5,
+             "txtColor": "white", "darkTone": "#101820", "labelEdge": null,
+             "palette": { "blue": "#3f7fd8" } }
+}
+```
+
+- `theme` is a **normalized** `ForgeTheme` — absolute colours, never deltas. The
+  sample above is abridged; a written theme carries every key of the interface
+  (`DEFAULT_THEME` in `src/services/uikit/ForgeTheme.ts` is the full list).
+  Everything read from disk (or handed over by an agent, or pasted from the
+  standalone page) goes through `normalizeTheme()`: numbers coerced, hex values
+  regex-checked (a bad one falls back to the default), the legacy single
+  `shadowOff` migrated to the `shadowDx` / `shadowDy` pair, unknown keys dropped.
+- `theme.palette` is the per-role **absolute override** (`sky`, `blue`, `green`,
+  `yellow`, `bluegray`, `gray`, `white`, `red`, `orange`, `purple`) — how a
+  project's own colours enter the generator; `null` or an absent role means the
+  generated colour stands.
+- `preset` records which preset the theme was last derived from. It is a label,
+  not a constraint — the theme is authoritative.
+- A **bare theme object** (no wrapper) is also accepted on read, because that is
+  what the standalone host exchanges through the clipboard.
+- The file is not `appState`: it is a project document that outlives the session,
+  travels in the repository, and is readable by an agent with `fs_read`.
+
+### 6.23.2 `design/ui-kit.json`
+
+```json
+{
+  "version": "1.0",
+  "generator": "UI Kit Forge",
+  "kitId": "1a2b3c4d",
+  "scale": 2,
+  "createdAt": "2026-09-05T12:00:00.000Z",
+  "theme": { "...": "the same normalized ForgeTheme the bake used" },
+  "parts": {
+    "button/green/normal": {
+      "path": "sprites/ui/1a2b3c4d/btn_green_normal_250x88.png",
+      "w": 500, "h": 176,
+      "sliceBorder": { "left": 24, "right": 24, "top": 24, "bottom": 32 },
+      "role": "green", "component": "button", "state": "normal"
+    },
+    "slider-track": {
+      "path": "sprites/ui/1a2b3c4d/slider-track_240x24.png",
+      "w": 480, "h": 48,
+      "sliceBorder": { "left": 16, "right": 16, "top": 16, "bottom": 16 },
+      "role": null, "component": "slider-track", "state": null
+    }
+  },
+  "warnings": []
+}
+```
+
+Fields, all of them:
+
+| Field | Meaning |
+| --- | --- |
+| `version` | manifest schema version (`KIT_MANIFEST_VERSION`, currently `"1.0"`) |
+| `generator` | always `"UI Kit Forge"` |
+| `kitId` | first 8 hex of an FNV-1a over the normalized theme's **canonical** JSON (object keys sorted). The sprite folder name and the dedupe key |
+| `scale` | design units → raster px. Defaults to the project manifest's `quality.maxPixelRatio`, clamped 1…4 |
+| `createdAt` | ISO timestamp of the bake |
+| `theme` | the normalized `ForgeTheme` this kit was baked from — a kit is reproducible from its own manifest |
+| `parts` | map of **part key** → part record (below) |
+| `warnings` | slicing warnings from the raster measurement, each prefixed with its part key |
+
+A **part key** is `component[/role][/state]`, joined with `/` and omitting the
+absent segments: `button/green/normal`, `panel-body/sky`, `bar-fill/red`,
+`checkbox`, `slider-track`. Extra button sizes beyond the default 250×88 get
+`…@<w>x<h>` appended, so the default size stays addressable under the plain key —
+that is the key the skin operation resolves. A glyph button takes the glyph as a
+fourth segment, `icon-button/<glyph>/<role>/<state>`, because a kit ships several
+of them and component/role/state alone could address only one.
+
+A part record:
+
+| Field | Meaning |
+| --- | --- |
+| `path` | project-relative, no `res://` (e.g. `sprites/ui/1a2b3c4d/btn_green_normal_250x88.png`). A consumer prepends `res://` |
+| `w`, `h` | **raster** size in px (design size × `scale`) |
+| `sliceBorder` | `{left, right, top, bottom}` in **raster px** — straight into `sliceBorderLeft/Right/Top/Bottom` (§7.2.2) — or `null` when the theme's silhouette is not nine-sliceable (any `skew` or `puffy`), in which case a host must render per size |
+| `role` | the `PaletteId` this part was coloured for, or `null` for the role-free parts |
+| `component` | the `SkinComponent`: `button`, `icon-button`, `panel-body`, `header-plate`, `slot`, `checkbox`, `checkbox-mark`, `slider-track`, `slider-thumb`, `bar-trough`, `bar-fill` |
+| `state` | `normal` / `hover` / `pressed` / `disabled` for a button-like part, `null` otherwise |
+| `icon` | present on `icon-button` only: the glyph the picture carries, under its canonical name (`resolveIconName` accepts the aliases, e.g. `settings` → `gear`) |
+
+Insets are **measured off the rasterized pixels** (`frameMeta`) rather than assumed,
+so a shape the theme made non-uniform is caught and reported in `warnings`; where
+no canvas is available the generator's own design-unit border is scaled by `scale`
+instead (the two agree by construction).
+
+### 6.23.3 `sprites/ui/<kitId>/`
+
+File names are `btn_<role>_<state>_<w>x<h>.png` for buttons,
+`icon_<glyph>_<role>_<state>_64x64.png` for glyph buttons and
+`<component>[_<role>]_<w>x<h>.png` for everything else, where `<w>x<h>` is the
+**design** size. What is baked: per colour role, the four button states at 250×88
+plus `panel-body` (256×256), `header-plate` (256×70) and `bar-fill` (240×36); once,
+role-free, `slot` (320×56), `checkbox` and `checkbox-mark` (64×64), `slider-track`
+(240×24), `slider-thumb` (48×48) and `bar-trough` (240×36); and the glyph buttons
+`close`, `gear`, `plus`, `minus`, `left`, `right`, `check` at 64×64 in four states,
+each in **one** semantic role (a close is red, a plus is green) rather than all ten
+— seven glyphs × ten roles × four states would more than triple a bake for pictures
+nothing asks for, and `KitWriteOptions.iconButtonRoles` widens it when a caller
+wants more. A glyph button is **not** nine-sliced: the glyph sits in the region a
+nine-slice would stretch, so its record carries `sliceBorder: null` and a node of
+another size scales it uniformly.
+
+Two consequences of the hash-named folder, both load-bearing:
+
+- **Re-baking an unchanged theme overwrites the same files.** The kit id is a pure
+  function of the theme, so nothing accumulates.
+- **A re-theme writes a new folder and leaves the old one.** That is what makes
+  Ctrl+Z on a skin edit land on art that still exists — the property writes undo,
+  the binary writes do not — and the stale folder is later collected by
+  `export.pruneUnusedAssets`, not by the forge.
+
+Baked skins carry **no text**: captions are drawn by the engine
+(`Button2D` / `UIControl2D` label), which is what keeps one sprite valid across
+states and locales. The engine lane also forces `pad: 0` (the kit's default
+transparent margin would otherwise be dead border inside the node's hit box) and
+disables `feDropShadow` (its blur is GPU/browser dependent, so two machines
+regenerating one theme would produce different bytes).
+
+### 6.23.4 `prefabs/ui/`
+
+A template that cannot be one picture — a dialog, a settings window — is delivered
+as **parts plus a layout** (`TemplateSpec`) and assembled into an ordinary prefab
+(§6.20 Node Prefabs System) at `prefabs/ui/<templateId>-<kitId>.pix3scene`; template
+ids are `dialog` and `settings`. `TemplateNode.anchor` becomes `Node2D.layout`
+(`{enabled, horizontalAlign, verticalAlign}`); the template's top-left-origin,
+y-down rectangle is converted to pix3's centre-origin, y-up position by the builder.
+The file is a plain `.pix3scene` — no new format, and `instance:` references it like
+any other prefab.
+
+### 6.23.5 Consumers
+
+- **Editor** — the UI Kit tab bakes, applies and writes prefabs;
+  `properties.apply-uikit-skin` (args `{ nodeIds?, colorRole?, manifest? }`) writes
+  the texture slots and `sliceBorder*` of the selection through
+  `UpdateObjectPropertyOperation`, composed into one undoable step.
+- **Agent** — the `skin_ui` tool (`bake` / `apply` / `restyle`), or the bare
+  `run_command properties.apply-uikit-skin` whose zero-argument form means current
+  selection, role `blue`, manifest from `design/ui-kit.json`.
+- **T0 expander** — `PrototypeBootstrapService` derives a theme from the brief's
+  palette in `design/style.md`, bakes, and skins the recipe scenes' UI controls
+  with no agent turn.
+- **Runtime** — nothing in `@pix3/runtime` reads these files. Nodes carry plain
+  `res://` texture references and scalar insets (§7.2.2); the kit is an authoring
+  artifact, and a sliced skin is excluded from the pre-launch texture atlas because
+  patch geometry needs the whole source rect.
+
 ## 7. Scene File Format (\*.pix3scene)
 
 The scene file uses the YAML format to ensure readability for both humans and machines (including AI agents).
@@ -999,6 +1179,80 @@ optional single-page override.
 Rendering requires the optional `@esotericsoftware/spine-threejs` (`~4.3`) module,
 registered by the host through `setSpineModuleLoader`. A scene with a Spine node
 still loads without it — the node keeps its authored properties and warns.
+
+### 7.2.2 Skinned 2D UI controls
+
+`Button2D`, `Checkbox2D`, `Slider2D` and `Bar2D` are colour-driven by default and
+skinned by pointing their texture slots at `res://` sprites. A slot that is set
+replaces the corresponding flat colour (the material tint goes white); a slot that
+is unset keeps the colour, so an existing scene is unchanged and **every one of
+these keys is omitted from a saved scene at its default**.
+
+Slots per node: `Button2D` — `textureNormal` / `textureHover` / `texturePressed` /
+`textureDisabled` (a missing state falls back to normal); `Checkbox2D` —
+`textureBox`, `textureBoxChecked` (optional; falls back to `textureBox`),
+`textureMark` (drawn over the box only while checked); `Slider2D` —
+`textureTrack`, `textureFill`, `textureThumb`; `Bar2D` — `textureTrough`,
+`textureFill`.
+
+The four `sliceBorderLeft/Right/Top/Bottom` scalars are the same nine-slice insets
+`TiledSprite2D` uses — source-texture pixels, Godot's `patch_margin_*` — so one
+64x64 skin fits a control of any size instead of being smeared. They apply to
+`Button2D`'s state skins, `Slider2D`'s track and fill, and `Bar2D`'s trough and
+fill; the slider thumb is drawn at its authored size and is never sliced. A fill
+that shrinks with `value` is **re-cut** at the new width, so its end caps keep
+their pixel size. All-zero (the default) is the plain stretch. A sliced skin opts
+out of the 2D quad batcher, because the batcher extracts four *unit* corners, and
+is excluded from the pre-launch texture atlas for the same reason.
+
+Sprites for every one of these slots — and the matching insets — can be generated
+and applied without leaving the editor; the files and their manifest are specified
+in **§6.23 UI Kit Assets**.
+
+```yaml
+- id: 'q7Bd-1mZ_kTn0-Vx4pA'
+  type: 'Button2D'
+  name: 'PlayButton'
+  properties:
+    transform:
+      position: { x: 0, y: -80 }
+    width: 240
+    height: 72
+    label: 'Play'
+    buttonAction: 'Submit'
+    textureNormal: { type: 'texture', url: 'res://sprites/ui/btn_normal.png' }
+    textureHover: { type: 'texture', url: 'res://sprites/ui/btn_hover.png' }
+    texturePressed: { type: 'texture', url: 'res://sprites/ui/btn_pressed.png' }
+    # 64x64 skin with 16 px corners -> fits 240x72 without smearing
+    sliceBorderLeft: 16
+    sliceBorderRight: 16
+    sliceBorderTop: 16
+    sliceBorderBottom: 16
+
+- id: 'w3Kf-8sQ_2rLm-Yc6tB'
+  type: 'Bar2D'
+  name: 'HealthBar'
+  properties:
+    width: 200
+    height: 24
+    value: 100
+    maxValue: 100
+    textureTrough: { type: 'texture', url: 'res://sprites/ui/bar_trough.png' }
+    textureFill: { type: 'texture', url: 'res://sprites/ui/bar_fill.png' }
+    sliceBorderLeft: 12
+    sliceBorderRight: 12
+
+- id: 'e5Nh-4tW_9pJk-Zd1uC'
+  type: 'Checkbox2D'
+  name: 'MusicToggle'
+  properties:
+    size: 32
+    checked: true
+    label: 'Music'
+    textureBox: { type: 'texture', url: 'res://sprites/ui/check_off.png' }
+    textureBoxChecked: { type: 'texture', url: 'res://sprites/ui/check_on.png' }
+    textureMark: { type: 'texture', url: 'res://sprites/ui/check_tick.png' }
+```
 
 ### 7.3 Validation Rules
 
@@ -1210,3 +1464,4 @@ still loads without it — the node keeps its authored properties and warns.
 - **1.33 (2026-08-20):** **Authored colours convert exactly once** — `GeometryMesh` and all five light nodes wrapped every colour in a manual `convertSRGBToLinear()` on write (and, on `GeometryMesh`, `convertLinearToSRGB()` on read), on top of the conversion `THREE.Color.set()` / `getHexString()` already perform because `ColorManagement` is enabled. The transfer function was therefore applied twice: an authored `#a8d8f0` reached the material as (0.127, 0.429, 0.732) instead of (0.392, 0.687, 0.871), so **every** authored 3D colour — mesh albedo, light colour, shader-effect tint — rendered far darker and more saturated than authored. **Existing 3D scenes in every project will now look brighter; this is the fix, not a regression.** Mesh colours need no data migration (their read/write pair was symmetric, so the stored hex is exactly what the author typed), but **light colours do**: their write side converted twice while `getHexString()` un-converted once, so every save wrote a darker hex back into the `.pix3scene` and light colours drifted one transfer step per save/load cycle. The bundled samples and the `recipe-grid-3d` template carried one cycle of that drift and have been re-authored back to their intended values (e.g. an ambient light stored as `#040406` at intensity 0.4 was authored `#22222a`; a hemisphere sky stored `#80afff` was `#bcd8ff`). Consumer projects tuned under the bug (DeepCore) may want the same one-step correction on light colours. The convention — authored colours are sRGB hex; `Color.set()` and `getHexString()` do all conversion themselves — is now pinned by `packages/pix3-runtime/src/core/color-convention.spec.ts`, which asserts the three.js behaviour, per-node hex round-trip **plus** the linear components (a hex round-trip alone passes under symmetric double conversion, which is how the bug hid), and scans the runtime sources so a re-added conversion fails the build. The orphaned `nodes/3D/light-property-helpers.ts`, whose only content was a duck-typed encoding of the wrong convention, was deleted. Plan: `.plans/done/srgb-double-conversion-fix.md`.
 - **1.34 (2026-08-20):** **A hidden UI control takes no input.** `NodeBase.tick` recurses into invisible children on purpose (components on a hidden node — a spawner, a timer, a state machine — have to keep running) and three.js only skips a hidden subtree when it *renders*, so nothing filtered hidden controls out of input: `UIControl2D` gated on `enabled` alone and a button inside a hidden overlay still hovered, pressed and clicked, and still called `registerHover`, which made `isPointerOverUI` report a finger as being over UI nobody could see. This was a shipped defect in the game recipes rather than a theoretical one: their end screen is a hidden `Group2D` centred over the playfield with an enabled MENU button, so a drag across the middle of the screen ended a run by opening the menu. Both input channels now gate on `NodeBase.isVisibleInTree()` (**new**, public: `visible` on the node and every ancestor) — the physical funnel cancels any hover/press it was holding and stops accepting frames, and `canAcceptSemanticPointer` refuses, so `invokeInteraction('click')` on a control inside a hidden panel returns `false` instead of reporting a success no player could reproduce. Deliberately boolean only, the line Godot's `is_visible_in_tree` draws: a fully transparent control still responds, because fading something out is not the same statement as taking it away, and a control that stopped responding halfway through a fade would be the surprising one. Guarded by `packages/pix3-runtime/src/nodes/2D/UI/UIControl2D.visibility.spec.ts`, which asserts the ancestor case specifically — the control's own `visible` stays `true` there, which is exactly what a per-node check misses.
 - **1.35 (2026-08-20):** **The in-editor agent can read the engine.** Measured cause of a persistent quality gap between the in-editor agent and an external one on the same brief: the agent's only account of `@pix3/runtime` was prose (skills + tool descriptions), so it guessed member names and paid a compile round-trip per guess, while an external agent reading `packages/pix3-runtime/src` got the contract right first time. The sources were **already in the browser** — `monaco-runtime-libs.ts` globs the whole runtime as `?raw` to type-check project scripts against it — they just were not reachable from the tool layer. New `src/core/engine-source.ts` owns that glob (Monaco now consumes it, so the type worker and the agent can never read different copies of the engine) and serves two tools: **`engine_search`** (literal or regex, `pathFilter`, capped matches with optional context lines, `matchCount`/`truncated` so a flood reads as "narrow the query") and **`engine_read`** (package-relative `@pix3/runtime/src/…` paths, with the prefix-less and unambiguous-bare-filename forms resolving too, and `suggestions` instead of a dead end on a miss; `offset`/`limit` with line and byte caps). Read-only by construction and said so in the descriptions — it is the engine inside the editor build, not a project file. **`node_inspect` de-trapped:** it returns AUTHORED values, and while the game is playing the live node may hold others, so it now carries `authoredWhilePlaying` pointing at `game_observe`. Unlike `scene_tree`'s existing `staleWhilePlaying` this fires in the SAME scene, which is the case that actually misleads — a verification pass "confirmed" a result-overlay label it had never observed, because the authored text and the runtime text differ for the whole run. **Eval scorecard gained the cost side** (`EvalReport.metrics`): `toolCalls`, `compileRoundTrips`, `engineReads`, `screenshots`, `stateVerifications`, plus `cacheReadTokens`/`cacheCreationTokens` and `iterationsUsed`/`iterationCap` on the agent summary — counted from the recorded calls and the conversation, so every later change to the agent's tools can be judged as a token bet and not only as "the game works". Guarded by `src/core/engine-source.spec.ts`, whose last case asserts the premise itself: the shipped bundle really does carry the sources, and `ShakeOptions` — the exact lookup that cost a compile round-trip — is findable in them.
+- **1.36 (2026-09-06):** **UI Kit Forge becomes part of the editor, and its output becomes a project format.** The forge was a 1388-line vanilla page (`public/tools/uikit-forge.html`) authored *outside* the repository and updated by copying downloaded HTML over the file — no typecheck, no tests on ~750 lines of geometry, and nothing wired its output back into a project: a user exported PNGs and imported them by hand. It is now a host-agnostic **core** in `src/services/uikit/` (theme + colour maths, SVG primitives, 34 glyphs, ~40 `comp*` generators, 6 showcase screens, ru/en captions, registry, `slices`, `presets`, `style-doc`) under **two hosts over one generator**, an invariant pinned by `host-agnostic.spec.ts` (the core imports nothing from `src/services/*`, `src/ui`, `src/state` and touches no DOM — rasterization and file writing are the host's job). Host one is the **standalone page**, now a second Vite entry (`tools/uikit-forge.html` + `src/tools/uikit-forge/`, same URL `/tools/uikit-forge.html`, still framed by the `#uikit` route and still usable with no project): every export lane of the old page survives — per-component SVG/PNG, the `showDirectoryPicker` folder dump, HTML gallery, glyph sheet, atlas PNG + TexturePacker JSON-hash manifest, "Kit + style contract" (`tokens.json` + `STYLE.md`), clipboard themes, localStorage presets, `window.__UIKIT_FORGE_DEBUG__`. Host two is the **"UI Kit" editor tab** (`pix3-uikit-forge-panel`, Tools → UI Kit Forge / `editor.open-uikit-forge`, which routes to the tab when a project is open and to `#uikit` when none is), and it is what makes the kit a *format*: new **§6.23 UI Kit Assets** specifies `design/ui-theme.json` (a normalized `ForgeTheme` — absolute colours, per-role `palette` overrides, `normalizeTheme()` as the single entry point from JSON), `design/ui-kit.json` (every field documented: `kitId` as an 8-hex FNV-1a over the theme's canonical JSON, `scale`, the `component[/role][/state]` part keys, per-part `path`/`w`/`h`/`sliceBorder`/`role`/`component`/`state`, `warnings`), the `sprites/ui/<kitId>/` naming, and `prefabs/ui/<templateId>-<kitId>.pix3scene` for the dialog/settings **templates** — parts plus a layout (`TemplateSpec`) assembled into an ordinary prefab (§6.20), because a composite baked as one picture is unusable (half of it is text that the engine has to draw, and a real `Button2D` on top draws it twice). New command **`properties.apply-uikit-skin`** (`{nodeIds?, colorRole?, manifest?}`) skins `Button2D` / `Checkbox2D` / `Slider2D` / `Bar2D` / `TiledSprite2D` / `Sprite2D` through `UpdateObjectPropertyOperation` composed into one `BulkOperation`; it sits under a `properties.` id deliberately, so the agent's prefix-gated `run_command` reaches it, and its zero-argument form is defined (current selection, role `blue`, manifest read from disk). **Undo is asymmetric on purpose:** property writes undo as one step, the PNG/JSON writes do not — the kit id is a pure function of the theme, so a re-theme writes a *new* folder and leaves the old art in place, which is what makes that Ctrl+Z land on art that still exists (`export.pruneUnusedAssets` collects the stale folder later). Three rules separate the **engine lane** from the preview one and are now stated where a consumer will find them: `pad` is forced to 0 (the kit's 24 px transparent margin lands inside a `Button2D`'s `width`/`height` hit box — ~20 % dead border), `feDropShadow` is never used (its blur differs by GPU and browser, so two collaborators regenerating one theme would produce different bytes), and PNGs carry **no captions** (the engine draws them, which is what keeps one sprite valid across states *and* locales; a baked *glyph* is fine, being language-independent, and is what `icon-button` is for). Nine-slice insets come from the generator's own geometry as `SkinPart.sliceBorder`, measured back off the rasterized pixels and `null` whenever `skew` or `puffy` makes an edge non-uniform. Consumers beyond the editor: the agent tool **`skin_ui`** (`bake` / `apply` / `restyle` — the "rounder, darker, less gloss" edit as a deterministic re-render off `ui-theme.json`, never a new roll) and the **T0 expander**, where `PrototypeBootstrapService` derives a theme from the brief's palette in `design/style.md`, bakes the kit and skins every UI control in the recipe scenes with zero agent turns — the first frame of a generated prototype stops being coloured rectangles. Runtime side (§7.2.2, unchanged in shape): `Button2D` gained `sliceBorder*`, and `Checkbox2D` / `Slider2D` / `Bar2D` gained the texture slots the kit fills. The cost paid knowingly: the external authoring loop is over — the page can no longer be edited outside the repository and copied over. Plan: `.plans/done/uikit-forge-modularization.md`.

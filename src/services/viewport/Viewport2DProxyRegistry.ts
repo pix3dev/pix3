@@ -21,6 +21,12 @@ import { ColorRect2D } from '@pix3/runtime';
 import { SpineSkeleton2D, SpineSkeletonView } from '@pix3/runtime';
 import type { AssetLoader } from '@pix3/runtime';
 import { buildTiledSpriteGeometry, type TiledSpriteGeometryParams } from '@pix3/runtime';
+import {
+  buildSkinGeometry,
+  isSliceBorderEmpty,
+  ZERO_SLICE_BORDER,
+  type SliceBorder2D,
+} from '@pix3/runtime';
 import { UIControl2D } from '@pix3/runtime';
 import { Button2D } from '@pix3/runtime';
 import { Label2D } from '@pix3/runtime';
@@ -43,6 +49,8 @@ import {
 } from '@/features/scene/animation-asset-utils';
 
 const LAYER_2D = 1;
+/** Marks a UIControl2D proxy skin as the plain unit quad (no 9-slice patch). */
+const UNIT_SKIN_SIGNATURE = 'unit';
 /** sRGB of the accent token oklch(0.8 0.15 75) — keep in sync with --accent in src/index.css. */
 const EDITOR_ACCENT_COLOR = 0xf5ae39;
 
@@ -1711,7 +1719,6 @@ export class Viewport2DProxyRegistry {
     });
     material.userData.baseOpacity = node instanceof Label2D ? 0 : 1;
 
-    this.applyTextureTo2DMaterial(node, material);
     // Only Button2D hosts effects among UIControl2D; installs on the SKIN mesh.
     this.deps.installProxyEffects(node, material);
 
@@ -1727,9 +1734,7 @@ export class Viewport2DProxyRegistry {
     root.visible = node.visible;
     root.layers.set(LAYER_2D);
 
-    const { width, height } = this.getUIControlDimensions(node);
     const sizeGroup = new THREE.Group();
-    sizeGroup.scale.set(width, height, 1);
     sizeGroup.layers.set(LAYER_2D);
     sizeGroup.add(mesh);
 
@@ -1745,9 +1750,80 @@ export class Viewport2DProxyRegistry {
     root.userData.sizeGroup = sizeGroup;
     root.userData.controlMesh = mesh;
     root.userData.texturePath = this.getUIControlSkinTextureUrl(node);
+    root.userData.skinGeometrySignature = UNIT_SKIN_SIGNATURE;
+    root.userData.skinTextureWidth = 0;
+    root.userData.skinTextureHeight = 0;
+    // Sizes the size group (unsliced) or bakes a 9-slice patch into the mesh.
+    this.applyUIControlSkinGeometry(node, root);
+    // After the root exists: the load callback needs it to record the skin's
+    // natural size and re-cut a 9-slice patch.
+    this.applyTextureTo2DMaterial(node, material, root);
     this.apply2DVisualOpacity(node, root);
 
     return root;
+  }
+
+  /**
+   * The 9-slice insets the proxy should cut its skin with. Only the controls that
+   * expose the property carry one; everything else stretches as before.
+   */
+  getUIControlSliceBorder(node: UIControl2D): SliceBorder2D {
+    if (node instanceof Button2D || node instanceof Slider2D || node instanceof Bar2D) {
+      return node.sliceBorder;
+    }
+    return ZERO_SLICE_BORDER;
+  }
+
+  /**
+   * Size the proxy skin, the way the runtime node sizes its own.
+   *
+   * Unsliced (the default) keeps the historical arrangement: a 1x1 quad inside a
+   * size group scaled to width x height. A non-zero `sliceBorder` bakes pixel
+   * positions into the mesh instead, so the size group has to go back to unit
+   * scale or the patch would be scaled a second time. The geometry is rebuilt only
+   * when the size, the border, or the skin's natural pixel size actually moved —
+   * this runs on every viewport sync.
+   */
+  applyUIControlSkinGeometry(node: UIControl2D, visualRoot: THREE.Group): void {
+    const sizeGroup = visualRoot.userData.sizeGroup as THREE.Object3D | undefined;
+    const mesh = visualRoot.userData.controlMesh as THREE.Mesh | undefined;
+    if (!sizeGroup || !mesh) {
+      return;
+    }
+
+    const { width, height } = this.getUIControlDimensions(node);
+    const border = this.getUIControlSliceBorder(node);
+
+    if (isSliceBorderEmpty(border)) {
+      sizeGroup.scale.set(width, height, 1);
+      if (visualRoot.userData.skinGeometrySignature !== UNIT_SKIN_SIGNATURE) {
+        mesh.geometry.dispose();
+        mesh.geometry = new THREE.PlaneGeometry(1, 1);
+        visualRoot.userData.skinGeometrySignature = UNIT_SKIN_SIGNATURE;
+      }
+      return;
+    }
+
+    const textureWidth = (visualRoot.userData.skinTextureWidth as number) ?? 0;
+    const textureHeight = (visualRoot.userData.skinTextureHeight as number) ?? 0;
+    const signature = [
+      width,
+      height,
+      border.left,
+      border.right,
+      border.top,
+      border.bottom,
+      textureWidth,
+      textureHeight,
+    ].join('|');
+
+    sizeGroup.scale.set(1, 1, 1);
+    if (visualRoot.userData.skinGeometrySignature === signature) {
+      return;
+    }
+    mesh.geometry.dispose();
+    mesh.geometry = buildSkinGeometry({ width, height, textureWidth, textureHeight, border });
+    visualRoot.userData.skinGeometrySignature = signature;
   }
 
   getUIControlDimensions(node: UIControl2D): { width: number; height: number } {
@@ -1809,16 +1885,68 @@ export class Viewport2DProxyRegistry {
       // normal sprite, else the legacy single skin.
       return node.getEffectiveStateTexturePath('normal') ?? node.texturePath ?? null;
     }
+    // The controls below draw several sprites at runtime (fill, thumb, mark); the
+    // proxy is one quad, so it shows the BASE one — the box / track / trough —
+    // which is what an author positions and sizes against.
+    if (node instanceof Checkbox2D) {
+      const box = node.checked
+        ? (node.getSlotTexturePath('boxChecked') ?? node.getSlotTexturePath('box'))
+        : node.getSlotTexturePath('box');
+      return box ?? node.texturePath ?? null;
+    }
+    if (node instanceof Slider2D) {
+      return node.getSlotTexturePath('track') ?? node.texturePath ?? null;
+    }
+    if (node instanceof Bar2D) {
+      return node.getSlotTexturePath('trough') ?? node.texturePath ?? null;
+    }
     return node.texturePath ?? null;
   }
 
-  applyTextureTo2DMaterial(node: UIControl2D, material: THREE.MeshBasicMaterial): void {
+  applyTextureTo2DMaterial(
+    node: UIControl2D,
+    material: THREE.MeshBasicMaterial,
+    visualRoot?: THREE.Group
+  ): void {
     const texturePath = this.getUIControlSkinTextureUrl(node);
     if (!texturePath) {
       return;
     }
 
     const textureLoader = new THREE.TextureLoader();
+
+    /**
+     * Latest-wins guard plus the two things a 9-slice skin needs once its pixels
+     * land: the natural size (9-slice UVs are anchored in SOURCE pixels, so the
+     * patch can only be cut correctly after the image resolves) and an explicit
+     * repaint — an async load marks nothing dirty, so without it the skin would
+     * only appear on the next 500 ms heartbeat.
+     */
+    const onTextureReady = (texture: THREE.Texture): void => {
+      if (visualRoot && this.uiControl2DVisuals.get(node.nodeId) !== visualRoot) {
+        texture.dispose();
+        return;
+      }
+      configureSpriteTexture(texture);
+      material.map = texture;
+      material.color.set(0xffffff);
+      material.transparent = true;
+      material.needsUpdate = true;
+
+      if (visualRoot) {
+        const image = texture.image as
+          | { naturalWidth?: number; naturalHeight?: number; width?: number; height?: number }
+          | undefined;
+        const width = image?.naturalWidth ?? image?.width ?? 0;
+        const height = image?.naturalHeight ?? image?.height ?? 0;
+        if (width && height) {
+          visualRoot.userData.skinTextureWidth = width;
+          visualRoot.userData.skinTextureHeight = height;
+          this.applyUIControlSkinGeometry(node, visualRoot);
+        }
+      }
+      this.deps.requestRender();
+    };
 
     void (async () => {
       try {
@@ -1829,11 +1957,7 @@ export class Viewport2DProxyRegistry {
           blobUrl,
           texture => {
             try {
-              configureSpriteTexture(texture);
-              material.map = texture;
-              material.color.set(0xffffff);
-              material.transparent = true;
-              material.needsUpdate = true;
+              onTextureReady(texture);
             } finally {
               URL.revokeObjectURL(blobUrl);
             }
@@ -1848,12 +1972,9 @@ export class Viewport2DProxyRegistry {
         const scheme = schemeMatch ? schemeMatch[1].toLowerCase() : '';
         if (scheme === 'http' || scheme === 'https' || scheme === '') {
           try {
-            const texture = textureLoader.load(texturePath);
-            configureSpriteTexture(texture);
-            material.map = texture;
-            material.color.set(0xffffff);
-            material.transparent = true;
-            material.needsUpdate = true;
+            textureLoader.load(texturePath, texture => {
+              onTextureReady(texture);
+            });
           } catch {
             // Keep flat color fallback
           }

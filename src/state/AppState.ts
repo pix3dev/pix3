@@ -17,7 +17,8 @@ export type EditorTabType =
   | 'game'
   | 'code'
   | 'sprite-editor'
-  | 'model-lab';
+  | 'model-lab'
+  | 'uikit-forge';
 
 export interface CodeEditorSelectionState {
   startLineNumber: number;

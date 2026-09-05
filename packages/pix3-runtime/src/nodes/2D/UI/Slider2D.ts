@@ -1,8 +1,26 @@
-import { Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
+import {
+  BufferGeometry,
+  Mesh,
+  MeshBasicMaterial,
+  PlaneGeometry,
+  type Texture,
+  Vector2,
+} from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
 import { readNumberArg, type InteractionDescriptor } from '../../../fw/interactive';
 import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
+import { coerceTextureResource, type TextureResourceRef } from '../../../core/TextureResource';
+import { configure2DTexture } from '../../../core/configure-2d-texture';
+import { getNaturalTextureSize } from '../../../core/texture-natural-size';
+import {
+  buildSkinGeometry,
+  normalizeSliceBorder,
+  type SliceBorder2D,
+} from '../../../core/nine-slice-skin';
+
+/** The three skin slots a slider can be given a sprite for. */
+export type Slider2DTextureSlot = 'track' | 'fill' | 'thumb';
 
 export interface Slider2DProps extends UIControl2DProps {
   width?: number;
@@ -15,6 +33,14 @@ export interface Slider2DProps extends UIControl2DProps {
   maxValue?: number;
   value?: number;
   axisName?: string;
+  /** Sprite for the track background. */
+  textureTrack?: TextureResourceRef | string | null;
+  /** Sprite for the filled portion of the track (left of the handle). */
+  textureFill?: TextureResourceRef | string | null;
+  /** Sprite for the draggable handle. Never nine-sliced. */
+  textureThumb?: TextureResourceRef | string | null;
+  /** 9-slice insets (source px) applied to the track and the fill. */
+  sliceBorder?: Partial<SliceBorder2D> | null;
 }
 
 /**
@@ -44,6 +70,20 @@ export class Slider2D extends UIControl2D {
   maxValue: number;
   value: number;
   axisName: string;
+  /**
+   * Skin slots. A set slot replaces the corresponding flat colour with the sprite
+   * (material colour goes white, like `Button2D` does for its state skins). The
+   * actual `Texture` objects arrive post-construction from the SceneLoader.
+   */
+  textureTrack: TextureResourceRef | null;
+  textureFill: TextureResourceRef | null;
+  textureThumb: TextureResourceRef | null;
+  /**
+   * 9-slice insets in *source-texture pixels*, applied to the track and the fill.
+   * All-zero (the default) keeps the historical plain `PlaneGeometry` stretch. The
+   * thumb is never sliced - it is drawn at its authored size, not stretched.
+   */
+  sliceBorder: SliceBorder2D;
 
   private trackMesh: Mesh;
   private filledTrackMesh: Mesh;
@@ -51,9 +91,24 @@ export class Slider2D extends UIControl2D {
   private trackMaterial: MeshBasicMaterial;
   private filledTrackMaterial: MeshBasicMaterial;
   private handleMaterial: MeshBasicMaterial;
-  private trackGeometry: PlaneGeometry;
-  private filledTrackGeometry: PlaneGeometry;
+  private trackGeometry: BufferGeometry;
+  private filledTrackGeometry: BufferGeometry;
   private handleGeometry: PlaneGeometry;
+
+  private readonly slotTextures: Record<Slider2DTextureSlot, Texture | null> = {
+    track: null,
+    fill: null,
+    thumb: null,
+  };
+  /** Natural size of each slot's texture (0 = unknown), needed to cut 9-slice UVs. */
+  private readonly slotTextureSizes: Record<
+    Slider2DTextureSlot,
+    { width: number; height: number }
+  > = {
+    track: { width: 0, height: 0 },
+    fill: { width: 0, height: 0 },
+    thumb: { width: 0, height: 0 },
+  };
 
   constructor(props: Slider2DProps) {
     super(props, 'Slider2D');
@@ -68,9 +123,14 @@ export class Slider2D extends UIControl2D {
     this.maxValue = props.maxValue ?? 100;
     this.value = Math.max(this.minValue, Math.min(this.maxValue, props.value ?? 50));
     this.axisName = props.axisName ?? 'Slider';
+    this.textureTrack = coerceTextureResource(props.textureTrack ?? null);
+    this.textureFill = coerceTextureResource(props.textureFill ?? null);
+    this.textureThumb = coerceTextureResource(props.textureThumb ?? null);
+    this.sliceBorder = normalizeSliceBorder(props.sliceBorder);
 
-    // Create track background
-    this.trackGeometry = new PlaneGeometry(this.width, this.height);
+    // Create track background. Built through the slot helper so an authored
+    // sliceBorder cuts a patch from the first frame, not only after a texture lands.
+    this.trackGeometry = this.buildSlotGeometry('track', this.width, this.height);
     this.trackMaterial = new MeshBasicMaterial({
       color: this.trackBackgroundColor,
       transparent: true,
@@ -251,16 +311,159 @@ export class Slider2D extends UIControl2D {
     const normalized = (this.value - this.minValue) / (this.maxValue - this.minValue);
     const filledWidth = this.width * normalized;
 
-    // Update filled track. PlaneGeometry is centered on the origin, so offset
-    // the mesh to anchor the fill to the track's left edge (grows rightward).
+    // Update filled track. The geometry is centred on the origin, so offset the
+    // mesh to anchor the fill to the track's left edge (grows rightward). With a
+    // 9-slice border the fill is re-CUT at the new width instead of squashed, so
+    // its caps keep their pixel size all the way down to `value = min`.
     this.filledTrackGeometry.dispose();
-    this.filledTrackGeometry = new PlaneGeometry(filledWidth, this.height);
+    this.filledTrackGeometry = this.buildSlotGeometry('fill', filledWidth, this.height);
     this.filledTrackMesh.geometry = this.filledTrackGeometry;
     this.filledTrackMesh.position.x = -this.width / 2 + filledWidth / 2;
 
     // Update handle position
     const handleX = -this.width / 2 + filledWidth;
     this.handleMesh.position.x = handleX;
+  }
+
+  /** Geometry for one slot: a plain quad, or a 9-slice patch when sliced. */
+  private buildSlotGeometry(
+    slot: Slider2DTextureSlot,
+    width: number,
+    height: number
+  ): BufferGeometry {
+    const size = this.slotTextureSizes[slot];
+    return buildSkinGeometry({
+      width,
+      height,
+      textureWidth: size.width,
+      textureHeight: size.height,
+      // The thumb is drawn at its authored size; slicing it would be meaningless.
+      border: slot === 'thumb' ? null : this.sliceBorder,
+    });
+  }
+
+  /** Re-cut the track (and the fill, via updateSliderVisuals) after a size/border change. */
+  private rebuildTrackGeometry(): void {
+    this.trackGeometry.dispose();
+    this.trackGeometry = this.buildSlotGeometry('track', this.width, this.height);
+    this.trackMesh.geometry = this.trackGeometry;
+    this.updateSliderVisuals();
+  }
+
+  /** Set the 9-slice insets (source px) for the track and fill. All-zero = stretch. */
+  setSliceBorder(border: Partial<SliceBorder2D>): void {
+    this.sliceBorder = normalizeSliceBorder({ ...this.sliceBorder, ...border });
+    this.rebuildTrackGeometry();
+  }
+
+  /**
+   * Assign the loaded `Texture` for one skin slot (called by the SceneLoader after
+   * loading, mirroring `Button2D.setStateTexture`). Passing null clears the slot
+   * and the control falls back to its flat colour.
+   */
+  setSlotTexture(slot: Slider2DTextureSlot, texture: Texture | null): void {
+    if (texture) {
+      // sRGB + mipmaps disabled (see configure2DTexture for the why).
+      configure2DTexture(texture);
+    }
+    this.slotTextures[slot] = texture;
+
+    const natural =
+      texture?.image !== undefined && texture.image !== null
+        ? getNaturalTextureSize(
+            texture.image as {
+              naturalWidth?: number;
+              naturalHeight?: number;
+              width?: number;
+              height?: number;
+            }
+          )
+        : {};
+    this.slotTextureSizes[slot] = { width: natural.width ?? 0, height: natural.height ?? 0 };
+
+    const material = this.materialForSlot(slot);
+    if (texture) {
+      material.map = texture;
+      material.color.set('#ffffff');
+      material.transparent = true;
+    } else {
+      material.map = null;
+      material.color.setStyle(this.colorForSlot(slot));
+    }
+    material.needsUpdate = true;
+
+    // 9-slice UVs are anchored in source pixels, so the natural size has to be in
+    // place before the patch is cut.
+    if (slot === 'thumb') {
+      this.handleGeometry.dispose();
+      this.handleGeometry = new PlaneGeometry(this.handleSize, this.height);
+      this.handleMesh.geometry = this.handleGeometry;
+    } else {
+      this.rebuildTrackGeometry();
+    }
+  }
+
+  /** The authored path that should be loaded for a slot, or null. */
+  getSlotTexturePath(slot: Slider2DTextureSlot): string | null {
+    switch (slot) {
+      case 'track':
+        return this.textureTrack?.url ?? null;
+      case 'fill':
+        return this.textureFill?.url ?? null;
+      case 'thumb':
+        return this.textureThumb?.url ?? null;
+    }
+  }
+
+  private materialForSlot(slot: Slider2DTextureSlot): MeshBasicMaterial {
+    switch (slot) {
+      case 'track':
+        return this.trackMaterial;
+      case 'fill':
+        return this.filledTrackMaterial;
+      case 'thumb':
+        return this.handleMaterial;
+    }
+  }
+
+  private colorForSlot(slot: Slider2DTextureSlot): string {
+    switch (slot) {
+      case 'track':
+        return this.trackBackgroundColor;
+      case 'fill':
+        return this.trackFilledColor;
+      case 'thumb':
+        return this.handleColor;
+    }
+  }
+
+  private setSlotTextureRef(slot: Slider2DTextureSlot, value: unknown): void {
+    const ref = coerceTextureResource(value);
+    const previous = this.getSlotTexturePath(slot);
+    switch (slot) {
+      case 'track':
+        this.textureTrack = ref;
+        break;
+      case 'fill':
+        this.textureFill = ref;
+        break;
+      case 'thumb':
+        this.textureThumb = ref;
+        break;
+    }
+    if (previous !== (ref?.url ?? null)) {
+      // The loaded Texture no longer matches the ref; drop it. The SceneLoader
+      // reloads from the ref on the next scene load / play.
+      this.setSlotTexture(slot, null);
+    }
+  }
+
+  /** Repaint one slot's flat colour, unless a sprite currently covers it. */
+  private refreshSlotColor(slot: Slider2DTextureSlot): void {
+    if (this.slotTextures[slot]) {
+      return;
+    }
+    this.materialForSlot(slot).color.setStyle(this.colorForSlot(slot));
   }
 
   static getPropertySchema(): PropertySchema {
@@ -278,10 +481,7 @@ export class Slider2D extends UIControl2D {
           setValue: (n, v) => {
             const slider = n as Slider2D;
             slider.width = Number(v);
-            slider.trackGeometry.dispose();
-            slider.trackGeometry = new PlaneGeometry(slider.width, slider.height);
-            slider.trackMesh.geometry = slider.trackGeometry;
-            slider.updateSliderVisuals();
+            slider.rebuildTrackGeometry();
           },
         },
         {
@@ -292,10 +492,10 @@ export class Slider2D extends UIControl2D {
           setValue: (n, v) => {
             const slider = n as Slider2D;
             slider.height = Number(v);
-            slider.trackGeometry.dispose();
-            slider.trackGeometry = new PlaneGeometry(slider.width, slider.height);
-            slider.trackMesh.geometry = slider.trackGeometry;
-            slider.updateSliderVisuals();
+            slider.handleGeometry.dispose();
+            slider.handleGeometry = new PlaneGeometry(slider.handleSize, slider.height);
+            slider.handleMesh.geometry = slider.handleGeometry;
+            slider.rebuildTrackGeometry();
           },
         },
         {
@@ -357,7 +557,7 @@ export class Slider2D extends UIControl2D {
           setValue: (n, v) => {
             const slider = n as Slider2D;
             slider.trackBackgroundColor = String(v);
-            slider.trackMaterial.color.setStyle(slider.trackBackgroundColor);
+            slider.refreshSlotColor('track');
           },
         },
         {
@@ -368,7 +568,7 @@ export class Slider2D extends UIControl2D {
           setValue: (n, v) => {
             const slider = n as Slider2D;
             slider.trackFilledColor = String(v);
-            slider.filledTrackMaterial.color.setStyle(slider.trackFilledColor);
+            slider.refreshSlotColor('fill');
           },
         },
         {
@@ -379,7 +579,120 @@ export class Slider2D extends UIControl2D {
           setValue: (n, v) => {
             const slider = n as Slider2D;
             slider.handleColor = String(v);
-            slider.handleMaterial.color.setStyle(slider.handleColor);
+            slider.refreshSlotColor('thumb');
+          },
+        },
+        {
+          name: 'textureTrack',
+          type: 'object',
+          ui: {
+            label: 'Track Sprite',
+            group: 'Skin',
+            description: 'Sprite for the track background',
+            editor: 'texture-resource',
+            resourceType: 'texture',
+          },
+          getValue: n => (n as Slider2D).textureTrack ?? { type: 'texture', url: '' },
+          setValue: (n, v) => {
+            (n as Slider2D).setSlotTextureRef('track', v);
+          },
+        },
+        {
+          name: 'textureFill',
+          type: 'object',
+          ui: {
+            label: 'Fill Sprite',
+            group: 'Skin',
+            description: 'Sprite for the filled portion of the track',
+            editor: 'texture-resource',
+            resourceType: 'texture',
+          },
+          getValue: n => (n as Slider2D).textureFill ?? { type: 'texture', url: '' },
+          setValue: (n, v) => {
+            (n as Slider2D).setSlotTextureRef('fill', v);
+          },
+        },
+        {
+          name: 'textureThumb',
+          type: 'object',
+          ui: {
+            label: 'Thumb Sprite',
+            group: 'Skin',
+            description: 'Sprite for the draggable handle (never sliced)',
+            editor: 'texture-resource',
+            resourceType: 'texture',
+          },
+          getValue: n => (n as Slider2D).textureThumb ?? { type: 'texture', url: '' },
+          setValue: (n, v) => {
+            (n as Slider2D).setSlotTextureRef('thumb', v);
+          },
+        },
+        {
+          name: 'sliceBorderLeft',
+          type: 'number',
+          ui: {
+            label: 'Slice Left',
+            group: 'Skin',
+            description: 'Left 9-slice inset of the track/fill sprites (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Slider2D).sliceBorder.left,
+          setValue: (n, v) => {
+            (n as Slider2D).setSliceBorder({ left: Number(v) });
+          },
+        },
+        {
+          name: 'sliceBorderRight',
+          type: 'number',
+          ui: {
+            label: 'Slice Right',
+            group: 'Skin',
+            description: 'Right 9-slice inset of the track/fill sprites (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Slider2D).sliceBorder.right,
+          setValue: (n, v) => {
+            (n as Slider2D).setSliceBorder({ right: Number(v) });
+          },
+        },
+        {
+          name: 'sliceBorderTop',
+          type: 'number',
+          ui: {
+            label: 'Slice Top',
+            group: 'Skin',
+            description: 'Top 9-slice inset of the track/fill sprites (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Slider2D).sliceBorder.top,
+          setValue: (n, v) => {
+            (n as Slider2D).setSliceBorder({ top: Number(v) });
+          },
+        },
+        {
+          name: 'sliceBorderBottom',
+          type: 'number',
+          ui: {
+            label: 'Slice Bottom',
+            group: 'Skin',
+            description: 'Bottom 9-slice inset of the track/fill sprites (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Slider2D).sliceBorder.bottom,
+          setValue: (n, v) => {
+            (n as Slider2D).setSliceBorder({ bottom: Number(v) });
           },
         },
         {
@@ -395,6 +708,7 @@ export class Slider2D extends UIControl2D {
       groups: {
         ...baseSchema.groups,
         Slider: { label: 'Slider', expanded: true },
+        Skin: { label: 'Skin', description: 'Sprites replacing the flat colours', expanded: true },
       },
     };
   }

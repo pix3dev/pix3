@@ -104,7 +104,35 @@ car's nose/front point UP toward the top edge?"`, then rotate until it does.
 Need several small icons in one style? Generate them one at a time with the same style tokens
 and the `icon` preset — consistent size and framing make them drop into a grid cleanly.
 
-## 6. Sound is a separate lane with the same shape
+## 6. UI chrome is a KIT, not a pile of separate generations
+
+Buttons, panels, sliders, bars and checkboxes are the one part of the art where independent
+generations always lose: drawn one at a time, a button and the panel behind it never quite agree
+on radius, outline weight or highlight, and the screen reads as assembled from three games.
+
+`skin_ui` solves that by construction — one theme, procedurally rendered into every part, no
+image model in the loop (no key, no cost, seconds):
+
+- `skin_ui { action: 'bake', preset: 'Candy Pop' }` renders the kit into `sprites/ui/<kitId>/`
+  and saves the recipe as `design/ui-theme.json`. Presets: Standard, Brawl Stars, Bombastic,
+  Candy Pop, Soft shadow, Puffy (capsule), Flat. Add `theme: { radius, bevel, outline, glossOn,
+  glossType, glossA, shadowMode, darkTone, palette }` to push individual knobs; `palette` pins
+  absolute hexes per semantic role, which is how the kit ends up in the project's own colours.
+- `skin_ui { action: 'apply', targets: 'scene' }` puts the baked textures and their nine-slice
+  insets on every UI control of the active scene (or pass `nodeIds`, or leave both out to use the
+  selection). `colorRole` decides the colour: **green = the single primary action on a screen,
+  blue = secondary, red = destructive.** It goes through the undoable property path, so Ctrl+Z
+  takes it back off — and the scene still needs saving afterwards.
+- `skin_ui { action: 'restyle', theme: { radius: 30, glossOn: 0 } }` is the answer to "rounder,
+  darker, less gloss": it re-renders the recipe and re-dresses everything already wearing a kit.
+  Use this rather than baking a fresh look each time — a restyle moves the whole UI together,
+  while a re-roll would leave one button in a different style.
+
+The kit's captions are NOT baked into the pictures (the engine draws `label`), so the skin stays
+valid in every locale. Use `generate_asset` for what a kit cannot make: hero art, props,
+backgrounds, one-off illustrations.
+
+## 7. Sound is a separate lane with the same shape
 
 Audio is not image generation and does not belong in this skill's loop, but the ladder is the
 same: `scene.audio.sfx(preset)` for the nine built-in synth sounds (no file, no cost),

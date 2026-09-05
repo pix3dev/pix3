@@ -63,6 +63,7 @@ tables: [node-types-reference.md](node-types-reference.md).
 - `Sprite2D`, `AnimatedSprite2D`, `TiledSprite2D`, `ColorRect2D` — images / frames / 9-slice-ish tiling / solid rects.
 - `SpineSkeleton2D` — a Spine skeleton (`.json`/`.skel` + `.atlas`). Skeletal rigs, mesh deformation and animation mixing, i.e. what a flipbook cannot do; see the recipe below.
 - UI controls: `Button2D`, `Label2D`, `Slider2D`, `Joystick2D`, `Checkbox2D`, `Bar2D`, `ScrollContainer2D`, `InventorySlot2D`.
+  **Skins:** these controls are colour-driven by default and take sprites through texture slots — `Button2D` `textureNormal/Hover/Pressed/Disabled`, `Checkbox2D` `textureBox` / `textureBoxChecked` / `textureMark`, `Slider2D` `textureTrack` / `textureFill` / `textureThumb`, `Bar2D` `textureTrough` / `textureFill`, plus `ScrollContainer2D`'s thumb/track. A set slot replaces that flat colour; an unset one keeps it. `Button2D`, `Slider2D` (track+fill) and `Bar2D` (trough+fill) also take the four `sliceBorder*` nine-slice insets `TiledSprite2D` uses, so one 64x64 skin fits any size instead of smearing — and a fill that shrinks with `value` is re-cut, not squashed. A sliced skin opts out of the 2D quad batcher.
   `Label2D` is multiline: a fixed `width` word-wraps, `labelAlign`/`labelVAlign` align inside the box, and `typewriterSpeed` + `setText()`/`skipTypewriter()`/`'typewriter-complete'` give a per-character reveal.
 - `Camera2D` — pan/zoom/limits/shake for the 2D pass. `CanvasLayer2D` — fixed HUD layer, unaffected by Camera2D.
 - `AnimatedSprite2D` (and `AnimatedSprite3D`) play a flipbook from a **`.pix3anim`** resource — see the recipe below. A non-looping clip emits **`animation-finished`** (clip name as arg) when it stops on the last frame. For self-freeing one-shot VFX set **`freeOnFinish: true`** on the node (destroys itself when the clip ends — no component); use `core:FreeOnSignal` only when the trigger is some *other* signal.
@@ -253,35 +254,155 @@ Add a `PostProcess` node to enable an EffectComposer pass (bloom / vignette /
 chromatic aberration / AO modes). **Use:** drop one `PostProcess` node; configure
 its properties. Pure-2D scenes can opt 2D in via `affect2D`.
 
-### 2D UI kit generation (UI Kit Forge — editor authoring)
-Editor-side tool that generates a **coherent set of game-UI sprites** — buttons,
-hex/square icon buttons, toggles, checkboxes, radios, sliders, progress and
-segment bars, shields, level bars, resource counters, panels, tab bars — from one
-theme (hue / saturation / lightness shift, corner radius, bevel, outline, skew,
-gloss, gradient, drop shadow, font and text outline, dark tone — plus style
-presets and a randomizer). Everything is drawn as SVG in the browser, so output is
-resolution-independent; exports are per-component SVG/PNG, a bulk SVG dump into a
-picked folder, an HTML contact sheet, and a packed **atlas PNG +
-TexturePacker-style JSON hash** for other tools — Pix3 itself does not read that
-manifest (project textures are atlased automatically at play time by
-`TextureAtlasService`), so for a Pix3 project the per-sprite export is the one to
-take. **Every PNG export is rendered without its label text** (single component
-and atlas alike): the baked-in caption is preview only, and the string belongs to
-the engine at runtime — a `Button2D`/`UIControl2D` label over the skin, which is
-also what makes one sprite reusable across states and localizations. SVG exports
-and the HTML sheet keep the text. The theme round-trips as JSON (older themes
-carrying a single `shadowOff` are migrated to the `shadowDx`/`shadowDy` pair on
-paste), so a kit can be reproduced or handed on.
-**Use (editor):** Tools → UI Kit Forge, or the grid button on the welcome screen,
-or the URL directly — `<editor>/#uikit`. It needs **no open project**: a cold load
-of that hash lands straight in the tool, and it takes over the whole window rather
-than docking as a panel. Saving into a project is manual for now (export, then
-import the files) — nothing wires the output back into the asset tree yet.
-**Where it lives:** the tool is a self-contained page at
-`public/tools/uikit-forge.html`, reachable on its own at `/tools/uikit-forge.html`
-and embedded by the route as a same-origin iframe (`src/ui/tools/`); the route
-constants are `src/core/tool-routes.ts` and the menu entry is
-`OpenUiKitForgeCommand`.
+### 2D UI kit generation (UI Kit Forge)
+The single surface for **game-UI art**: one theme in, a coherent set of sprites
+out — as files for a human, or baked straight into the open project and applied
+to nodes without leaving the editor. Two hosts (a standalone page and an editor
+tab) sit over one host-agnostic core, so the generator itself has no branch in it.
+
+**What it draws.** Buttons (four states), hex/square icon buttons, toggles,
+checkboxes, radios, sliders, progress and segment bars, shields, level bars,
+resource counters, panels (body + header plate + slot), tab bars — ~40 `comp*`
+generators plus 34 glyphs and 6 showcase screens, in ten palette roles (`sky`,
+`blue`, `green`, `yellow`, `bluegray`, `gray`, `white`, `red`, `orange`,
+`purple`). One `ForgeTheme` drives all of it: hue / saturation / lightness shift,
+corner radius, bevel, outline, skew, puffy, gloss (strip / dome / corner, with
+height and alpha), gradient, drop shadow (mode / dx / dy / blur / alpha), font +
+a separate Cyrillic face, text outline / drop / colour / tracking, dark tone, and
+an **absolute per-role `palette` override** — the hook a project's own colours
+come in through. Presets (`Standard`, `Brawl Stars`, `Bombastic`, `Candy Pop`,
+`Soft shadow`, `Flat`) and a randomizer that rolls the **shape** knobs only,
+never the palette. Everything is drawn as SVG in the browser, so output is
+resolution-independent; `normalizeTheme()` is the single entry point for a theme
+from JSON (bad hex → default, `shadowOff` → `shadowDx`/`shadowDy` migration,
+unknown keys dropped), so a hand-edited file or an agent's patch cannot poison it.
+
+**Use — human, no project (`tools/uikit-forge.html`).** Tools → UI Kit Forge with
+no project open, or `<editor>/#uikit`, or the page directly at
+`/tools/uikit-forge.html`; a cold load of that hash lands straight in the tool and
+it takes over the window rather than docking. Exports: per-component SVG/PNG, a
+bulk SVG dump into a picked folder (`showDirectoryPicker`, sequential downloads as
+the fallback), an HTML contact sheet, a glyph-only sheet, and a packed **atlas PNG
++ TexturePacker-style JSON hash**. The manifest keeps TexturePacker's own fields,
+so any loader reads it unchanged, and adds per frame what a *slicer* needs — the
+generator knows its own corner geometry, so nothing downstream has to guess:
+`border`/`cap` (the safe nine-slice inset, exactly what
+`TiledSprite2D.sliceBorderLeft/Right/Top/Bottom` takes), `body`/`shadow`/`midY`
+(where the opaque body sits inside the frame, so a caption centres on the body
+rather than on the rect), `anchors` (where each stripped caption belonged) and
+`warnings`. The theme's transparent `pad` is trimmed out of every frame by
+default. **"Kit + style contract"** writes four files in one go — the atlas, its
+manifest, `tokens.json` and `STYLE.md` (colours by role, the shape numbers, the
+per-sprite slicing facts): the pictures are enough for a human, but anyone
+*developing* against the kit — an agent especially — needs the contract. The
+theme round-trips as JSON through the clipboard, and presets live in
+`localStorage`. `window.__UIKIT_FORGE_DEBUG__` (`buildManifest()`,
+`listComponents()`, `faces()`, `patchTheme()`, `pickPreset()`) makes an export
+inspectable in place — a downloaded file is unreadable from the session that
+asked for it.
+
+**Use — human, project open (the "UI Kit" editor tab).** Tools → UI Kit Forge
+(`editor.open-uikit-forge`) opens `pix3-uikit-forge-panel`: theme controls +
+preset / randomize / reset on the left, a live per-tab gallery in the middle, and
+four project actions along the bottom.
+- **Save kit to project** (`UiKitProjectWriter.writeKit`) rasterizes the engine
+  lane and writes `sprites/ui/<kitId>/*.png`, the manifest `design/ui-kit.json`
+  and the theme `design/ui-theme.json`. `kitId` is the first 8 hex of an FNV-1a
+  over the *normalized* theme's canonical JSON, so it is stable across machines
+  and sessions: re-baking an unchanged theme overwrites the same folder instead of
+  littering the project, while a re-theme writes a **new** folder and leaves the
+  old art in place — which is what keeps Ctrl+Z on the property edit meaningful,
+  and what `export.pruneUnusedAssets` collects later. Raster scale defaults to the
+  project manifest's `quality.maxPixelRatio` (clamped 1…4). Baked per colour role:
+  the four button states at 250×88 and `panel-body` / `header-plate` / `bar-fill`;
+  baked once, role-free: `slot`, `checkbox`, `checkbox-mark`, `slider-track`,
+  `slider-thumb`, `bar-trough`. Buttons are baked at a real size rather than a
+  small stamp because the gloss band's height is a *percent* of the face while the
+  bevel lip is absolute — stretching a tiny source would smear both. The recorded
+  insets are **measured back off the rasterized pixels** (`frameMeta`), falling
+  back to the generator's own design-unit border scaled up where no canvas exists.
+- **Apply to selection** dispatches `properties.apply-uikit-skin` with the role
+  picked beside the button. It skins `Button2D` (four state slots +
+  `sliceBorder*`), `Checkbox2D` (`textureBox` / `textureBoxChecked` /
+  `textureMark`), `Slider2D` (`textureTrack` / `textureFill` / `textureThumb` +
+  `sliceBorder*` off the track), `Bar2D` (`textureTrough` / `textureFill` +
+  `sliceBorder*`), `TiledSprite2D` and `Sprite2D` (a panel body; `Sprite2D` gets no
+  insets, so it is only right at the baked size).
+- **Dialog prefab / Settings prefab** turn a core `TemplateSpec` into
+  `prefabs/ui/<templateId>-<kitId>.pix3scene` (`UiKitPrefabBuilder`) — an ordinary
+  prefab, see "Node Prefabs System"; **Instance into scene** then runs
+  `CreatePrefabInstanceCommand`. The core stops at data (parts + a layout) and
+  knows nothing about nodes: which node type a template row becomes, the
+  top-left/y-down → centre-origin/y-up conversion, and `TemplateNode.anchor` →
+  `Node2D.layout` all live in the builder.
+
+**Undo semantics.** Property changes undo, binary writes do not. Every skin write
+goes through `UpdateObjectPropertyOperation` and the commits are composed with
+`BulkOperationBuilder`, so one Ctrl+Z takes the whole outfit back off. Baking and
+prefab-writing are file I/O with no undo — inventing a bulk-asset undo would be a
+worse trade than hash-named folders that simply stay on disk, which is exactly
+what makes the property undo land on art that is still there.
+
+**Use — agent.** The `skin_ui` tool: `{ action: 'bake' | 'apply' | 'restyle',
+preset?, theme? (a partial ForgeTheme), nodeIds?, colorRole?, targets?:
+'selection' | 'scene' }`. `bake` saves the theme and bakes the kit, answering with
+the kitId, the sprite count and the manifest path; `apply` runs
+`properties.apply-uikit-skin`; `restyle` bakes and then re-applies to every node
+already wearing a `sprites/ui/` texture — the "rounder, darker, less gloss" edit,
+which is a deterministic re-render off `design/ui-theme.json`, never a new roll.
+The bare command is reachable too: `run_command properties.apply-uikit-skin` takes
+no arguments, so its zero-argument form is defined — current selection, role
+`blue`, manifest read from `design/ui-kit.json`.
+
+**Use — the T0 expander.** `PrototypeBootstrapService` derives a theme from the
+brief's palette (the one it writes to `design/style.md`), bakes the kit and skins
+every `Button2D` / `Checkbox2D` / `Slider2D` / `Bar2D` in the recipe scenes — with
+**zero agent turns**, so the first frame of a generated prototype is a themed UI
+rather than coloured rectangles.
+
+**The engine-vs-tool boundary** (get this wrong and the art fights the runtime):
+- **Captions belong to the engine.** Every PNG export is rendered without its
+  label text, single component and atlas alike: the baked caption is preview only,
+  and a `Button2D` / `UIControl2D` label over the skin is what makes one sprite
+  reusable across states *and* localizations. SVG exports and the HTML sheet keep
+  the text; the engine lane strips it by construction. A baked **glyph** is the
+  exception — glyphs are language-independent, which is what the `icon-button`
+  skin component is for (a dialog's close button, for instance).
+- **`pad` is forced to 0 for engine skins.** The kit's default 24 px transparent
+  margin lands *inside* the frame and a `Button2D` computes its hit box from
+  `width`/`height`, so ~20 % of the button would be dead border.
+- **`feDropShadow` is not used in the engine lane.** Its blur differs by GPU and
+  browser, so two collaborators regenerating one theme would get different bytes;
+  at `pad: 0` it would be clipped anyway.
+- **Nine-slice comes from `sliceBorder`, and only when the silhouette allows it.**
+  `SkinPart.sliceBorder` is `null` whenever the theme sets `skew` or `puffy` —
+  those bulge or lean the edges, so no edge is uniform along its length and
+  stretching the middle flattens the shape; a host must render per size instead. A
+  sliced skin also opts out of the 2D quad batcher and is excluded from the
+  pre-launch atlas (`TextureAtlasService` disqualifies any node with a non-zero
+  inset, because the patch geometry needs the whole source rect).
+- **Pix3 does not read the atlas manifest** — project textures are atlased
+  automatically at play time by `TextureAtlasService` — so for a Pix3 project take
+  the baked kit (or the per-component export), not the atlas.
+
+**Where it lives.** The generator is a host-agnostic **core** in
+`src/services/uikit/` — `ForgeTheme`/`color`, `svg-primitives`, `icons`,
+`skins/*`, `showcase`, `registry`, `strings`, `slices` (`sliceBorder` /
+`frameMeta` / anchors), `SkinSpec` (the engine lane: `buildSkin`,
+`buildButtonStates`, `isNineSliceable`), `TemplateSpec` (dialog / settings),
+`presets`, `style-doc`. It touches no DOM, no DI and nothing under
+`src/services/*`, `src/ui` or `src/state` (pinned by `host-agnostic.spec.ts`),
+which is what lets two hosts share one generator: rasterization and file writing
+are supplied by the host. The **standalone page** is a second Vite build entry —
+`tools/uikit-forge.html` plus `src/tools/uikit-forge/` (controls, Google-Fonts
+inlining, rasterizer, atlas packer, export lanes, localStorage presets) — embedded
+by the `#uikit` route as a same-origin iframe (`src/ui/tools/`); same-origin is
+load-bearing, since the exports use `showDirectoryPicker()` and anchor downloads.
+The **editor host** is `src/ui/uikit-forge/` (the panel) over
+`src/services/uikit-editor/` (`UiKitThemeService` — the live theme, deliberately
+*not* in `appState` because it is a project document; `UiKitProjectWriter`;
+`UiKitPrefabBuilder`) plus `src/features/uikit/` (the apply command + operation).
+Route constants: `src/core/tool-routes.ts`. File formats: spec → "UI kit assets".
 
 ### 3D model generation (Model Lab — editor authoring)
 Editor-side tool that reconstructs a hard-surface 3D model **procedurally by

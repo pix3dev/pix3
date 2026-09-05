@@ -555,6 +555,26 @@ export class AssetGenService {
 
   // -- project I/O -----------------------------------------------------------
 
+  /**
+   * Take a blob produced OUTSIDE this service — a rasterized procedural generator, a decoded
+   * upload — into a working handle, so it rides the same rails as a generated image: post-process,
+   * preview, `save` into the project. `svgSource` travels with it, which is what later gives the
+   * Sprite Editor a vector to re-edit rather than a flattened raster.
+   *
+   * Added for the UI Kit Forge editor host: it bakes its own SVG and needs `save`'s path,
+   * extension and parent-directory handling without going through an image provider.
+   */
+  async importBlob(blob: Blob, mimeType?: string, svgSource?: string): Promise<AssetImageMeta> {
+    const stored = await this.store(
+      blob,
+      mimeType || blob.type || 'image/png',
+      'import',
+      undefined,
+      svgSource
+    );
+    return this.toMeta(stored);
+  }
+
   /** Load an existing project asset into a working handle (for cropping/resizing/editing). */
   async open(pathOrRef: string): Promise<AssetImageMeta> {
     const blob = await this.storage.readBlob(pathOrRef);

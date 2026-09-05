@@ -337,6 +337,7 @@ const STATE_CHANGING_TOOLS = new Set([
   'compile_scripts',
   'generate_asset',
   'process_asset',
+  'skin_ui',
   'generate_model_3d',
   'generate_scene_3d',
 ]);

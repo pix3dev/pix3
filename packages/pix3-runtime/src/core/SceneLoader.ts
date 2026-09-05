@@ -24,9 +24,10 @@ import { AnimatedSprite3D } from '../nodes/3D/AnimatedSprite3D';
 import { Particles3D } from '../nodes/3D/Particles3D';
 import { Joystick2D } from '../nodes/2D/UI/Joystick2D';
 import { Button2D, type Button2DSpriteState } from '../nodes/2D/UI/Button2D';
-import { Slider2D } from '../nodes/2D/UI/Slider2D';
-import { Bar2D } from '../nodes/2D/UI/Bar2D';
-import { Checkbox2D } from '../nodes/2D/UI/Checkbox2D';
+import { Slider2D, type Slider2DTextureSlot } from '../nodes/2D/UI/Slider2D';
+import { Bar2D, type Bar2DTextureSlot } from '../nodes/2D/UI/Bar2D';
+import { Checkbox2D, type Checkbox2DTextureSlot } from '../nodes/2D/UI/Checkbox2D';
+import type { SliceBorder2D } from './nine-slice-skin';
 import { InventorySlot2D } from '../nodes/2D/UI/InventorySlot2D';
 import { Label2D } from '../nodes/2D/UI/Label2D';
 import { ScrollContainer2D } from '../nodes/2D/UI/ScrollContainer2D';
@@ -1384,6 +1385,7 @@ export class SceneLoader {
           texturePressed: stateRefs[2][1],
           textureDisabled: stateRefs[3][1],
           stateTextureKeys,
+          sliceBorder: this.readSliceBorder(props),
         });
 
         for (const [state] of stateRefs) {
@@ -1437,7 +1439,7 @@ export class SceneLoader {
       case 'Slider2D': {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
-        return new Slider2D({
+        const slider = new Slider2D({
           ...baseProps,
           position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
           scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
@@ -1465,12 +1467,35 @@ export class SceneLoader {
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           texturePath: this.asString(props.texturePath),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
+          textureTrack: coerceTextureResource(props.textureTrack ?? null),
+          textureFill: coerceTextureResource(props.textureFill ?? null),
+          textureThumb: coerceTextureResource(props.textureThumb ?? null),
+          sliceBorder: this.readSliceBorder(props),
         });
+
+        for (const slot of [
+          'track',
+          'fill',
+          'thumb',
+        ] as const satisfies readonly Slider2DTextureSlot[]) {
+          const path = slider.getSlotTexturePath(slot);
+          if (!path) continue;
+          try {
+            slider.setSlotTexture(slot, await this.assetLoader.loadTexture(path));
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading ${slot} texture for Slider2D "${slider.nodeId}":`,
+              error
+            );
+          }
+        }
+
+        return slider;
       }
       case 'Bar2D': {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
-        return new Bar2D({
+        const bar = new Bar2D({
           ...baseProps,
           position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
           scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
@@ -1498,12 +1523,30 @@ export class SceneLoader {
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           texturePath: this.asString(props.texturePath),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
+          textureTrough: coerceTextureResource(props.textureTrough ?? null),
+          textureFill: coerceTextureResource(props.textureFill ?? null),
+          sliceBorder: this.readSliceBorder(props),
         });
+
+        for (const slot of ['trough', 'fill'] as const satisfies readonly Bar2DTextureSlot[]) {
+          const path = bar.getSlotTexturePath(slot);
+          if (!path) continue;
+          try {
+            bar.setSlotTexture(slot, await this.assetLoader.loadTexture(path));
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading ${slot} texture for Bar2D "${bar.nodeId}":`,
+              error
+            );
+          }
+        }
+
+        return bar;
       }
       case 'Checkbox2D': {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
-        return new Checkbox2D({
+        const checkbox = new Checkbox2D({
           ...baseProps,
           position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
           scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
@@ -1527,7 +1570,29 @@ export class SceneLoader {
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           texturePath: this.asString(props.texturePath),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
+          textureBox: coerceTextureResource(props.textureBox ?? null),
+          textureBoxChecked: coerceTextureResource(props.textureBoxChecked ?? null),
+          textureMark: coerceTextureResource(props.textureMark ?? null),
         });
+
+        for (const slot of [
+          'box',
+          'boxChecked',
+          'mark',
+        ] as const satisfies readonly Checkbox2DTextureSlot[]) {
+          const path = checkbox.getSlotTexturePath(slot);
+          if (!path) continue;
+          try {
+            checkbox.setSlotTexture(slot, await this.assetLoader.loadTexture(path));
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading ${slot} texture for Checkbox2D "${checkbox.nodeId}":`,
+              error
+            );
+          }
+        }
+
+        return checkbox;
       }
       case 'InventorySlot2D': {
         const props = baseProps.properties as Record<string, unknown>;
@@ -2211,6 +2276,20 @@ export class SceneLoader {
     }
 
     return fallback.clone();
+  }
+
+  /**
+   * The four `sliceBorder*` scalars a skinned 2D control writes, read back as one
+   * border. Same YAML spelling `TiledSprite2D` uses, so a skin authored once can be
+   * pasted between a panel and a button.
+   */
+  private readSliceBorder(props: Record<string, unknown>): SliceBorder2D {
+    return {
+      left: this.asNumber(props.sliceBorderLeft, 0),
+      right: this.asNumber(props.sliceBorderRight, 0),
+      top: this.asNumber(props.sliceBorderTop, 0),
+      bottom: this.asNumber(props.sliceBorderBottom, 0),
+    };
   }
 
   private readVector2(value: unknown, fallback: Vector2): Vector2 {

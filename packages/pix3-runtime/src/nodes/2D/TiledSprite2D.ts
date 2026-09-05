@@ -4,6 +4,7 @@ import type { PropertySchema } from '../../fw/property-schema';
 import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
 import { coerceTextureResource, type TextureResourceRef } from '../../core/TextureResource';
 import { configure2DTexture } from '../../core/configure-2d-texture';
+import { normalizeSliceBorder } from '../../core/nine-slice-skin';
 import {
   buildTiledSpriteGeometry,
   type TiledSpriteAxisStretch,
@@ -253,19 +254,11 @@ export class TiledSprite2D extends Node2D {
       : 'stretch';
   }
 
+  /** Shared with the skinned UI controls (Button2D/Slider2D/Bar2D). */
   private static normalizeBorder(
     border: Partial<TiledSpriteSliceBorder> | undefined
   ): TiledSpriteSliceBorder {
-    const clamp = (v: unknown): number => {
-      const n = Number(v);
-      return Number.isFinite(n) && n > 0 ? n : 0;
-    };
-    return {
-      left: clamp(border?.left),
-      right: clamp(border?.right),
-      top: clamp(border?.top),
-      bottom: clamp(border?.bottom),
-    };
+    return normalizeSliceBorder(border);
   }
 
   private static normalizeAnchor(

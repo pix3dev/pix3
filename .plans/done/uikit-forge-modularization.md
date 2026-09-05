@@ -1,12 +1,19 @@
 # UI Kit Forge: самодостаточный инструмент → префабы и скины → рантайм догоняет
 
-**Статус:** дизайн, не начато. **Дата:** 2026-09-04, сверено по коду на `baaf4acc`.
+**Статус:** ревизия 3 — **реализовано** на ветке `feat/uikit-forge-core` (Ф1–Ф3, Ф5, Ф6 целиком;
+из Ф4 закрыт первый и третий пункты — остаток см. §10). **Дата:** 2026-09-05; ревизии 1–2 сверены
+по коду на `baaf4acc`.
 **Авторы:** сессия + Fable (архитектурная критика, §8), рамка, цель и приоритет потребителей —
 пользователь.
 
 **Ревизии:**
 - **1** — после критики Fable: перенос порядка фаз, находки §3.
-- **2 (действующая)** — **правка постановки пользователем: первый потребитель — человек, а не
+- **3 (действующая)** — **источник переноса сменился**: в `C:\Projects\games\jam-august`
+  форж уже разложен на DOM-free ES-модули (`src/dev/uikit/*.js`, ~3.6k строк) и дорос до
+  манифеста слайсов, style-контракта, двуязычных подписей, showcase-экранов и per-caption
+  выбора шрифта. Ф1 переносится **оттуда**, а не из 1388-строчной страницы; что именно и с
+  какими поправками — §9. Порядок фаз ревизии 2 сохранён.
+- **2** — **правка постановки пользователем: первый потребитель — человек, а не
   экспандер T0 и не агент.** Конструктор обязан быть самодостаточным инструментом на случай, что
   пользователь вообще не собирается пользоваться редактором. Отсюда откатываются три решения
   ревизии 1 — см. §2.1. UI в рантайме был низкоприоритетным из-за отсутствия прецедентов;
@@ -364,3 +371,142 @@ auto-creation of `Layout2D`/root 2D container». Взамен раскладка
 контейнер результата, не источник (§5 это и реализует: источник — `TemplateSpec`). Тема в
 настройках проекта, читаемая каждой нодой в рантайме, — потребовала бы генератор внутри
 `@pix3/runtime` и работу с canvas каждый кадр.
+
+---
+
+## 9. Ревизия 3: перенос из jam-august и контракты реализации
+
+### 9.1. Что даёт jam-версия (`C:\Projects\games\jam-august/src/dev/uikit/`)
+
+| Модуль (JS) | Что там | Судьба в pix3 |
+| --- | --- | --- |
+| `theme.js` | цветовая математика, `DEFAULT_THEME`, `PALETTE` (id→role→use), `C()/DARK()/NAVY()/LABEL_EDGE()/ink()`, **`palette` — абсолютный override по ролям** (это и есть §4 «абсолютные цвета»), `FONTS[].cyr`, `faceFor(text)` — шрифт выбирается **по символам подписи**, свой вес у каждой семьи | переносится целиком → `ForgeTheme.ts` + `color.ts` |
+| `svg.js` | `bevelRect` (кольцо обводки **равной ширины**: face на `r-ow/2`), `recessRect` (углубление), `pillowPath`, `glossFor`, `roundedPoly`, `label` с абсолютной толщиной обводки, `estTextWidth/fitTextSize` (раскладка без DOM), сбор anchors при strip | целиком → `svg-primitives.ts` |
+| `icons.js` | 34 глифа в боксе 24×24, `iconStroke` с полосой = `txtOut/k` (одна толщина у иконки и слова) | целиком → `icons.ts` |
+| `components.js` | ~30 `comp*`, `withShadow`, `shadowDef`; панель = `compPanelBody + compHeaderPlate` (одна форма, не три) | целиком → `skins/*.ts`; **плюс состояния кнопки** (9.3) |
+| `showcase.js` | 6 экранов из тех же частей (shop, map, settings, settings in-game, tutorial, win), `place()` | целиком → `showcase.ts`; экраны — заготовки `TemplateSpec` (Ф3) |
+| `registry.js` | `TABS`, `listAll/buildAll/buildTab`, `noExport` для showcase, per-component сбор anchors | целиком → `registry.ts` |
+| `strings.js` | подписи ru/en через `tx()`, отсутствующий ключ виден как ключ | целиком → `strings.ts` (UI страницы — английский, подписи — переключатель) |
+| `slices.js` | `sliceBorder(theme,…)` из геометрии темы (pad+outline+radius, gloss сверху, bevel снизу, тень), `trimBounds/bodyBounds/midFraction/textAnchor/frameMeta` | переносится **без** `fitsGame`/`GAME_TOKENS`: капы чужой игры → опциональный параметр `caps?`, предупреждения только при его наличии. Наш потребитель — `TiledSprite2D.sliceBorder` (§3.2) |
+| `presets.js` | пресеты + пользовательские в localStorage | переносится без `PIXEL_DROP`/`gameTokens.js` (палитра чужой игры); localStorage — в хост. Абсолютная палитра pix3-проекта придёт из `design/style.md` (Ф5) |
+| `styleDoc.js` | `tokens.json` + `STYLE.md` — контракт стиля для человека и агента | переносится без секций `game`/`GAME_TOKENS`; инварианты — pix3-шные (подписи рисует `UIControl2D`, `pad` для движка = 0, `sliceBorder` из манифеста) |
+| `export.js`, `ui.js`, `uikit-lab.js` | вшивание woff2 (локально/CDN, **latin+cyrillic блоки**, per family+weight, кэш только успехов), растеризация, shelf-атлас + манифест, галерея, `deliver()` в репо | хостовый код → страница-хост Ф2 (`src/tools/uikit-forge/`); лана «в репозиторий» (`/__uikit-lab/save`) **не переносится** — её место занимает запись в проект через `AssetGenService` в редакторском хосте |
+| `gameTokens.js` | токены чужой игры | **не переносится** |
+
+### 9.2. Поправки к §4 по итогам переноса
+
+- **Контекст вместо глобалов.** Генераторы синхронны, поэтому ядро держит один модульный
+  контекст (тема, `stripText`, `lang`, счётчик `uid`), выставляемый на время сборки через
+  `runBuild(opts, fn)` с восстановлением в `finally`. `uid` **сбрасывается на каждый
+  top-level build дескриптора реестра** (не на каждую `comp*` — showcase вкладывает части в
+  один документ, id градиентов не должны сталкиваться) → один и тот же `(theme, name, lang)`
+  даёт **байт-в-байт тот же SVG**. Строковые снапшоты всё равно не пинить (§6 Ф1).
+- **Валидация входа** (§7): `normalizeTheme(unknown): ForgeTheme` — числа приводятся,
+  хексы проверяются регулярным выражением (плохой → дефолт), миграция `shadowOff →
+  shadowDx/Dy`, неизвестные ключи отбрасываются. Единственная точка входа темы из JSON.
+- **Экранирование `<text>`** (§3.6): `label()` экранирует `& < > "` сам, в ядре.
+- **Инвариант хост-агностичности держится тестом**: ни один файл `src/services/uikit/**`
+  не импортирует из `src/services/*` (кроме самого `uikit`), `src/ui`, `src/state`, `@/fw`,
+  `three`, и не трогает `document`/`window`/`localStorage`.
+
+### 9.3. Контракты ядра (`src/services/uikit/`)
+
+```ts
+// ForgeTheme.ts
+export type PaletteId = 'sky'|'blue'|'green'|'yellow'|'bluegray'|'gray'|'white'|'red'|'orange'|'purple';
+export interface ForgeTheme { hue; sat; light; radius; bevel; outline; skew; pad; glossOn; glossType:'strip'|'dome'|'corner';
+  glossH; glossA; puffy; gradOn; gradK; shadowMode:0|1|2; shadowDx; shadowDy; shadowBlur; shadowA;
+  font; fontCyr; txtOut; txtDrop; txtColor:'white'|'dark'|'auto'; track; darkTone; labelEdge:string|null;
+  palette: Partial<Record<PaletteId,string>>|null }
+export const DEFAULT_THEME: ForgeTheme; export function normalizeTheme(input: unknown): ForgeTheme;
+// registry.ts
+export interface BuildOptions { theme: ForgeTheme; lang?: 'ru'|'en'; stripText?: boolean }
+export interface ForgeComponent { name: string; tab: string; svg: string; w: number; h: number; anchors?: RawAnchor[] }
+export const TABS; export function listAll(tabId?); export function buildAll(opts, tabId?); export function buildTab(tabId, opts); export function buildComponent(name, opts)
+// SkinSpec.ts — движковый путь (Ф5), pad принудительно 0, feDropShadow не используется
+export type ButtonSkinState = 'normal'|'hover'|'pressed'|'disabled';
+export interface SkinSpec { component: 'button'|'panel'|'panel-body'|'header-plate'|'slot'|'checkbox'|'slider-track'|'slider-thumb'|'bar-trough'|'bar-fill';
+  colorRole: PaletteId; width: number; height: number; state?: ButtonSkinState }
+export interface SkinPart { svg: string; w: number; h: number; sliceBorder: {left,right,top,bottom}|null /* null = не режется (skew/puffy) */; state?: ButtonSkinState }
+export function buildSkin(spec: SkinSpec, theme: ForgeTheme): SkinPart
+// TemplateSpec.ts (Ф3)
+export interface TemplateNode { type:'Group2D'|'TiledSprite2D'|'Sprite2D'|'Button2D'|'Label2D'|'ColorRect2D'; name: string; part?: string;
+  x: number; y: number; w: number; h: number; anchor?: { h:'left'|'center'|'right'; v:'top'|'center'|'bottom' }; label?: string; children?: TemplateNode[] }
+export interface TemplateSpec { id: 'dialog'|'settings'; parts: Record<string, SkinPart>; root: TemplateNode }
+export function buildTemplate(id, theme, opts): TemplateSpec
+```
+
+**Состояния кнопки** (новое, опережает рантайм по §1): `hover` — face светлее (`dl:+6`),
+`pressed` — face опущен на `bevel` (лип 0), `disabled` — насыщенность −35, светлота −6, ink
+приглушён. Одна геометрия во всех четырёх → `Button2D` может менять текстуру без скачка.
+
+### 9.4. Волны реализации (по два агента)
+
+1. **A — ядро Ф1** (`src/services/uikit/`, TS, структурные тесты, инвариант-тест).
+   **B — дорожка рантайма Ф4** (независима от A): `sliceBorder` на скине `Button2D`; текстурные
+   слоты у `Checkbox2D` (box/mark), `Slider2D` (track/thumb), `Bar2D` (trough/fill, девятислайс);
+   схема свойств, `SceneLoader/SceneSaver`, спека YAML, `node-types-reference.md`.
+2. **C — страница-хост Ф2**: `tools/uikit-forge.html` + `src/tools/uikit-forge/*.ts` как второй
+   vite-энтри (URL `/tools/uikit-forge.html` не меняется, `public/tools/uikit-forge.html`
+   удаляется), все экспортные ланы jam-версии кроме «в репозиторий».
+   **D — редакторский хост Ф6 + Ф3**: Lit-панель `src/ui/uikit-forge/` (по образцу Model Lab),
+   «Save kit to project» (`rasterizeSvg` + `AssetGenService` → `sprites/ui/`, манифест
+   `design/ui-kit.json`, тема `design/ui-theme.json`), «Apply to selected Button2D»
+   (`UpdateObjectPropertyCommand`), шаблоны диалог/настройки → `.pix3scene`-префаб.
+3. **E — Ф5**: `PrototypeBootstrapService` скиннит `Button2D` рецепта детерминированно; агентский
+   тул `skin_ui`. **F — документация**: `nodes-and-systems.md`, спека, этот план → `.plans/done/`.
+
+---
+
+## 10. Что сделано / что осталось
+
+Итог ветки `feat/uikit-forge-core`. Документация: `docs/nodes-and-systems.md` → «2D UI kit
+generation» (единственная точка входа: человек, редактор, агент, экспандер, граница
+движок/инструмент), `docs/pix3-specification.md` → §6.23 «UI Kit Assets» (форматы файлов) и
+§7.2.2 (слоты нод), роутер в `CLAUDE.md`.
+
+### Сделано
+
+- **Ф1. Ядро** — `src/services/uikit/`: `ForgeTheme` + `color`, `svg-primitives`, `icons`
+  (34 глифа), `skins/*` (~40 `comp*`), `showcase` (6 экранов), `registry`, `strings` (ru/en),
+  `slices` (`sliceBorder`/`frameMeta`/якоря), `presets`, `style-doc` (`tokens.json` + `STYLE.md`),
+  `SkinSpec` (движковая лана: `buildSkin`, состояния кнопки, `isNineSliceable`, `pad: 0`,
+  без `feDropShadow`), `TemplateSpec` (dialog/settings). Инвариант хост-агностичности держит
+  `host-agnostic.spec.ts`; контекст сборки вместо глобалов (`runBuild`), `normalizeTheme` —
+  единственный вход темы из JSON.
+- **Ф2. Страница-хост** — `tools/uikit-forge.html` + `src/tools/uikit-forge/` вторым vite-энтри
+  (URL не изменился, `public/tools/uikit-forge.html` удалён). Все экспортные ланы jam-версии,
+  кроме «в репозиторий»; `window.__UIKIT_FORGE_DEBUG__.buildManifest()`.
+- **Ф3. Шаблоны и префабы** — `UiKitPrefabBuilder` → `prefabs/ui/<id>-<kitId>.pix3scene`,
+  якоря `TemplateNode.anchor` → `Node2D.layout`, перевод из top-left/y-down в центр/y-up;
+  «Instance into scene» через `CreatePrefabInstanceCommand`.
+- **Ф4, частично** — `sliceBorder*` на скине `Button2D`; текстурные слоты у `Checkbox2D`
+  (`textureBox`/`textureBoxChecked`/`textureMark`), `Slider2D`
+  (`textureTrack`/`textureFill`/`textureThumb`) и `Bar2D` (`textureTrough`/`textureFill`),
+  с девятислайсом там, где он осмыслен; девятислайсные скины исключены из пред-стартового атласа.
+- **Ф5. Экспандер и агент** — `PrototypeBootstrapService` выводит тему из палитры брифа
+  (`design/style.md`), печёт кит и скиннит `Button2D`/`Checkbox2D`/`Slider2D`/`Bar2D` рецептных
+  сцен **без хода агента**; агентский тул `skin_ui` (`bake`/`apply`/`restyle`) — рецептом, а не
+  новым роллом; `SkinComponent` дорос до `icon-button` (запечённый глиф — язык-независим, в
+  отличие от подписи).
+- **Ф6. Редакторский хост** — вкладка «UI Kit» (`pix3-uikit-forge-panel`, Tools → UI Kit Forge /
+  `editor.open-uikit-forge`; без проекта команда уводит на `#uikit`), `src/services/uikit-editor/`
+  (`UiKitThemeService` → `design/ui-theme.json`, `UiKitProjectWriter` → `sprites/ui/<kitId>/` +
+  `design/ui-kit.json`, `UiKitPrefabBuilder`) и команда `properties.apply-uikit-skin`
+  (`src/features/uikit/`) — под `properties.`-префиксом намеренно, чтобы её доставал
+  префикс-гейтед `run_command` агента.
+
+Решения §7, подтвердившиеся реализацией: undo асимметричен (свойства откатываются одним
+`BulkOperation`, бинарная запись — нет, и именно хеш-имя папки делает этот Ctrl+Z осмысленным);
+`kitId` — FNV-1a по каноническому JSON нормализованной темы, стабильный между машинами.
+
+### Осталось (очередь Ф4)
+
+- **Шрифты и типографика подписи в движке**: загрузка `fonts/*.woff2` проекта через `FontFace`
+  плюс обводка и тень подписи в `UIControl2D`. Пока скин из кита «как в Brawl Stars» выходит в
+  движке с плоским `Arial`. Сам инструмент этим не болен — он вшивает woff2 в SVG-экспорт.
+- **Потоковая/стековая раскладка поверх существующих якорей `Node2D`** — для колонки настроек.
+  Ноду `Layout2D` не возвращать.
+- **Прокси вьюпорта не рисует часть скинов**: заливку и ползунок `Slider2D`, заливку `Bar2D`,
+  галочку `Checkbox2D` — в редакторе они видны только в play mode.
+- **Тонкие recess/fill-части** (`slot`, `slider-track`, `bar-trough`, `bar-fill`) считают nine-slice инсеты своей формулой (`flatPartBorder`: обводка + дуга угла + полоса тени), а не общей `sliceBorder()` для bevelRect — та на 240×36 отдавала `{52,52,35,35}` и середины не оставалось (`skin-flat-border.spec.ts`).

@@ -17,6 +17,8 @@ import { Button2D } from '../nodes/2D/UI/Button2D';
 import { Slider2D } from '../nodes/2D/UI/Slider2D';
 import { Bar2D } from '../nodes/2D/UI/Bar2D';
 import { Checkbox2D } from '../nodes/2D/UI/Checkbox2D';
+import type { TextureResourceRef } from './TextureResource';
+import type { SliceBorder2D } from './nine-slice-skin';
 import { InventorySlot2D } from '../nodes/2D/UI/InventorySlot2D';
 import { Label2D } from '../nodes/2D/UI/Label2D';
 import { ScrollContainer2D } from '../nodes/2D/UI/ScrollContainer2D';
@@ -578,6 +580,7 @@ export class SceneSaver {
       } else {
         delete props.stateTextureKeys;
       }
+      this.serializeSliceBorder(node.sliceBorder, props);
       delete props.effects;
       const buttonFx = node.getShaderEffectStack();
       if (!buttonFx.isEmpty) {
@@ -617,6 +620,10 @@ export class SceneSaver {
       props.maxValue = node.maxValue;
       props.value = node.value;
       props.axisName = node.axisName;
+      this.serializeTextureRef(props, 'textureTrack', node.textureTrack);
+      this.serializeTextureRef(props, 'textureFill', node.textureFill);
+      this.serializeTextureRef(props, 'textureThumb', node.textureThumb);
+      this.serializeSliceBorder(node.sliceBorder, props);
     } else if (node instanceof Bar2D) {
       this.serializeCommonUIControlProps(node, props);
       props.width = node.width;
@@ -629,6 +636,9 @@ export class SceneSaver {
       props.showBorder = node.showBorder;
       props.borderColor = node.borderColor;
       props.borderWidth = node.borderWidth;
+      this.serializeTextureRef(props, 'textureTrough', node.textureTrough);
+      this.serializeTextureRef(props, 'textureFill', node.textureFill);
+      this.serializeSliceBorder(node.sliceBorder, props);
     } else if (node instanceof Checkbox2D) {
       this.serializeCommonUIControlProps(node, props);
       props.size = node.size;
@@ -637,6 +647,9 @@ export class SceneSaver {
       props.checkedColor = node.checkedColor;
       props.checkmarkColor = node.checkmarkColor;
       props.checkmarkAction = node.checkmarkAction;
+      this.serializeTextureRef(props, 'textureBox', node.textureBox);
+      this.serializeTextureRef(props, 'textureBoxChecked', node.textureBoxChecked);
+      this.serializeTextureRef(props, 'textureMark', node.textureMark);
     } else if (node instanceof InventorySlot2D) {
       this.serializeCommonUIControlProps(node, props);
       props.width = node.width;
@@ -896,5 +909,43 @@ export class SceneSaver {
     if (node.labelColor !== '#ffffff') props.labelColor = node.labelColor;
     if (node.labelAlign !== 'center') props.labelAlign = node.labelAlign;
     if (node.texturePath) props.texturePath = node.texturePath;
+  }
+
+  /**
+   * Emit a texture resource ref, or drop the key when the slot is empty. A cleared
+   * slot MUST delete rather than write null: the props map starts as the YAML the
+   * node was loaded from, so leaving the old key would resurrect the sprite.
+   */
+  private serializeTextureRef(
+    props: Record<string, unknown>,
+    key: string,
+    ref: TextureResourceRef | null
+  ): void {
+    if (ref) {
+      props[key] = { ...ref };
+    } else {
+      delete props[key];
+    }
+  }
+
+  /**
+   * The four `sliceBorder*` scalars, defaults (0) omitted — an unsliced control
+   * serializes byte-for-byte as it did before nine-slice existed. Same spelling as
+   * `TiledSprite2D`, which always emits them because slicing is its whole point.
+   */
+  private serializeSliceBorder(border: SliceBorder2D, props: Record<string, unknown>): void {
+    const sides = [
+      ['sliceBorderLeft', border.left],
+      ['sliceBorderRight', border.right],
+      ['sliceBorderTop', border.top],
+      ['sliceBorderBottom', border.bottom],
+    ] as const;
+    for (const [key, value] of sides) {
+      if (value > 0) {
+        props[key] = value;
+      } else {
+        delete props[key];
+      }
+    }
   }
 }

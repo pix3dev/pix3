@@ -1,4 +1,4 @@
-import { inject, injectable } from '@/fw/di';
+import { inject, injectable, injectLazy, type LazyService } from '@/fw/di';
 import { appState } from '@/state';
 import { guessMimeType } from '@/core/remote-preview/protocol';
 import { ensureAssetTypeFolder } from '@/core/asset-categories';
@@ -54,6 +54,21 @@ import type {
 } from '@/services/model-gen/model-gen-types';
 import { Scene3DGenService } from '@/services/model-gen/scene/Scene3DGenService';
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
+import {
+  PALETTE,
+  normalizeTheme,
+  presetNames,
+  presetTheme,
+  type ForgeTheme,
+  type PaletteId,
+} from '@/services/uikit';
+import {
+  SKINNABLE_NODE_TYPES,
+  UI_CONTROL_NODE_TYPES,
+  planSkinPatches,
+} from '@/services/uikit-editor/skin-planner';
+import type { KitManifest, UiKitProjectWriter } from '@/services/uikit-editor/UiKitProjectWriter';
+import type { UiKitThemeService } from '@/services/uikit-editor/UiKitThemeService';
 import {
   GameInputService,
   type GameInputStep,
@@ -529,6 +544,22 @@ export class AgentToolRegistry {
 
   @inject(FlowReferencesService)
   private readonly flowReferences!: FlowReferencesService;
+
+  /**
+   * The UI kit lane is lazy for the same two reasons the expander's is: `UiKitThemeService`
+   * reaches back into `PrototypeBootstrapService` for the `design/` path, which would close an
+   * import cycle through this module, and the bake pulls the rasterization/asset pipeline behind
+   * it — a session that never skins anything should not carry it.
+   */
+  @injectLazy(() =>
+    import('@/services/uikit-editor/UiKitThemeService').then(m => m.UiKitThemeService)
+  )
+  private readonly uiKitTheme!: LazyService<UiKitThemeService>;
+
+  @injectLazy(() =>
+    import('@/services/uikit-editor/UiKitProjectWriter').then(m => m.UiKitProjectWriter)
+  )
+  private readonly uiKitWriter!: LazyService<UiKitProjectWriter>;
 
   private tools: AgentToolDefinition[] | null = null;
 
@@ -1903,6 +1934,55 @@ export class AgentToolRegistry {
           additionalProperties: false,
         },
         handler: args => this.generateSfx(args),
+      },
+      {
+        name: 'skin_ui',
+        description:
+          'Dress this project\'s 2D UI (Button2D / Checkbox2D / Slider2D / Bar2D, plus panel sprites) in a GENERATED, coherent skin — a procedural kit, not an image model: no key, no cost, seconds, and every part matches every other because they all come from one theme. Three actions. `bake` renders the kit into `sprites/ui/<kitId>/` and saves the recipe as `design/ui-theme.json` (pass `preset` for a named look and/or `theme` for individual knobs). `apply` writes the baked textures and their nine-slice insets onto nodes (`nodeIds`, or the selection, or every UI control of the active scene with `targets: "scene"`) through the undoable property path. `restyle` = bake + re-apply to every node already wearing a kit texture, which is how you answer "rounder, darker, less gloss": the RECIPE is edited and re-rendered deterministically, so the whole UI moves together instead of one button being re-rolled into a different style. Use it for UI chrome; use `generate_asset` for one-off props and hero art.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['bake', 'apply', 'restyle'],
+              description:
+                'bake = render the kit from preset/theme and save it; apply = put an already baked kit on nodes; restyle = bake, then re-apply to everything already wearing the old kit.',
+            },
+            preset: {
+              type: 'string',
+              enum: presetNames(),
+              description:
+                'Named look to start from. Omitted, the current design/ui-theme.json (or the default theme) is the base, which is what makes a `theme` patch an EDIT rather than a re-roll.',
+            },
+            theme: {
+              type: 'object',
+              description:
+                'Partial ForgeTheme patched over the base, e.g. { "radius": 30, "bevel": 2, "glossOn": 0, "outline": 3, "darkTone": "#101020", "palette": { "green": "#3ad16a" } }. Geometry is in design px; `palette` pins absolute hexes per semantic role (sky/blue/green/yellow/bluegray/gray/white/red/orange/purple). Unknown keys and bad values are dropped, never guessed.',
+              additionalProperties: true,
+            },
+            nodeIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                'Nodes to skin (apply/restyle). Omit to use the current selection, or pass targets:"scene".',
+            },
+            colorRole: {
+              type: 'string',
+              enum: PALETTE.map(entry => entry.id),
+              description:
+                'Which palette role the skinned nodes wear. Defaults to blue. Convention: green = the single primary action on a screen, blue = secondary, red = destructive.',
+            },
+            targets: {
+              type: 'string',
+              enum: ['selection', 'scene'],
+              description:
+                'Where to apply when `nodeIds` is omitted: "selection" (default) or "scene" — every UI control of the active scene.',
+            },
+          },
+          required: ['action'],
+          additionalProperties: false,
+        },
+        handler: args => this.skinUi(args),
       },
       {
         name: 'process_asset',
@@ -4023,6 +4103,225 @@ export class AgentToolRegistry {
     }
   }
 
+  /**
+   * `skin_ui` — the agent's door to the UI Kit Forge (plan Ф5).
+   *
+   * A tool rather than a command on purpose: `run_command` takes no arguments, and every useful
+   * thing here (a preset, a theme patch, a colour role, a set of nodes) is an argument. The
+   * mutations still go through the gateway — `apply` dispatches `ApplyUiKitSkinCommand`, whose
+   * writes are `UpdateObjectPropertyOperation`s, so one Ctrl+Z takes the outfit back off.
+   */
+  private async skinUi(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (appState.project.status !== 'ready') {
+      return { ok: false, error: 'No project is open — cannot bake or apply a UI kit.' };
+    }
+    const action = asOptionalString(args.action) || 'bake';
+    if (action !== 'bake' && action !== 'apply' && action !== 'restyle') {
+      return { ok: false, error: `Unknown action "${action}" — use bake, apply or restyle.` };
+    }
+
+    try {
+      if (action === 'apply') {
+        return await this.skinUiApply(args, null, null);
+      }
+
+      const baked = await this.skinUiBake(args);
+      if (baked.ok !== true || action === 'bake') return baked;
+
+      // restyle: the same nodes that were wearing the OLD kit put on the new one. Anything else
+      // would leave a project half-themed, which is the failure the loop exists to avoid.
+      const manifest = baked.manifest as KitManifest;
+      const wearing = this.nodesWearingKit();
+      const applied = await this.skinUiApply(args, manifest, wearing);
+      return { ...baked, ...applied, ok: applied.ok !== false, action: 'restyle' };
+    } catch (error) {
+      return { ok: false, error: error instanceof Error ? error.message : String(error) };
+    }
+  }
+
+  /** Render the kit and save the recipe beside it. */
+  private async skinUiBake(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    const themeService = await this.uiKitTheme();
+    // The project's own recipe is the base, so a `theme` patch edits the kit instead of rolling
+    // a new one.
+    await themeService.load();
+
+    const presetArg = asOptionalString(args.preset);
+    if (presetArg && !presetNames().includes(presetArg)) {
+      return {
+        ok: false,
+        error: `Unknown preset "${presetArg}". Available: ${presetNames().join(', ')}.`,
+      };
+    }
+    const base: ForgeTheme = presetArg ? presetTheme(presetArg) : themeService.getTheme();
+    const patch =
+      args.theme && typeof args.theme === 'object' && !Array.isArray(args.theme)
+        ? (args.theme as Record<string, unknown>)
+        : {};
+    const theme = normalizeTheme({ ...base, ...patch });
+    // The writer saves whatever the service holds, so it is told first: the JSON recipe and the
+    // PNGs must describe one kit.
+    themeService.replaceTheme(theme, presetArg || undefined);
+
+    const writer = await this.uiKitWriter();
+    const result = await writer.writeKit(theme);
+    const sprites = result.paths.filter(path => path.endsWith('.png'));
+
+    return {
+      ok: true,
+      action: 'bake',
+      kitId: result.kitId,
+      scale: result.scale,
+      preset: presetArg || themeService.getPresetName(),
+      sprites: sprites.length,
+      spriteRoot: sprites.length > 0 ? sprites[0].slice(0, sprites[0].lastIndexOf('/')) : null,
+      manifestPath: result.paths.find(path => path.endsWith('ui-kit.json')) ?? null,
+      themePath: result.paths.find(path => path.endsWith('ui-theme.json')) ?? null,
+      theme,
+      ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
+    };
+  }
+
+  /** Put a baked kit on nodes, through the undoable command. */
+  private async skinUiApply(
+    args: Record<string, unknown>,
+    manifest: KitManifest | null,
+    preselected: string[] | null
+  ): Promise<Record<string, unknown>> {
+    const graph = this.sceneManager.getActiveSceneGraph();
+    if (!graph) {
+      return { ok: false, error: 'No active scene — open one before applying a UI kit.' };
+    }
+
+    const kit = manifest ?? (await (await this.uiKitWriter()).readManifest());
+    if (!kit) {
+      return {
+        ok: false,
+        error:
+          'No design/ui-kit.json in this project — run skin_ui { action: "bake" } first (or use action: "restyle").',
+      };
+    }
+
+    const roleArg = asOptionalString(args.colorRole);
+    const roles = PALETTE.map(entry => entry.id as string);
+    if (roleArg && !roles.includes(roleArg)) {
+      return {
+        ok: false,
+        error: `Unknown colorRole "${roleArg}". Available: ${roles.join(', ')}.`,
+      };
+    }
+    const colorRole = (roleArg || 'blue') as PaletteId;
+
+    const explicit = Array.isArray(args.nodeIds)
+      ? args.nodeIds.filter((id): id is string => typeof id === 'string' && id.trim().length > 0)
+      : [];
+    let nodeIds: string[];
+    if (explicit.length > 0) {
+      nodeIds = explicit;
+    } else if (preselected) {
+      nodeIds = preselected;
+    } else if (asOptionalString(args.targets) === 'scene') {
+      // Only the CONTROLS: a blanket "every skinnable node" would repaint the game's own
+      // Sprite2Ds with a panel body.
+      nodeIds = [...graph.nodeMap.values()]
+        .filter(node => UI_CONTROL_NODE_TYPES.includes(node.type))
+        .map(node => node.nodeId);
+    } else {
+      nodeIds = [...appState.selection.nodeIds];
+    }
+
+    if (nodeIds.length === 0) {
+      return {
+        ok: true,
+        action: 'apply',
+        colorRole,
+        kitId: kit.kitId,
+        applied: [],
+        note: 'Nothing to skin: no nodeIds, an empty selection, and no UI controls in the scene.',
+      };
+    }
+
+    // What each node will wear, resolved BEFORE the dispatch so the answer describes the plan the
+    // command executed rather than a re-read of the graph.
+    const applied: Record<string, unknown>[] = [];
+    const skipped: Record<string, unknown>[] = [];
+    for (const nodeId of nodeIds) {
+      const node = graph.nodeMap.get(nodeId);
+      if (!node) {
+        skipped.push({ nodeId, reason: 'no such node' });
+        continue;
+      }
+      const plan = planSkinPatches(node.type, kit, colorRole);
+      if (plan.length === 0) {
+        skipped.push({
+          nodeId,
+          name: node.name,
+          type: node.type,
+          reason: SKINNABLE_NODE_TYPES.includes(node.type)
+            ? 'the kit has no part for this node type'
+            : `${node.type} has no texture slots — skinnable types: ${SKINNABLE_NODE_TYPES.join(', ')}`,
+        });
+        continue;
+      }
+      applied.push({
+        nodeId,
+        name: node.name,
+        type: node.type,
+        textures: plan
+          .filter(write => write.kind === 'texture')
+          .map(write => ({
+            property: write.propertyPath,
+            value: (write.value as { url: string }).url,
+          })),
+        sliceBorder: Object.fromEntries(
+          plan
+            .filter(write => write.kind === 'border')
+            .map(write => [write.propertyPath, write.value])
+        ),
+      });
+    }
+
+    const { ApplyUiKitSkinCommand } = await import('@/features/uikit/ApplyUiKitSkinCommand');
+    const didMutate = await this.dispatcher.execute(
+      new ApplyUiKitSkinCommand({ nodeIds, colorRole, manifest: kit })
+    );
+
+    return {
+      ok: true,
+      action: 'apply',
+      colorRole,
+      kitId: kit.kitId,
+      didMutate,
+      applied,
+      ...(skipped.length > 0 ? { skipped } : {}),
+      note: didMutate
+        ? 'Save the scene to keep the skin (save_scene / Ctrl+S); Ctrl+Z takes it back off.'
+        : 'Nothing changed — the nodes already wore these textures, or none was skinnable.',
+    };
+  }
+
+  /**
+   * Nodes of the active scene already wearing a kit texture — the set a `restyle` moves onto the
+   * new kit. Matched on the sprite folder rather than on a manifest lookup so a node skinned by
+   * an OLDER kit (a different `kitId`, a hand-edited path) is still carried over.
+   */
+  private nodesWearingKit(): string[] {
+    const graph = this.sceneManager.getActiveSceneGraph();
+    if (!graph) return [];
+    const out: string[] = [];
+    for (const node of graph.nodeMap.values()) {
+      const record = node as unknown as Record<string, unknown>;
+      const wearing = UI_TEXTURE_SLOTS.some(slot => {
+        const value = record[slot];
+        if (!value || typeof value !== 'object') return false;
+        const url = (value as { url?: unknown }).url;
+        return typeof url === 'string' && url.includes(`/${UI_SPRITE_FOLDER}/`);
+      });
+      if (wearing) out.push(node.nodeId);
+    }
+    return out;
+  }
+
   private async processAsset(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (appState.project.status !== 'ready') {
       return { ok: false, error: 'No project is open — cannot process an asset.' };
@@ -5095,6 +5394,29 @@ const asReferenceRole = (value: unknown): FlowReferenceRole | undefined => {
     ? (value as FlowReferenceRole)
     : undefined;
 };
+
+/** The texture slots a UI kit writes — the ones a `restyle` looks at to find its own work. */
+const UI_TEXTURE_SLOTS: readonly string[] = [
+  'texture',
+  'textureNormal',
+  'textureHover',
+  'texturePressed',
+  'textureDisabled',
+  'textureBox',
+  'textureBoxChecked',
+  'textureMark',
+  'textureTrack',
+  'textureFill',
+  'textureThumb',
+  'textureTrough',
+];
+
+/** The folder `UiKitProjectWriter` bakes into (`sprites/ui/<kitId>/`). */
+const UI_SPRITE_FOLDER = 'ui';
+
+/** A string argument that may legitimately be absent — `asString` throws on `undefined`. */
+const asOptionalString = (value: unknown): string =>
+  typeof value === 'string' ? value.trim() : '';
 
 const asString = (value: unknown): string => {
   if (typeof value !== 'string') {

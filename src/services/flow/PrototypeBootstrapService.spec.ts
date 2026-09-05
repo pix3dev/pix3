@@ -41,6 +41,10 @@ import {
   PLANNER_SYSTEM_PROMPT,
   RECIPE_CATALOG,
   THEME_TUNABLES,
+  UI_KIT_BOOTSTRAP_ROLES,
+  UI_PRESET_FOR_THEME,
+  deriveUiKitTheme,
+  uiKitRoleForNodeName,
   type PrototypeBrief,
 } from './PrototypeBootstrapService';
 import { parseChecklist } from './FlowPlanService';
@@ -1490,5 +1494,301 @@ describe('parseStylePalette', () => {
   it('is empty when there is no palette to read', () => {
     expect(parseStylePalette('- **Palette:** (recipe defaults)')).toEqual([]);
     expect(parseStylePalette('# Style')).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The UI kit the expander bakes (plan Ф5)
+// ---------------------------------------------------------------------------
+
+describe('deriveUiKitTheme', () => {
+  const brief = (over: Partial<PrototypeBrief> = {}): PrototypeBrief =>
+    ({
+      title: 'Bubbles',
+      pitch: 'pop them',
+      recipeId: FALLBACK_RECIPE_ID,
+      style: { palette: [], artStyle: 'flat', mood: 'calm' },
+      entities: [],
+      tunables: {},
+      winLose: { win: 'clear', lose: 'miss' },
+      increments: [],
+      ...over,
+    }) as PrototypeBrief;
+
+  it('picks the preset the named look stands for', () => {
+    for (const [look, preset] of Object.entries(UI_PRESET_FOR_THEME)) {
+      const derived = deriveUiKitTheme(
+        brief({ style: { palette: [], artStyle: 'x', mood: 'y', theme: look as never } })
+      );
+      expect(derived.preset, look).toBe(preset);
+    }
+  });
+
+  it('pins the palette roles as absolute hexes, accent first', () => {
+    // Coverage order: dominant background first, accent last (`paletteColorForRole`).
+    const palette = ['#101020', '#3a6ea5', '#d94141', '#4cd137'];
+    const { theme } = deriveUiKitTheme(
+      brief({ style: { palette, artStyle: 'flat', mood: 'calm', theme: 'pastel' } })
+    );
+    expect(theme.palette?.green).toBe('#4cd137');
+    expect(theme.palette?.red).toBe('#d94141');
+    // Not the background and not a duplicate of another role.
+    expect(theme.palette?.blue).toBe('#3a6ea5');
+    // The darkest entry becomes the outline tone — an edge needs to be darker than the face.
+    expect(theme.darkTone).toBe('#101020');
+  });
+
+  it('ignores a palette with no usable colours', () => {
+    const { theme } = deriveUiKitTheme(
+      brief({ style: { palette: ['not a colour', ''], artStyle: 'x', mood: 'y' } })
+    );
+    expect(theme.palette).toBeNull();
+  });
+
+  it('is deterministic — the same brief yields the same theme', () => {
+    const one = deriveUiKitTheme(
+      brief({ style: { palette: ['#222', '#48f'], artStyle: 'x', mood: 'y', theme: 'neon' } })
+    );
+    const two = deriveUiKitTheme(
+      brief({ style: { palette: ['#222', '#48f'], artStyle: 'x', mood: 'y', theme: 'neon' } })
+    );
+    expect(one).toEqual(two);
+  });
+});
+
+describe('uiKitRoleForNodeName', () => {
+  it('reads the intent out of the name', () => {
+    expect(uiKitRoleForNodeName('PlayButton')).toBe('green');
+    expect(uiKitRoleForNodeName('StartGame')).toBe('green');
+    expect(uiKitRoleForNodeName('BackButton')).toBe('blue');
+    expect(uiKitRoleForNodeName('CloseDialog')).toBe('blue');
+    expect(uiKitRoleForNodeName('QuitButton')).toBe('red');
+    expect(uiKitRoleForNodeName('ResetProgress')).toBe('red');
+    expect(uiKitRoleForNodeName('HealthBar')).toBe('red');
+    expect(uiKitRoleForNodeName('Widget')).toBe('blue');
+  });
+});
+
+describe('PrototypeBootstrapService: deterministic UI skinning', () => {
+  const SCENE = [
+    'version: 1.0.0',
+    'root:',
+    '  - id: ui-root',
+    '    type: Group2D',
+    '    name: UI',
+    '    properties: {}',
+    '    children:',
+    '      - id: btn-play',
+    '        type: Button2D',
+    '        name: PlayButton',
+    '        properties:',
+    '          label: Play',
+    '        children: []',
+    '      - id: btn-back',
+    '        type: Button2D',
+    '        name: BackButton',
+    '        properties:',
+    '          label: Back',
+    '        children: []',
+    '      - id: btn-quit',
+    '        type: Button2D',
+    '        name: QuitButton',
+    '        properties:',
+    '          label: Quit',
+    '        children: []',
+    '',
+  ].join('\n');
+
+  const NO_UI_SCENE = [
+    'version: 1.0.0',
+    'root:',
+    '  - id: world',
+    '    type: Node3D',
+    '    name: World',
+    '    properties: {}',
+    '    children: []',
+    '',
+  ].join('\n');
+
+  /** A kit manifest shaped like the writer's, with only the parts a Button2D asks for. */
+  const stubManifest = (kitId: string) => {
+    const parts: Record<string, unknown> = {};
+    for (const role of ['green', 'blue', 'red', 'gray']) {
+      for (const state of ['normal', 'hover', 'pressed', 'disabled']) {
+        parts[`button/${role}/${state}`] = {
+          path: `sprites/ui/${kitId}/btn_${role}_${state}_250x88.png`,
+          w: 500,
+          h: 176,
+          sliceBorder: { left: 12, right: 12, top: 9, bottom: 22 },
+          role,
+          component: 'button',
+          state,
+        };
+      }
+    }
+    return { kitId, parts };
+  };
+
+  const buildSkinHarness = (scenes: Record<string, string>) => {
+    const service = new PrototypeBootstrapService();
+    const written = new Map<string, string>();
+    const files = new Map(Object.entries(scenes));
+    const writeCalls: Record<string, unknown>[] = [];
+    let savedTheme: { theme: unknown; preset: string } | null = null;
+
+    Object.defineProperty(service, 'storage', {
+      value: {
+        listDirectory: async (path: string) =>
+          path === 'scenes'
+            ? [...files.keys()].map(file => ({
+                kind: 'file',
+                name: file.split('/').pop(),
+                path: file,
+              }))
+            : [],
+        readTextFile: async (path: string) => {
+          const text = files.get(path);
+          if (text === undefined) throw new Error(`no such file ${path}`);
+          return text;
+        },
+        writeTextFile: async (path: string, contents: string) => {
+          written.set(path, contents);
+          files.set(path, contents);
+        },
+      },
+      configurable: true,
+    });
+    Object.defineProperty(service, 'uiKitTheme', {
+      value: async () => ({
+        replaceTheme: (theme: unknown, preset: string) => {
+          savedTheme = { theme, preset };
+          return theme;
+        },
+      }),
+      configurable: true,
+    });
+    Object.defineProperty(service, 'uiKitWriter', {
+      value: async () => ({
+        writeKit: async (theme: unknown, options: Record<string, unknown>) => {
+          writeCalls.push({ theme, options });
+          return {
+            kitId: 'cafebabe',
+            scale: 2,
+            paths: [],
+            manifest: stubManifest('cafebabe'),
+            warnings: [],
+          };
+        },
+      }),
+      configurable: true,
+    });
+
+    return {
+      service,
+      written,
+      writeCalls,
+      theme: () => savedTheme,
+      skin: async (brief: PrototypeBrief, notes: string[] = []) => {
+        await (
+          service as unknown as {
+            skinRecipeUi(b: PrototypeBrief, n: string[]): Promise<void>;
+          }
+        ).skinRecipeUi(brief, notes);
+        return notes;
+      },
+    };
+  };
+
+  const uiBrief = (): PrototypeBrief =>
+    ({
+      title: 'Bubbles',
+      pitch: 'pop them',
+      recipeId: FALLBACK_RECIPE_ID,
+      style: {
+        palette: ['#101020', '#3a6ea5', '#d94141', '#4cd137'],
+        artStyle: 'flat',
+        mood: 'calm',
+        theme: 'pastel',
+      },
+      entities: [],
+      tunables: {},
+      winLose: { win: 'clear', lose: 'miss' },
+      increments: [],
+    }) as PrototypeBrief;
+
+  it('paints Play green, Back blue and Quit red, with the nine-slice insets', async () => {
+    const harness = buildSkinHarness({ 'scenes/main.pix3scene': SCENE });
+
+    await harness.skin(uiBrief());
+
+    const patched = harness.written.get('scenes/main.pix3scene');
+    expect(patched).toBeDefined();
+    expect(patched).toContain('sprites/ui/cafebabe/btn_green_normal_250x88.png');
+    expect(patched).toContain('sprites/ui/cafebabe/btn_blue_normal_250x88.png');
+    expect(patched).toContain('sprites/ui/cafebabe/btn_red_normal_250x88.png');
+    // Every state slot, not just the resting one.
+    for (const state of ['normal', 'hover', 'pressed', 'disabled']) {
+      expect(patched, state).toContain(`btn_green_${state}_250x88.png`);
+    }
+    expect(patched).toContain('sliceBorderLeft: 12');
+    expect(patched).toContain('sliceBorderBottom: 22');
+
+    // Each button got the role its NAME asks for, not a shared one.
+    const play = patched!.slice(patched!.indexOf('id: btn-play'), patched!.indexOf('id: btn-back'));
+    expect(play).toContain('btn_green_normal');
+    expect(play).not.toContain('btn_red_normal');
+  });
+
+  it('bakes only the roles it can use, and no glyph buttons', async () => {
+    const harness = buildSkinHarness({ 'scenes/main.pix3scene': SCENE });
+
+    await harness.skin(uiBrief());
+
+    expect(harness.writeCalls).toHaveLength(1);
+    expect(harness.writeCalls[0].options).toMatchObject({
+      colorRoles: UI_KIT_BOOTSTRAP_ROLES,
+      iconButtons: false,
+    });
+    // The theme service is told BEFORE the bake — the writer saves what it holds, and the two
+    // documents must describe one kit.
+    expect(harness.theme()?.preset).toBe('Candy Pop');
+  });
+
+  it('is deterministic — the same brief writes the same file', async () => {
+    const first = buildSkinHarness({ 'scenes/main.pix3scene': SCENE });
+    await first.skin(uiBrief());
+    const second = buildSkinHarness({ 'scenes/main.pix3scene': SCENE });
+    await second.skin(uiBrief());
+
+    expect(second.written.get('scenes/main.pix3scene')).toBe(
+      first.written.get('scenes/main.pix3scene')
+    );
+  });
+
+  it('skips a project with no 2D UI nodes, silently and without baking', async () => {
+    const harness = buildSkinHarness({ 'scenes/world.pix3scene': NO_UI_SCENE });
+
+    const notes = await harness.skin(uiBrief());
+
+    expect(harness.writeCalls).toHaveLength(0);
+    expect(harness.written.size).toBe(0);
+    expect(notes).toEqual([]);
+  });
+
+  it('degrades a failed bake into a note instead of failing the transition', async () => {
+    const harness = buildSkinHarness({ 'scenes/main.pix3scene': SCENE });
+    Object.defineProperty(harness.service, 'uiKitWriter', {
+      value: async () => ({
+        writeKit: async () => {
+          throw new Error('canvas is not available');
+        },
+      }),
+      configurable: true,
+    });
+
+    const notes = await harness.skin(uiBrief());
+
+    expect(notes.join(' ')).toContain('canvas is not available');
+    expect(harness.written.size).toBe(0);
   });
 });

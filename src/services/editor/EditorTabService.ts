@@ -356,6 +356,15 @@ export class EditorTabService {
   }
 
   /**
+   * Reveal the UI Kit tab (UI Kit Forge, editor host). Single-instance with a synthetic resource
+   * id, like Model Lab: the theme it edits lives in `design/ui-theme.json`, not in the tab, so a
+   * second copy of the tab would only be a second view of the same document.
+   */
+  async focusOrOpenUiKitForge(): Promise<void> {
+    await this.openResourceTab('uikit-forge', 'uikit-forge://new', {}, true, 'UI Kit');
+  }
+
+  /**
    * Reveal the in-editor agent chat. It is a docked panel to the right of the viewport (not an
    * editor tab), so this focuses the existing panel or re-adds it if the user closed it.
    */
@@ -631,14 +640,15 @@ export class EditorTabService {
   }
 
   /**
-   * Session-persistable tabs are real project resources only — game, sprite-editor, model-lab and
-   * template tabs are editor-local and must never be restored on the next launch.
+   * Session-persistable tabs are real project resources only — game, sprite-editor, model-lab,
+   * uikit-forge and template tabs are editor-local and must never be restored on the next launch.
    */
   private isPersistableTab(tab: { type: string; resourceId: string }): boolean {
     if (tab.resourceId.startsWith('templ://')) return false;
     if (tab.type === 'game') return false;
     if (tab.type === 'sprite-editor') return false;
     if (tab.type === 'model-lab') return false;
+    if (tab.type === 'uikit-forge') return false;
     // Legacy: pre-rename sessions persisted 'asset-generator' tabs; keep dropping them.
     if (tab.type === 'asset-generator') return false;
     return true;

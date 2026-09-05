@@ -1,4 +1,4 @@
-import { Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
+import { Mesh, MeshBasicMaterial, PlaneGeometry, type Texture, Vector2 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
 import { readBooleanArg, type InteractionDescriptor } from '../../../fw/interactive';
@@ -6,6 +6,11 @@ import {
   assignWithoutSchemaRefresh,
   installReactiveSchemaProperties,
 } from '../../../fw/reactive-schema-properties';
+import { coerceTextureResource, type TextureResourceRef } from '../../../core/TextureResource';
+import { configure2DTexture } from '../../../core/configure-2d-texture';
+
+/** The three skin slots a checkbox can be given a sprite for. */
+export type Checkbox2DTextureSlot = 'box' | 'boxChecked' | 'mark';
 
 export interface Checkbox2DProps extends UIControl2DProps {
   size?: number;
@@ -14,6 +19,12 @@ export interface Checkbox2DProps extends UIControl2DProps {
   checkedColor?: string;
   checkmarkColor?: string;
   checkmarkAction?: string;
+  /** Sprite for the box in its unchecked state (and the checked fallback). */
+  textureBox?: TextureResourceRef | string | null;
+  /** Optional sprite for the box while checked; falls back to {@link Checkbox2DProps.textureBox}. */
+  textureBoxChecked?: TextureResourceRef | string | null;
+  /** Sprite drawn over the box while checked (the tick itself). */
+  textureMark?: TextureResourceRef | string | null;
 }
 
 /**
@@ -46,6 +57,22 @@ export class Checkbox2D extends UIControl2D {
   checkedColor: string;
   checkmarkColor: string;
   checkmarkAction: string;
+  /**
+   * Skin slots. A set slot replaces the corresponding flat colour with the sprite
+   * (material colour goes white, exactly as `Button2D` does for its state skins);
+   * an unset slot keeps the historical colour fill. The actual `Texture` objects
+   * are supplied post-construction by the SceneLoader - nodes have no asset loader,
+   * so the schema stores only resource refs.
+   */
+  textureBox: TextureResourceRef | null;
+  textureBoxChecked: TextureResourceRef | null;
+  textureMark: TextureResourceRef | null;
+
+  private readonly slotTextures: Record<Checkbox2DTextureSlot, Texture | null> = {
+    box: null,
+    boxChecked: null,
+    mark: null,
+  };
 
   private boxMesh: Mesh;
   private boxMaterial: MeshBasicMaterial;
@@ -63,6 +90,9 @@ export class Checkbox2D extends UIControl2D {
     this.checkedColor = props.checkedColor ?? '#4a9eff';
     this.checkmarkColor = props.checkmarkColor ?? '#ffffff';
     this.checkmarkAction = props.checkmarkAction ?? 'Checkbox';
+    this.textureBox = coerceTextureResource(props.textureBox ?? null);
+    this.textureBoxChecked = coerceTextureResource(props.textureBoxChecked ?? null);
+    this.textureMark = coerceTextureResource(props.textureMark ?? null);
 
     // Create checkbox box
     this.geometry = new PlaneGeometry(this.size, this.size);
@@ -112,10 +142,13 @@ export class Checkbox2D extends UIControl2D {
   }
 
   private createCheckmark(): void {
-    const checkSize = this.size * 0.6;
-    this.checkGeometry = new PlaneGeometry(checkSize, checkSize * 0.5);
+    const markTexture = this.slotTextures.mark;
+    // A mark SPRITE covers the whole box unrotated (the artwork carries the shape);
+    // without one the historical tilted colour bar stands in for a tick.
+    this.checkGeometry = Checkbox2D.buildMarkGeometry(this.size, markTexture !== null);
     this.checkMaterial = new MeshBasicMaterial({
-      color: this.checkmarkColor,
+      color: markTexture ? '#ffffff' : this.checkmarkColor,
+      map: markTexture,
       transparent: true,
       opacity: 1.0,
       depthTest: false,
@@ -124,8 +157,112 @@ export class Checkbox2D extends UIControl2D {
     this.checkMesh = new Mesh(this.checkGeometry, this.checkMaterial);
     this.checkMesh.renderOrder = 1000;
     this.checkMesh.position.z = 0.1;
-    this.checkMesh.rotation.z = Math.PI / 4; // Tilt checkmark
+    this.checkMesh.rotation.z = markTexture ? 0 : Math.PI / 4; // Tilt the colour tick only
     this.add(this.checkMesh);
+  }
+
+  /** Mark quad: box-sized for a sprite, the small tilted bar for the colour tick. */
+  private static buildMarkGeometry(size: number, textured: boolean): PlaneGeometry {
+    if (textured) {
+      return new PlaneGeometry(size, size);
+    }
+    const checkSize = size * 0.6;
+    return new PlaneGeometry(checkSize, checkSize * 0.5);
+  }
+
+  private destroyCheckmark(): void {
+    if (!this.checkMesh) {
+      return;
+    }
+    this.remove(this.checkMesh);
+    this.checkGeometry?.dispose();
+    this.checkMaterial?.dispose();
+    this.checkMesh = null;
+    this.checkGeometry = null;
+    this.checkMaterial = null;
+  }
+
+  /**
+   * Assign the loaded `Texture` for one skin slot (called by the SceneLoader after
+   * loading, mirroring `Button2D.setStateTexture`). Passing null clears the slot
+   * and the control falls back to its flat colours.
+   */
+  setSlotTexture(slot: Checkbox2DTextureSlot, texture: Texture | null): void {
+    if (texture) {
+      // sRGB + mipmaps disabled (see configure2DTexture for the why).
+      configure2DTexture(texture);
+    }
+    this.slotTextures[slot] = texture;
+    if (slot === 'mark') {
+      // The mark mesh's geometry and rotation differ between sprite and colour tick.
+      if (this.checked) {
+        this.destroyCheckmark();
+        this.createCheckmark();
+      }
+      return;
+    }
+    this.refreshBoxSkin();
+  }
+
+  /** The authored path that should be loaded for a slot, or null. */
+  getSlotTexturePath(slot: Checkbox2DTextureSlot): string | null {
+    switch (slot) {
+      case 'box':
+        return this.textureBox?.url ?? null;
+      case 'boxChecked':
+        return this.textureBoxChecked?.url ?? null;
+      case 'mark':
+        return this.textureMark?.url ?? null;
+    }
+  }
+
+  private setSlotTextureRef(slot: Checkbox2DTextureSlot, value: unknown): void {
+    const ref = coerceTextureResource(value);
+    const previous = this.getSlotTexturePath(slot);
+    switch (slot) {
+      case 'box':
+        this.textureBox = ref;
+        break;
+      case 'boxChecked':
+        this.textureBoxChecked = ref;
+        break;
+      case 'mark':
+        this.textureMark = ref;
+        break;
+    }
+    if (previous !== (ref?.url ?? null)) {
+      // The loaded Texture no longer matches the ref; drop it. The SceneLoader
+      // reloads from the ref on the next scene load / play.
+      this.setSlotTexture(slot, null);
+    }
+  }
+
+  /** Box sprite for the current checked state (checked falls back to the box sprite). */
+  private resolveBoxTexture(): Texture | null {
+    if (this.checked) {
+      return this.slotTextures.boxChecked ?? this.slotTextures.box;
+    }
+    return this.slotTextures.box;
+  }
+
+  /** Apply the box sprite, or the flat colour when no sprite is set. */
+  private refreshBoxSkin(): void {
+    if (!this.boxMaterial) {
+      return; // guard: called before the material exists during construction
+    }
+    const texture = this.resolveBoxTexture();
+    const hadMap = this.boxMaterial.map !== null;
+    if (texture) {
+      this.boxMaterial.map = texture;
+      this.boxMaterial.color.set('#ffffff');
+      this.boxMaterial.transparent = true;
+    } else {
+      this.boxMaterial.map = null;
+      this.boxMaterial.color.setStyle(this.checked ? this.checkedColor : this.uncheckedColor);
+    }
+    if (hadMap !== (texture !== null)) {
+      this.boxMaterial.needsUpdate = true;
+    }
   }
 
   override isPointInBounds(worldPoint: Vector2): boolean {
@@ -245,19 +382,14 @@ export class Checkbox2D extends UIControl2D {
   }
 
   private updateCheckboxVisuals(): void {
-    // Update box color
-    this.boxMaterial.color.setStyle(this.checked ? this.checkedColor : this.uncheckedColor);
+    // Box: the checked/unchecked sprite when one is set, else the flat colour.
+    this.refreshBoxSkin();
 
-    // Update checkmark
+    // Mark: present exactly while checked.
     if (this.checked && !this.checkMesh) {
       this.createCheckmark();
     } else if (!this.checked && this.checkMesh) {
-      this.remove(this.checkMesh);
-      this.checkGeometry?.dispose();
-      this.checkMaterial?.dispose();
-      this.checkMesh = null;
-      this.checkGeometry = null;
-      this.checkMaterial = null;
+      this.destroyCheckmark();
     }
   }
 
@@ -280,9 +412,11 @@ export class Checkbox2D extends UIControl2D {
             cb.geometry = new PlaneGeometry(cb.size, cb.size);
             cb.boxMesh.geometry = cb.geometry;
             if (cb.checked && cb.checkGeometry) {
-              const checkSize = cb.size * 0.6;
               cb.checkGeometry.dispose();
-              cb.checkGeometry = new PlaneGeometry(checkSize, checkSize * 0.5);
+              cb.checkGeometry = Checkbox2D.buildMarkGeometry(
+                cb.size,
+                cb.slotTextures.mark !== null
+              );
               if (cb.checkMesh) cb.checkMesh.geometry = cb.checkGeometry;
             }
           },
@@ -305,9 +439,7 @@ export class Checkbox2D extends UIControl2D {
           setValue: (n, v) => {
             const cb = n as Checkbox2D;
             cb.uncheckedColor = String(v);
-            if (!cb.checked) {
-              cb.boxMaterial.color.setStyle(cb.uncheckedColor);
-            }
+            cb.refreshBoxSkin();
           },
         },
         {
@@ -318,9 +450,7 @@ export class Checkbox2D extends UIControl2D {
           setValue: (n, v) => {
             const cb = n as Checkbox2D;
             cb.checkedColor = String(v);
-            if (cb.checked) {
-              cb.boxMaterial.color.setStyle(cb.checkedColor);
-            }
+            cb.refreshBoxSkin();
           },
         },
         {
@@ -331,9 +461,55 @@ export class Checkbox2D extends UIControl2D {
           setValue: (n, v) => {
             const cb = n as Checkbox2D;
             cb.checkmarkColor = String(v);
-            if (cb.checkMaterial) {
+            // A mark SPRITE keeps its white tint; the colour only drives the fallback tick.
+            if (cb.checkMaterial && !cb.slotTextures.mark) {
               cb.checkMaterial.color.setStyle(cb.checkmarkColor);
             }
+          },
+        },
+        {
+          name: 'textureBox',
+          type: 'object',
+          ui: {
+            label: 'Box Sprite',
+            group: 'Skin',
+            description: 'Sprite for the box (also the checked fallback)',
+            editor: 'texture-resource',
+            resourceType: 'texture',
+          },
+          getValue: n => (n as Checkbox2D).textureBox ?? { type: 'texture', url: '' },
+          setValue: (n, v) => {
+            (n as Checkbox2D).setSlotTextureRef('box', v);
+          },
+        },
+        {
+          name: 'textureBoxChecked',
+          type: 'object',
+          ui: {
+            label: 'Checked Box Sprite',
+            group: 'Skin',
+            description: 'Optional sprite for the box while checked',
+            editor: 'texture-resource',
+            resourceType: 'texture',
+          },
+          getValue: n => (n as Checkbox2D).textureBoxChecked ?? { type: 'texture', url: '' },
+          setValue: (n, v) => {
+            (n as Checkbox2D).setSlotTextureRef('boxChecked', v);
+          },
+        },
+        {
+          name: 'textureMark',
+          type: 'object',
+          ui: {
+            label: 'Mark Sprite',
+            group: 'Skin',
+            description: 'Sprite drawn over the box while checked',
+            editor: 'texture-resource',
+            resourceType: 'texture',
+          },
+          getValue: n => (n as Checkbox2D).textureMark ?? { type: 'texture', url: '' },
+          setValue: (n, v) => {
+            (n as Checkbox2D).setSlotTextureRef('mark', v);
           },
         },
         {
@@ -349,6 +525,7 @@ export class Checkbox2D extends UIControl2D {
       groups: {
         ...baseSchema.groups,
         Checkbox: { label: 'Checkbox', expanded: true },
+        Skin: { label: 'Skin', description: 'Sprites replacing the flat colours', expanded: true },
       },
     };
   }

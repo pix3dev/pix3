@@ -393,6 +393,52 @@ const valueAt = (root: unknown, path: NodePath): unknown => {
   return current;
 };
 
+/** A node of a scene FILE, as the expander addresses it: by its stable `id`. */
+export interface SceneNodeRef {
+  readonly id: string;
+  readonly name: string;
+  readonly type: string;
+}
+
+/**
+ * Every node of a `.pix3scene`, depth first.
+ *
+ * The counterpart of {@link applyScenePatches}: that one edits a node the caller can already
+ * name, this one is how a caller FINDS the nodes worth editing (every `Button2D` of a recipe,
+ * say) without loading the scene into a graph. Malformed YAML yields an empty list rather than
+ * an error — the caller is walking a whole project's files and a stray one must not stop it.
+ */
+export const listSceneNodes = (sceneText: string): SceneNodeRef[] => {
+  let js: unknown;
+  try {
+    const doc = parseDocument(sceneText);
+    if (doc.errors.length > 0) return [];
+    js = doc.toJS() as unknown;
+  } catch {
+    return [];
+  }
+
+  const out: SceneNodeRef[] = [];
+  const visit = (node: unknown): void => {
+    if (!node || typeof node !== 'object') return;
+    const record = node as Record<string, unknown>;
+    if (typeof record.id === 'string' && typeof record.type === 'string') {
+      out.push({
+        id: record.id,
+        name: typeof record.name === 'string' ? record.name : record.id,
+        type: record.type,
+      });
+    }
+    const children = record.children;
+    if (Array.isArray(children)) for (const child of children) visit(child);
+  };
+
+  const root = (js as { root?: unknown } | null)?.root;
+  if (Array.isArray(root)) for (const node of root) visit(node);
+  else visit(root);
+  return out;
+};
+
 /** True when a parsed YAML document looks like a scene we can patch (used by callers to skip files). */
 export const looksLikeScene = (sceneText: string): boolean => {
   try {

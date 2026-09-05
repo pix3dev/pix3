@@ -196,6 +196,15 @@ makes it the right tool for icons, buttons, bars, arrows, flat props and blockou
 of what a prototype needs. Upgrade the pieces that want painterly or textured art (hero
 sprites, backgrounds, key illustrations) to a raster model afterwards, when the game plays.
 
+**For UI chrome — buttons, panels, bars, sliders, checkboxes — use `skin_ui`, not
+`generate_asset`.** It renders a whole coherent kit from ONE theme (no model, no key, seconds),
+so the button and the panel behind it actually agree; drawn separately they never do. The loop is
+`skin_ui { action: 'bake', preset: … }` → `skin_ui { action: 'apply', targets: 'scene' }`, and
+later `skin_ui { action: 'restyle', theme: { … } }` to re-theme everything at once. Colour
+convention: green = the single primary action, blue = secondary, red = destructive. (A project
+built from an idea already arrives with a kit baked and applied — restyle it rather than starting
+over.)
+
 **Sound has the same three-rung ladder, and the first rung costs nothing.** Start with the
 built-in synth presets — `scene.audio.sfx('tap' | 'score' | 'bounce' | 'explosion' | 'powerup'
 | 'win' | 'lose' | 'laser' | 'tick')` plays on the first frame with no file, no asset and no

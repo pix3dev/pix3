@@ -2564,11 +2564,7 @@ export class ViewportRendererService {
           const visualRoot = this.proxyRegistry.uiControl2DVisuals.get(node.nodeId);
           if (visualRoot) {
             this.proxyRegistry.apply2DVisualTransform(node, visualRoot);
-            const sizeGroup = visualRoot.userData.sizeGroup as THREE.Object3D | undefined;
-            if (sizeGroup) {
-              const { width, height } = this.proxyRegistry.getUIControlDimensions(node);
-              sizeGroup.scale.set(width, height, 1);
-            }
+            this.proxyRegistry.applyUIControlSkinGeometry(node, visualRoot);
             this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
           }
         }
@@ -3001,24 +2997,29 @@ export class ViewportRendererService {
       if (visualRoot) {
         this.proxyRegistry.apply2DVisualTransform(node, visualRoot);
 
-        const sizeGroup = visualRoot.userData.sizeGroup as THREE.Object3D | undefined;
-        if (sizeGroup) {
-          const { width, height } = this.proxyRegistry.getUIControlDimensions(node);
-          sizeGroup.scale.set(width, height, 1);
-        }
+        this.proxyRegistry.applyUIControlSkinGeometry(node, visualRoot);
 
         const mesh = visualRoot.userData.controlMesh as THREE.Mesh | undefined;
         if (mesh && mesh.material instanceof THREE.MeshBasicMaterial) {
           mesh.material.userData.baseOpacity = node instanceof Label2D ? 0 : 1;
-          mesh.material.color.setHex(this.proxyRegistry.getUIControlDefaultColor(node));
 
           const currentTexturePath = this.proxyRegistry.getUIControlSkinTextureUrl(node);
           const previousTexturePath = (visualRoot.userData.texturePath as string | null) ?? null;
           if (currentTexturePath !== previousTexturePath) {
             mesh.material.map = null;
             mesh.material.needsUpdate = true;
-            this.proxyRegistry.applyTextureTo2DMaterial(node, mesh.material);
+            // A different skin can have a different natural size, so forget the old
+            // one before the load records the new one (9-slice UVs depend on it).
+            visualRoot.userData.skinTextureWidth = 0;
+            visualRoot.userData.skinTextureHeight = 0;
+            this.proxyRegistry.applyTextureTo2DMaterial(node, mesh.material, visualRoot);
             visualRoot.userData.texturePath = currentTexturePath;
+          }
+
+          // The flat colour is the fallback, not a tint: a skinned control keeps the
+          // white multiplier the texture load set, exactly as the runtime node does.
+          if (!mesh.material.map) {
+            mesh.material.color.setHex(this.proxyRegistry.getUIControlDefaultColor(node));
           }
         }
 
