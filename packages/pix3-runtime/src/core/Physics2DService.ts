@@ -119,6 +119,42 @@ export interface Physics2DQueryOptions {
   includeSensors?: boolean;
 }
 
+/** What {@link Physics2DService.moveAndCollide} did and what stopped it. */
+export interface MoveCollide2DResult {
+  /** Actual displacement, which is less than the request when something blocked. */
+  movedX: number;
+  movedY: number;
+  collided: boolean;
+  /** Surface normal pointing *away* from what was hit, or `(0, 0)`. */
+  normalX: number;
+  normalY: number;
+  collider: NodeBase | null;
+}
+
+export interface MoveAndSlide2DOptions extends Physics2DQueryOptions {
+  /** "Up" for floor/ceiling classification. Defaults to `(0, 1)`. */
+  upX?: number;
+  upY?: number;
+  /** Degrees from `up` a surface may tilt and still count as floor. Default 45. */
+  floorMaxAngle?: number;
+  /** How many times the motion may be redirected in one call. Default 4. */
+  maxSlides?: number;
+}
+
+export interface MoveAndSlide2DResult {
+  /** The velocity with blocked components removed — feed it back next frame. */
+  velocityX: number;
+  velocityY: number;
+  isOnFloor: boolean;
+  isOnWall: boolean;
+  isOnCeiling: boolean;
+  /** Normal of the surface being stood on, when `isOnFloor`. */
+  floorNormalX: number;
+  floorNormalY: number;
+  /** The last thing hit during the slide, or null. */
+  collider: NodeBase | null;
+}
+
 export interface Physics2DRaycastHit {
   node: NodeBase;
   group: string;
@@ -535,6 +571,286 @@ export class Physics2DService {
       .map(entry => entry.source.node as NodeBase);
   }
 
+  // --- character movement -----------------------------------------------
+  //
+  // Godot's CharacterBody2D role, as two methods on the world rather than a
+  // node type. A kinematic body moved this way is *driven*: it pushes nothing,
+  // is pushed by nothing, and stops exactly where geometry says it should —
+  // which is what a platformer or a top-down character wants, and what falls out
+  // wrong if you try to build it out of forces.
+
+  /**
+   * Move `node`'s body by `(dx, dy)`, stopping at the first thing it hits.
+   *
+   * Motion is substepped so no substep advances further than half the body's
+   * smallest extent — without that a fast character samples past a thin wall and
+   * ends up on the far side of it. After each substep the body is pushed back out
+   * of anything it overlaps, and the deepest such push is reported as the hit.
+   */
+  moveAndCollide(
+    node: NodeBase | null | undefined,
+    dx: number,
+    dy: number,
+    options: Physics2DQueryOptions = {}
+  ): MoveCollide2DResult {
+    const empty: MoveCollide2DResult = {
+      movedX: 0,
+      movedY: 0,
+      collided: false,
+      normalX: 0,
+      normalY: 0,
+      collider: null,
+    };
+    const body = node ? this.bodies.get(node) : null;
+    if (!body || !Number.isFinite(dx) || !Number.isFinite(dy)) {
+      return empty;
+    }
+
+    this.refreshShapes();
+
+    const startX = body.x;
+    const startY = body.y;
+    const distance = Math.hypot(dx, dy);
+    const step = Math.max(1, Math.ceil(distance / Math.max(1, this.bodyStepLimit(body))));
+
+    let collided = false;
+    let bestNormalX = 0;
+    let bestNormalY = 0;
+    let bestDepth = -Infinity;
+    let bestCollider: NodeBase | null = null;
+
+    for (let i = 0; i < step; i++) {
+      body.x += dx / step;
+      body.y += dy / step;
+      const hit = this.depenetrate(body, options);
+      if (hit) {
+        collided = true;
+        if (hit.depth > bestDepth) {
+          bestDepth = hit.depth;
+          bestNormalX = hit.normalX;
+          bestNormalY = hit.normalY;
+          bestCollider = hit.collider;
+        }
+      }
+    }
+
+    this.writeBodyToNode(body);
+    return {
+      movedX: body.x - startX,
+      movedY: body.y - startY,
+      collided,
+      normalX: bestNormalX,
+      normalY: bestNormalY,
+      collider: bestCollider,
+    };
+  }
+
+  /**
+   * Move by `velocity * dt`, sliding along whatever is hit instead of stopping
+   * dead, and report what the body is standing on.
+   *
+   * The returned velocity has the blocked component removed, so the usual game
+   * loop is `velocity = phys.moveAndSlide(node, vx, vy, dt).velocity` — a
+   * character walking into a wall keeps its along-wall speed, and one landing on
+   * the floor loses its fall speed rather than accumulating it forever.
+   *
+   * Floor / wall / ceiling are classified against `up` exactly as Godot does:
+   * a contact whose normal is within `floorMaxAngle` of `up` is floor, within
+   * that angle of `-up` is ceiling, anything else is wall.
+   */
+  moveAndSlide(
+    node: NodeBase | null | undefined,
+    velocityX: number,
+    velocityY: number,
+    dt: number,
+    options: MoveAndSlide2DOptions = {}
+  ): MoveAndSlide2DResult {
+    const upX = options.upX ?? 0;
+    const upY = options.upY ?? 1;
+    const upLength = Math.hypot(upX, upY) || 1;
+    const ux = upX / upLength;
+    const uy = upY / upLength;
+    const floorCos = Math.cos(((options.floorMaxAngle ?? 45) * Math.PI) / 180);
+    const maxSlides = Math.max(1, Math.floor(options.maxSlides ?? 4));
+
+    let vx = velocityX;
+    let vy = velocityY;
+    let remainingX = velocityX * dt;
+    let remainingY = velocityY * dt;
+
+    const result: MoveAndSlide2DResult = {
+      velocityX: vx,
+      velocityY: vy,
+      isOnFloor: false,
+      isOnWall: false,
+      isOnCeiling: false,
+      floorNormalX: 0,
+      floorNormalY: 0,
+      collider: null,
+    };
+
+    for (let slide = 0; slide < maxSlides; slide++) {
+      if (Math.hypot(remainingX, remainingY) < 1e-6) {
+        break;
+      }
+      const hit = this.moveAndCollide(node, remainingX, remainingY, options);
+      if (!hit.collided) {
+        break;
+      }
+
+      // The normal from `depenetrate` points the way the body was pushed, i.e.
+      // out of the surface — which is the direction a floor's normal has to face.
+      const nx = hit.normalX;
+      const ny = hit.normalY;
+      const alignment = nx * ux + ny * uy;
+      if (alignment >= floorCos) {
+        result.isOnFloor = true;
+        result.floorNormalX = nx;
+        result.floorNormalY = ny;
+      } else if (alignment <= -floorCos) {
+        result.isOnCeiling = true;
+      } else {
+        result.isOnWall = true;
+      }
+      result.collider = hit.collider;
+
+      // Project the blocked component out of both the leftover motion and the
+      // velocity the caller will carry into the next frame.
+      remainingX -= hit.movedX;
+      remainingY -= hit.movedY;
+      const motionDot = remainingX * nx + remainingY * ny;
+      if (motionDot < 0) {
+        remainingX -= nx * motionDot;
+        remainingY -= ny * motionDot;
+      }
+      const velocityDot = vx * nx + vy * ny;
+      if (velocityDot < 0) {
+        vx -= nx * velocityDot;
+        vy -= ny * velocityDot;
+      }
+    }
+
+    result.velocityX = vx;
+    result.velocityY = vy;
+    const body = node ? this.bodies.get(node) : null;
+    if (body) {
+      body.vx = vx;
+      body.vy = vy;
+    }
+    return result;
+  }
+
+  /**
+   * How far one substep of {@link moveAndCollide} may advance: half the body's
+   * smallest collider extent, so a substep can never skip clean over the thing it
+   * should have hit.
+   */
+  private bodyStepLimit(body: BodyEntry): number {
+    let smallest = Infinity;
+    for (const collider of body.colliders) {
+      if (collider.sensor || collider.shape.kind === 'empty') {
+        continue;
+      }
+      const extent =
+        collider.shape.kind === 'circle'
+          ? collider.shape.radius * 2
+          : Math.min(
+              collider.bounds.maxX - collider.bounds.minX,
+              collider.bounds.maxY - collider.bounds.minY
+            );
+      smallest = Math.min(smallest, extent);
+    }
+    return Number.isFinite(smallest) ? Math.max(1, smallest / 2) : Infinity;
+  }
+
+  /**
+   * Push `body` out of everything solid it currently overlaps, deepest first.
+   * Returns the deepest correction applied, or null when it was already clear.
+   */
+  private depenetrate(
+    body: BodyEntry,
+    options: Physics2DQueryOptions
+  ): { normalX: number; normalY: number; depth: number; collider: NodeBase | null } | null {
+    let best: {
+      normalX: number;
+      normalY: number;
+      depth: number;
+      collider: NodeBase | null;
+    } | null = null;
+
+    for (let pass = 0; pass < 4; pass++) {
+      for (const own of body.colliders) {
+        this.refreshColliderWorldShape(own);
+      }
+
+      let deepest: {
+        normalX: number;
+        normalY: number;
+        depth: number;
+        collider: NodeBase | null;
+      } | null = null;
+
+      for (const own of body.colliders) {
+        if (own.sensor || own.shape.kind === 'empty') {
+          continue;
+        }
+        for (const other of this.orderedColliders(options)) {
+          if (other.body === body || other.shape.kind === 'empty') {
+            continue;
+          }
+          for (const part of collideShapeParts(own.shape, other.shape)) {
+            for (const contact of part.manifold.contacts) {
+              if (contact.penetration <= PENETRATION_SLOP) {
+                continue;
+              }
+              if (!deepest || contact.penetration > deepest.depth) {
+                deepest = {
+                  // The manifold normal points own -> other, so backing out of
+                  // the overlap means moving along its negation.
+                  normalX: -part.manifold.normalX,
+                  normalY: -part.manifold.normalY,
+                  depth: contact.penetration,
+                  collider: other.source.node,
+                };
+              }
+            }
+          }
+        }
+      }
+
+      if (!deepest) {
+        break;
+      }
+      body.x += deepest.normalX * deepest.depth;
+      body.y += deepest.normalY * deepest.depth;
+      if (!best || deepest.depth > best.depth) {
+        best = deepest;
+      }
+    }
+
+    return best;
+  }
+
+  /** Push a body's solved pose onto its node, honouring the parent's frame. */
+  private writeBodyToNode(body: BodyEntry): void {
+    const node = body.node;
+    const parent = node.parentNode;
+    if (!parent) {
+      node.position.set(body.x, body.y, node.position.z);
+      node.rotation.z = body.rotation;
+      return;
+    }
+    const parentTransform = readWorldTransform2D(parent);
+    const dx = body.x - parentTransform.x;
+    const dy = body.y - parentTransform.y;
+    const cos = Math.cos(-parentTransform.rotation);
+    const sin = Math.sin(-parentTransform.rotation);
+    const sx = parentTransform.scaleX || 1;
+    const sy = parentTransform.scaleY || 1;
+    node.position.set((dx * cos - dy * sin) / sx, (dx * sin + dy * cos) / sy, node.position.z);
+    node.rotation.z = body.rotation - parentTransform.rotation;
+  }
+
   /**
    * The wireframe for the debug overlay, in the layout `PhysicsDebugOverlay`
    * already speaks: three floats per point, two points per segment, plus an RGBA
@@ -680,55 +996,63 @@ export class Physics2DService {
         this.recomputeMass(entry.body);
       }
 
-      const body = entry.body;
-      // The collider's own node may sit below the body's node; compose the
-      // difference so a compound body's child colliders follow the parent.
-      const local = this.colliderLocalTransform(entry);
-      const cos = Math.cos(body.rotation);
-      const sin = Math.sin(body.rotation);
-      const offsetX = local.x * cos - local.y * sin;
-      const offsetY = local.x * sin + local.y * cos;
-      const worldTransform: ShapeTransform2D = {
-        x: body.x + offsetX,
-        y: body.y + offsetY,
-        rotation: body.rotation + local.rotation,
-        scaleX: 1,
-        scaleY: 1,
-      };
-
-      if (entry.shape.kind === 'circle') {
-        const rotated = transformPolygon(
-          [{ x: entry.shape.cx, y: entry.shape.cy }],
-          worldTransform
-        );
-        entry.shape.worldCx = rotated[0].x;
-        entry.shape.worldCy = rotated[0].y;
-        entry.bounds = {
-          minX: entry.shape.worldCx - entry.shape.radius,
-          minY: entry.shape.worldCy - entry.shape.radius,
-          maxX: entry.shape.worldCx + entry.shape.radius,
-          maxY: entry.shape.worldCy + entry.shape.radius,
-        };
-      } else {
-        entry.shape.worldParts = entry.shape.parts.map(part =>
-          transformPolygon(part, worldTransform)
-        );
-        let minX = Infinity;
-        let minY = Infinity;
-        let maxX = -Infinity;
-        let maxY = -Infinity;
-        for (const part of entry.shape.worldParts) {
-          const bounds = polygonBounds(part);
-          minX = Math.min(minX, bounds.minX);
-          minY = Math.min(minY, bounds.minY);
-          maxX = Math.max(maxX, bounds.maxX);
-          maxY = Math.max(maxY, bounds.maxY);
-        }
-        entry.bounds = { minX, minY, maxX, maxY };
-        entry.shape.worldCx = (minX + maxX) / 2;
-        entry.shape.worldCy = (minY + maxY) / 2;
-      }
+      this.refreshColliderWorldShape(entry);
     }
+  }
+
+  /**
+   * Lift one collider's baked shape into world space at its body's current pose.
+   *
+   * Split out of {@link refreshShapes} because character movement moves a single
+   * body many times within one call and has to re-test after each nudge; walking
+   * every collider in the scene for that would make a slide cost O(world) per
+   * substep.
+   */
+  private refreshColliderWorldShape(entry: ColliderEntry): void {
+    const body = entry.body;
+    // The collider's own node may sit below the body's node; compose the
+    // difference so a compound body's child colliders follow the parent.
+    const local = this.colliderLocalTransform(entry);
+    const cos = Math.cos(body.rotation);
+    const sin = Math.sin(body.rotation);
+    const offsetX = local.x * cos - local.y * sin;
+    const offsetY = local.x * sin + local.y * cos;
+    const worldTransform: ShapeTransform2D = {
+      x: body.x + offsetX,
+      y: body.y + offsetY,
+      rotation: body.rotation + local.rotation,
+      scaleX: 1,
+      scaleY: 1,
+    };
+
+    if (entry.shape.kind === 'circle') {
+      const rotated = transformPolygon([{ x: entry.shape.cx, y: entry.shape.cy }], worldTransform);
+      entry.shape.worldCx = rotated[0].x;
+      entry.shape.worldCy = rotated[0].y;
+      entry.bounds = {
+        minX: entry.shape.worldCx - entry.shape.radius,
+        minY: entry.shape.worldCy - entry.shape.radius,
+        maxX: entry.shape.worldCx + entry.shape.radius,
+        maxY: entry.shape.worldCy + entry.shape.radius,
+      };
+      return;
+    }
+
+    entry.shape.worldParts = entry.shape.parts.map(part => transformPolygon(part, worldTransform));
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+    for (const part of entry.shape.worldParts) {
+      const bounds = polygonBounds(part);
+      minX = Math.min(minX, bounds.minX);
+      minY = Math.min(minY, bounds.minY);
+      maxX = Math.max(maxX, bounds.maxX);
+      maxY = Math.max(maxY, bounds.maxY);
+    }
+    entry.bounds = { minX, minY, maxX, maxY };
+    entry.shape.worldCx = (minX + maxX) / 2;
+    entry.shape.worldCy = (minY + maxY) / 2;
   }
 
   /**
@@ -1497,23 +1821,7 @@ export class Physics2DService {
       if (body.bodyType !== 'dynamic' || body.sleeping) {
         continue;
       }
-      const node = body.node;
-      const parent = node.parentNode;
-      if (parent) {
-        // Convert the solved world pose into the parent's frame.
-        const parentTransform = readWorldTransform2D(parent);
-        const dx = body.x - parentTransform.x;
-        const dy = body.y - parentTransform.y;
-        const cos = Math.cos(-parentTransform.rotation);
-        const sin = Math.sin(-parentTransform.rotation);
-        const sx = parentTransform.scaleX || 1;
-        const sy = parentTransform.scaleY || 1;
-        node.position.set((dx * cos - dy * sin) / sx, (dx * sin + dy * cos) / sy, node.position.z);
-        node.rotation.z = body.rotation - parentTransform.rotation;
-      } else {
-        node.position.set(body.x, body.y, node.position.z);
-        node.rotation.z = body.rotation;
-      }
+      this.writeBodyToNode(body);
     }
   }
 
