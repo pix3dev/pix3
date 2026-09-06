@@ -69,19 +69,33 @@ export class Collider2DBehavior extends Script implements Collider2DSource {
           ui: {
             label: 'Shape',
             description:
-              'All three follow the node rotation and scale. A polygon may be concave; it is split into convex parts for you.',
+              'All of them follow the node rotation and scale. A capsule is upright along local Y and sized by height + radius (Godot\u2019s convention). A polygon may be concave; it is split into convex parts for you.',
             group: 'Shape',
-            options: ['rect', 'circle', 'polygon'],
+            options: ['rect', 'circle', 'polygon', 'capsule'],
           },
           getValue: (c: unknown) => (c as Collider2DBehavior).config.shape,
           setValue: (c: unknown, v: unknown) => {
-            (c as Collider2DBehavior).config.shape =
-              v === 'circle' ? 'circle' : v === 'polygon' ? 'polygon' : 'rect';
+            const shape = String(v);
+            (c as Collider2DBehavior).config.shape = (
+              ['circle', 'polygon', 'capsule'] as const
+            ).includes(shape as 'circle' | 'polygon' | 'capsule')
+              ? shape
+              : 'rect';
           },
         },
         numberProp('width', 'Width', 'Shape', 'Rect width in design pixels.'),
-        numberProp('height', 'Height', 'Shape', 'Rect height in design pixels.'),
-        numberProp('radius', 'Radius', 'Shape', 'Circle radius in design pixels.'),
+        numberProp(
+          'height',
+          'Height',
+          'Shape',
+          'Rect height, or a capsule\u2019s TOTAL height including both caps.'
+        ),
+        numberProp(
+          'radius',
+          'Radius',
+          'Shape',
+          'Circle radius, or a capsule\u2019s cap radius (its half-width).'
+        ),
         numberProp('offsetX', 'Offset X', 'Shape', 'Shape offset from the node origin.'),
         numberProp('offsetY', 'Offset Y', 'Shape', 'Shape offset from the node origin.'),
         {
@@ -174,7 +188,7 @@ export class Collider2DBehavior extends Script implements Collider2DSource {
 
   getColliderShape(): Collider2DShape {
     const shape = this.config.shape;
-    return shape === 'circle' ? 'circle' : shape === 'polygon' ? 'polygon' : 'rect';
+    return shape === 'circle' || shape === 'polygon' || shape === 'capsule' ? shape : 'rect';
   }
 
   getColliderSize(): { width: number; height: number; radius: number } {

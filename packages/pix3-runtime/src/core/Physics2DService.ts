@@ -1,6 +1,7 @@
 import type { NodeBase } from '../nodes/NodeBase';
 import {
   boxPolygon,
+  capsulePolygon,
   decomposeConvex,
   pointInPolygon,
   polygonArea,
@@ -56,8 +57,11 @@ import { readWorldTransform2D } from './world-transform-2d';
 
 export type PhysicsBody2DType = 'static' | 'kinematic' | 'dynamic';
 
-/** Shape of a collider as authored. Rect and polygon both resolve to polygons. */
-export type Collider2DShape = 'rect' | 'circle' | 'polygon';
+/**
+ * Shape of a collider as authored. Everything except `circle` resolves to convex
+ * polygon parts; see {@link capsulePolygon} for what a capsule becomes and why.
+ */
+export type Collider2DShape = 'rect' | 'circle' | 'polygon' | 'capsule';
 
 /**
  * The contract a collider component implements. Read live on every rebuild so an
@@ -372,6 +376,8 @@ const RESTITUTION_THRESHOLD = 40;
 const SLEEP_LINEAR_THRESHOLD = 4;
 const SLEEP_ANGULAR_THRESHOLD = 0.15;
 const SLEEP_TIME = 0.5;
+/** Segments per capsule cap. Eight keeps the radial error under 2% of the radius. */
+const CAPSULE_CAP_SEGMENTS = 8;
 /** Broadphase cell size in px — a compromise for the 32-128 px sprites 2D games use. */
 const BROADPHASE_CELL = 128;
 
@@ -1300,6 +1306,21 @@ export class Physics2DService {
         // A non-uniformly scaled circle is an ellipse, which this solver has no
         // shape for; take the larger axis so the collider never under-covers.
         return circleShape(offset.x * sx, offset.y * sy, Math.abs(size.radius) * Math.max(sx, sy));
+      }
+      case 'capsule': {
+        // Godot's convention: `height` is the total height including both caps.
+        // Routed through `decomposeConvex` like an authored polygon so the
+        // winding and cleaning guarantees are the same for every polygon path,
+        // not something the stadium builder has to be trusted to get right.
+        const parts = decomposeConvex(
+          capsulePolygon(
+            Math.abs(size.height) * sy,
+            Math.abs(size.radius) * Math.max(sx, sy),
+            CAPSULE_CAP_SEGMENTS,
+            { x: offset.x * sx, y: offset.y * sy }
+          )
+        );
+        return parts.length > 0 ? polygonShape(parts) : emptyShape();
       }
       case 'polygon': {
         const authored = source.getColliderPolygon();

@@ -1,6 +1,7 @@
 import type { NodeBase, Point2D, ShapeTransform2D } from '@pix3/runtime';
 import {
   boxPolygon,
+  capsulePolygon,
   circlePolygon,
   normalizePolygonConfig,
   readWorldTransform2D,
@@ -30,7 +31,7 @@ import {
  */
 export const COLLIDER_COMPONENT_TYPES = ['core:Hitbox2D', 'core:Collider2D'] as const;
 
-export type ColliderShapeKind = 'rect' | 'circle' | 'polygon';
+export type ColliderShapeKind = 'rect' | 'circle' | 'polygon' | 'capsule';
 
 export interface ColliderShape {
   nodeId: string;
@@ -99,7 +100,9 @@ export function collectColliderShapes(node: NodeBase): ColliderShape[] {
     };
     const rawShape = String(config.shape ?? 'rect');
     const kind: ColliderShapeKind =
-      rawShape === 'circle' ? 'circle' : rawShape === 'polygon' ? 'polygon' : 'rect';
+      rawShape === 'circle' || rawShape === 'polygon' || rawShape === 'capsule'
+        ? (rawShape as ColliderShapeKind)
+        : 'rect';
 
     if (kind === 'polygon') {
       const fromFrame = config.polygonSource === 'frame';
@@ -125,11 +128,18 @@ export function collectColliderShapes(node: NodeBase): ColliderShape[] {
     const outline =
       kind === 'circle'
         ? circlePolygon(Math.abs(Number(config.radius) || 0), CIRCLE_SEGMENTS, offset)
-        : boxPolygon(
-            (Math.abs(Number(config.width) || 0) || 0) / 2,
-            (Math.abs(Number(config.height) || 0) || 0) / 2,
-            offset
-          );
+        : kind === 'capsule'
+          ? capsulePolygon(
+              Math.abs(Number(config.height) || 0),
+              Math.abs(Number(config.radius) || 0),
+              CIRCLE_SEGMENTS / 4,
+              offset
+            )
+          : boxPolygon(
+              (Math.abs(Number(config.width) || 0) || 0) / 2,
+              (Math.abs(Number(config.height) || 0) || 0) / 2,
+              offset
+            );
     if (outline.length < 3) {
       continue;
     }

@@ -294,6 +294,55 @@ export function circlePolygon(radius: number, segments = 16, offset?: Point2D): 
   return out;
 }
 
+/**
+ * A capsule (Godot's CapsuleShape2D: a box with semicircular caps, upright along
+ * local Y) as a closed convex loop — a "stadium".
+ *
+ * Sampling the caps rather than carrying a true segment-plus-radius shape is a
+ * deliberate trade. A real capsule needs its own narrowphase against every other
+ * shape kind, with its own deep-penetration and two-point-manifold cases; a
+ * stadium is *already* a convex polygon, so it inherits SAT, reference-face
+ * clipping, warm starting and stacking with no new code and no new failure modes.
+ * The cost is that the caps are faceted: at 8 segments per cap the radial error
+ * is under 2% of the radius — sub-pixel for anything a 2D playable draws. A shape
+ * that must roll perfectly smoothly wants `circle`, which is exact.
+ *
+ * `height` is the TOTAL height including both caps, matching Godot; a height at
+ * or below `2 * radius` degenerates to a circle.
+ */
+export function capsulePolygon(
+  height: number,
+  radius: number,
+  capSegments = 8,
+  offset?: Point2D
+): Point2D[] {
+  const r = Math.abs(radius);
+  const ox = offset?.x ?? 0;
+  const oy = offset?.y ?? 0;
+  if (r <= 0) {
+    return [];
+  }
+  const halfSegment = Math.max(0, Math.abs(height) / 2 - r);
+  if (halfSegment <= 1e-6) {
+    return circlePolygon(r, capSegments * 2, offset);
+  }
+
+  const segments = Math.max(2, Math.floor(capSegments));
+  const out: Point2D[] = [];
+  // Counter-clockwise in a y-up frame: over the top from right to left, then
+  // under the bottom from left to right. Sweeping the other way winds the loop
+  // clockwise, which points every SAT normal inward and lets bodies fall through.
+  for (let i = 0; i <= segments; i++) {
+    const a = Math.PI * (i / segments);
+    out.push({ x: ox + Math.cos(a) * r, y: oy + halfSegment + Math.sin(a) * r });
+  }
+  for (let i = 0; i <= segments; i++) {
+    const a = Math.PI + Math.PI * (i / segments);
+    out.push({ x: ox + Math.cos(a) * r, y: oy - halfSegment + Math.sin(a) * r });
+  }
+  return ensureCounterClockwise(cleanPolygon(out));
+}
+
 /** Even-odd ray crossing. Correct for concave loops; boundary hits are unspecified. */
 export function pointInPolygon(x: number, y: number, points: readonly Point2D[]): boolean {
   const n = points.length;
