@@ -710,6 +710,58 @@ describe('EditorTabComponent — standalone (tab-less) mode', () => {
 
     expect(services.viewportRenderer.attachToHost).toHaveBeenCalled();
   });
+
+  /**
+   * Switching Vibe -> Studio used to leave the Studio viewport blank until the scene was closed and
+   * reopened. Both views mount a `pix3-editor-tab` over the ONE shared canvas, and on the switch
+   * both are still connected and still subscribed: Valtio notifies in a microtask, long before Lit
+   * re-renders the shell and unmounts the Flow branch. Vibe's view subscribed last, so it was
+   * notified last and re-parented the canvas into its own host — which then left the DOM. Nothing
+   * mutates `appState.tabs` on a workspace switch, so nothing ever handed it back.
+   */
+  it('does not grab the shared canvas back while Vibe is being left', async () => {
+    resetAppState();
+    appState.ui.workspaceMode = 'flow';
+    appState.ui.flowSceneViewVisible = true;
+
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    panel.standalone = true;
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+    services.viewportRenderer.attachToHost.mockClear();
+
+    appState.ui.workspaceMode = 'studio';
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(services.viewportRenderer.attachToHost).not.toHaveBeenCalled();
+  });
+
+  /** The other half of the same arbitration: the docked tab still has to take the canvas back. */
+  it('lets the docked Studio tab reclaim the canvas on the way back from Vibe', async () => {
+    resetAppState();
+    appState.ui.workspaceMode = 'flow';
+    appState.ui.flowSceneViewVisible = true;
+    appState.tabs.tabs = [
+      { id: 'tab-1', title: 'Main', type: 'scene', resourceId: 'main', isDirty: false },
+    ];
+    appState.tabs.activeTabId = 'tab-1';
+
+    const panel = new EditorTabComponent();
+    const services = stubPanelServices(panel);
+    panel.tabId = 'tab-1';
+
+    document.body.appendChild(panel);
+    await panel.updateComplete;
+    // Gated out while Vibe owns the canvas, as the test above this pair asserts.
+    expect(services.viewportRenderer.attachToHost).not.toHaveBeenCalled();
+
+    appState.ui.workspaceMode = 'studio';
+    await new Promise(resolve => setTimeout(resolve, 0));
+
+    expect(services.viewportRenderer.attachToHost).toHaveBeenCalled();
+  });
 });
 
 function graphOf(...nodes: NodeBase[]): SceneGraph {

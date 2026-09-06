@@ -256,7 +256,15 @@ export class EditorTabComponent extends ComponentBase {
         // host was just torn out of the DOM with the Flow shell. Nothing mutates `appState.tabs` on
         // a workspace switch, so without this reclaim the Studio viewport stays empty until the
         // next tab change.
-        if (appState.ui.workspaceMode === 'studio') {
+        //
+        // Only a DOCKED tab may reclaim here. Vibe's standalone view is still connected and still
+        // subscribed at this point — Valtio notifies in a microtask, well before Lit re-renders the
+        // shell and unmounts the Flow branch — and it subscribed *after* the Studio tab, so it was
+        // notified last and won the arbitration for the one shared canvas, parenting it into a host
+        // that was about to leave the DOM. That is the "Vibe -> Studio leaves an empty viewport,
+        // reopening the scene fixes it" bug: reopening builds a fresh tab whose connect re-attaches.
+        // The standalone view needs no reclaim of its own; Vibe always mounts it fresh.
+        if (!this.standalone && appState.ui.workspaceMode === 'studio') {
           this.syncActiveState();
         }
       }
