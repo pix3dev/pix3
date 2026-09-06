@@ -30,11 +30,13 @@ import {
   IDEA_PRESERVED_PATHS,
   type RecipePlaceholder,
   type RecipeTunable,
+  type SceneNodeRef,
   type ScenePatch,
   type TunableResolution,
 } from '@/services/flow/recipe-contract';
 import { FlowReferencesService } from '@/services/flow/FlowReferencesService';
 import {
+  captionInkForRole,
   hexToHsl,
   isHex,
   lum,
@@ -42,10 +44,19 @@ import {
   presetTheme,
   type ForgeTheme,
   type PaletteId,
+  type TemplateId,
+  type TemplateTypography,
 } from '@/services/uikit';
-import { UI_CONTROL_NODE_TYPES, planSkinPatches } from '@/services/uikit-editor/skin-planner';
+import {
+  CAPTION_NODE_TYPES,
+  UI_CONTROL_NODE_TYPES,
+  planCaptionPatches,
+  planSkinPatches,
+  uiKitRoleForNodeName,
+} from '@/services/uikit-editor/skin-planner';
 import type { UiKitThemeService } from '@/services/uikit-editor/UiKitThemeService';
-import type { UiKitProjectWriter } from '@/services/uikit-editor/UiKitProjectWriter';
+import type { KitManifest, UiKitProjectWriter } from '@/services/uikit-editor/UiKitProjectWriter';
+import type { UiKitPrefabBuilder } from '@/services/uikit-editor/UiKitPrefabBuilder';
 import { ideaTimeline } from '@/services/flow/idea-timeline';
 import { FlowStageService } from '@/services/flow/FlowStageService';
 import {
@@ -316,8 +327,39 @@ export const UI_PRESET_FOR_THEME: Readonly<Record<PrototypeTheme, string>> = {
   minimal: 'Flat',
 };
 
-/** The palette roles the expander bakes — everything the four UI node types can ask for. */
-export const UI_KIT_BOOTSTRAP_ROLES: readonly PaletteId[] = ['green', 'blue', 'red', 'gray'];
+/**
+ * The palette roles the expander bakes.
+ *
+ * The first four are what the four UI node types can ask for through
+ * {@link uiKitRoleForNodeName}; `sky` is what the WINDOW TEMPLATES paint their frame and header
+ * with (`TemplateSpec.buildTemplate` defaults `colorRole` to it), so the dialog prefabs written
+ * below would come out untextured without it. Order matters in one way only: the manifest judges
+ * its caption ink against `roles[0]`, so `green` stays first.
+ */
+export const UI_KIT_BOOTSTRAP_ROLES: readonly PaletteId[] = ['green', 'blue', 'red', 'gray', 'sky'];
+
+/**
+ * The glyphs the window prefabs reference — the dialog's close control, and nothing else.
+ *
+ * A recipe's own HUD references no glyph at all, which is why the expander used to bake with
+ * `iconButtons: false`. The prefabs changed that for exactly one glyph, and 4 pictures is a
+ * different trade from the full set's 28.
+ */
+export const UI_KIT_BOOTSTRAP_GLYPHS: readonly string[] = ['close'];
+
+/** The window prefabs the expander writes, so "add a pause menu" is an instance, not a redraw. */
+export const UI_KIT_BOOTSTRAP_TEMPLATES: readonly TemplateId[] = ['dialog', 'settings'];
+
+/** What the T0 kit lane produced, for the design docs and the decision log. */
+export interface RecipeUiKitResult {
+  readonly kitId: string;
+  readonly preset: string;
+  /** Project-relative path of `design/ui-kit.json`. */
+  readonly manifestPath: string;
+  /** `res://` paths of the window prefabs that were written. */
+  readonly prefabs: readonly string[];
+  readonly typography: TemplateTypography;
+}
 
 export interface DerivedUiKitTheme {
   preset: string;
@@ -390,21 +432,11 @@ const reddestHex = (hexes: readonly string[]): string | null => {
 /**
  * The colour role a UI node's NAME asks for.
  *
- * A heuristic, and cheap on purpose: the alternative is a model turn per button, and the plan's
- * whole argument for doing cosmetics in code is that a turn spent here buys nothing a table
- * cannot decide. Destructive is checked first so a "Reset progress" button does not read as a
- * confirmation just because it contains "set".
+ * The rule itself moved to `skin-planner.ts` — it is a rule about SKINNING, and `create_node`
+ * now applies the same one to a node the agent just made. Re-exported here because this is where
+ * it was first published and both callers and specs address it by this module.
  */
-export const uiKitRoleForNodeName = (name: string): PaletteId => {
-  const n = name.toLowerCase();
-  if (/(^|[^a-z])(quit|exit|delete|remove|reset|clear|danger|health|hp|lives?)/.test(n)) {
-    return 'red';
-  }
-  if (/(^|[^a-z])(play|start|ok|confirm|accept|yes|go|next|continue|resume|retry)/.test(n)) {
-    return 'green';
-  }
-  return 'blue';
-};
+export { uiKitRoleForNodeName };
 
 // ---------------------------------------------------------------------------
 // Observable status
@@ -483,6 +515,13 @@ const IDLE_STATUS: PrototypeBootstrapStatus = {
  */
 export const FLOW_STYLE_PATH = 'design/style.md';
 
+/**
+ * Where the kit manifest lands — derived from {@link FLOW_STYLE_PATH} for the same reason
+ * `UiKitThemeService` derives its own path from it: the two halves of one style contract must not
+ * drift into different folders. Not imported FROM that service, because it imports this module.
+ */
+const UI_KIT_MANIFEST_PROJECT_PATH = `${FLOW_STYLE_PATH.slice(0, FLOW_STYLE_PATH.lastIndexOf('/'))}/ui-kit.json`;
+
 const MAX_PLANNER_TOKENS = 2048;
 /** Cap on how much of an attached document reaches the planner (design §5.7 — never inline a GDD). */
 const DOC_EXCERPT_CHARS = 4000;
@@ -555,6 +594,12 @@ export class PrototypeBootstrapService {
     import('@/services/uikit-editor/UiKitProjectWriter').then(m => m.UiKitProjectWriter)
   )
   private readonly uiKitWriter!: LazyService<UiKitProjectWriter>;
+
+  /** Lazy for the same two reasons as the writer — and it pulls the writer behind it. */
+  @injectLazy(() =>
+    import('@/services/uikit-editor/UiKitPrefabBuilder').then(m => m.UiKitPrefabBuilder)
+  )
+  private readonly uiKitPrefabs!: LazyService<UiKitPrefabBuilder>;
 
   private status: PrototypeBootstrapStatus = IDLE_STATUS;
   private readonly listeners = new Set<(status: PrototypeBootstrapStatus) => void>();
@@ -897,7 +942,11 @@ export class PrototypeBootstrapService {
       preserveDecisions: true,
     });
 
-    await this.projectService.saveProjectManifest(manifest);
+    // The kit bake inside `applyRecipe` declares its typefaces in `pix3project.yaml`
+    // (`UiKitProjectWriter.mergeManifestFonts`), and `manifest` above was built BEFORE that. Saving
+    // it as-is wiped the declaration: the woff2 files stayed in `fonts/` and nothing registered
+    // them, so every caption drew in a substitute face. Re-read and carry the fonts over.
+    await this.projectService.saveProjectManifest(await this.withBakedFonts(manifest));
     try {
       await this.projectService.reactivateCurrentProject({
         ...(template?.entryScenePath ? { entryScenePath: template.entryScenePath } : {}),
@@ -946,8 +995,8 @@ export class PrototypeBootstrapService {
     const resolution = resolveTunables(themedTunables(brief), declared);
     await this.applyTunables(resolution, brief, declared, notes);
     await this.tintPlaceholders(placeholders, brief.style.palette, notes);
-    await this.skinRecipeUi(brief, notes);
-    await this.writeDesignDocs(brief, prompt, references, resolution, notes, options);
+    const uiKit = await this.skinRecipeUi(brief, notes);
+    await this.writeDesignDocs(brief, prompt, references, resolution, uiKit, notes, options);
   }
 
   /** Images → `references/`, documents → `design/source/` (design §5.7's hard rule). */
@@ -1085,7 +1134,7 @@ export class PrototypeBootstrapService {
   }
 
   /**
-   * Dress the recipe's UI controls in a generated kit — deterministically, with no agent turn.
+   * Dress the recipe's UI in a generated kit — deterministically, with no agent turn.
    *
    * Same brief in, same files out: the theme comes from the brief ({@link deriveUiKitTheme}), the
    * kit folder is named by a hash of that theme, and the colour role of each control comes from
@@ -1093,49 +1142,102 @@ export class PrototypeBootstrapService {
    * chosen by code cost nothing per project, while the same choices made by an agent cost a turn
    * each.
    *
-   * Two guards, both deliberate. A project with no 2D UI nodes is skipped in silence (a 3D-only
-   * or HUD-less recipe has nothing to wear a kit, and a note about it would be noise), and every
-   * failure degrades into a note: a prototype whose buttons are grey is a working prototype,
+   * Four things it does beyond the art, each closing a move the agent used to have to make: the
+   * caption recipe is written too (a skinned button that kept 16 px Arial was a second kit on the
+   * same screen), the window prefabs are built (so "add a pause menu" is a prefab instance rather
+   * than a hand-drawn `ColorRect2D`), the kit is baked EVEN when the recipe has no UI node yet
+   * (the agent's first menu then has something to wear), and a theme the user already saved in the
+   * UI Kit tab wins over the derived one.
+   *
+   * Every failure degrades into a note: a prototype whose buttons are grey is a working prototype,
    * whereas a transition that fails over a cosmetic bake is not.
    */
-  private async skinRecipeUi(brief: PrototypeBrief, notes: string[]): Promise<void> {
+  private async skinRecipeUi(
+    brief: PrototypeBrief,
+    notes: string[]
+  ): Promise<RecipeUiKitResult | null> {
     try {
-      const targets: {
-        path: string;
-        text: string;
-        nodes: { id: string; name: string; type: string }[];
-      }[] = [];
+      const skinnableTypes = new Set([...UI_CONTROL_NODE_TYPES, ...CAPTION_NODE_TYPES]);
+      const targets: { path: string; text: string; nodes: SceneNodeRef[] }[] = [];
       for (const path of await this.listScenes()) {
         const text = await this.storage.readTextFile(path);
         if (!looksLikeScene(text)) continue;
-        const nodes = listSceneNodes(text).filter(node =>
-          UI_CONTROL_NODE_TYPES.includes(node.type)
-        );
+        const nodes = listSceneNodes(text).filter(node => skinnableTypes.has(node.type));
         if (nodes.length > 0) targets.push({ path, text, nodes });
       }
-      if (targets.length === 0) return;
 
-      const { preset, theme } = deriveUiKitTheme(brief);
       const themeService = await this.uiKitTheme();
-      // The writer saves whatever theme the service currently holds, so the service is the one
-      // that has to be told first — otherwise `design/ui-theme.json` and the baked PNGs describe
-      // two different kits.
-      themeService.replaceTheme(theme, preset);
+      // A theme the user built in the UI Kit tab before pressing the CTA is a DECISION, and
+      // deriving one from the palette on top of it would silently throw that decision away. The
+      // read is forced because the service caches per project, and this project was opened (as an
+      // idea) before the file existed.
+      const adopted = await themeService.load(true);
+      let preset: string;
+      let theme: ForgeTheme;
+      if (adopted) {
+        theme = themeService.getTheme();
+        preset = themeService.getPresetName();
+        notes.push(`Used your UI Kit theme (${preset}) instead of deriving one from the palette.`);
+      } else {
+        const derived = deriveUiKitTheme(brief);
+        preset = derived.preset;
+        theme = derived.theme;
+        // The writer saves whatever theme the service currently holds, so the service is the one
+        // that has to be told first — otherwise `design/ui-theme.json` and the baked PNGs describe
+        // two different kits.
+        themeService.replaceTheme(theme, preset);
+      }
 
       const writer = await this.uiKitWriter();
-      const kit = await writer.writeKit(theme, {
-        colorRoles: UI_KIT_BOOTSTRAP_ROLES,
-        // Glyph buttons are for dialogs and templates; a recipe's HUD has none, and baking 28
-        // pictures nothing references would just slow the transition down.
-        iconButtons: false,
-      });
+      // The module is already loaded by the line above, so this import is free — and it keeps the
+      // hash function out of this module's eager graph, which is the whole point of the lazy
+      // writer.
+      const { kitIdForTheme } = await import('@/services/uikit-editor/UiKitProjectWriter');
+      const wantedKitId = kitIdForTheme(theme);
+      const existing = await writer.readManifest();
+
+      let manifest: KitManifest;
+      let kitId: string;
+      if (existing && existing.kitId === wantedKitId) {
+        // Same theme, same folder by construction: re-baking would rewrite the same ~100 PNGs for
+        // nothing. The prefabs below are still built, because a kit can exist without them.
+        manifest = existing;
+        kitId = existing.kitId;
+        notes.push(
+          `Reused the "${preset}" UI kit already baked in this project (sprites/ui/${kitId}).`
+        );
+      } else {
+        const kit = await writer.writeKit(theme, {
+          colorRoles: UI_KIT_BOOTSTRAP_ROLES,
+          // Only the glyphs the window prefabs reference — see UI_KIT_BOOTSTRAP_GLYPHS.
+          iconButtonGlyphs: UI_KIT_BOOTSTRAP_GLYPHS,
+        });
+        manifest = kit.manifest;
+        kitId = kit.kitId;
+      }
 
       let skinned = 0;
       for (const target of targets) {
         const patches: ScenePatch[] = [];
         for (const node of target.nodes) {
           const role = uiKitRoleForNodeName(node.name);
-          for (const write of planSkinPatches(node.type, kit.manifest, role)) {
+          const props = node.properties ?? {};
+          for (const write of planSkinPatches(node.type, manifest, role)) {
+            patches.push({ node: node.id, property: write.propertyPath, value: write.value });
+          }
+          if (!CAPTION_NODE_TYPES.includes(node.type)) continue;
+          const captions = planCaptionPatches(manifest, node.type, {
+            ...(typeof props.label === 'string' ? { text: props.label } : {}),
+            ...(typeof props.height === 'number' ? { height: props.height } : {}),
+            ...(typeof props.labelFontSize === 'number'
+              ? { currentFontSize: props.labelFontSize }
+              : {}),
+            // Only a button's caption sits on a coloured kit ground, so only a button's ink is
+            // decided by its role. A `Label2D` sits on the game's own background and keeps the
+            // colour the recipe chose for it.
+            ...(node.type === 'Button2D' ? { inkColor: captionInkForRole(theme, role) } : {}),
+          });
+          for (const write of captions) {
             patches.push({ node: node.id, property: write.propertyPath, value: write.value });
           }
         }
@@ -1147,16 +1249,66 @@ export class PrototypeBootstrapService {
         skinned += target.nodes.length;
       }
 
+      const prefabs = await this.writeUiKitPrefabs(theme, manifest, notes);
+
       if (skinned > 0) {
         notes.push(
-          `Skinned ${skinned} UI node${skinned === 1 ? '' : 's'} with the generated "${preset}" UI kit (sprites/ui/${kit.kitId}).`
+          `Skinned ${skinned} UI node${skinned === 1 ? '' : 's'} with the "${preset}" UI kit (sprites/ui/${kitId}).`
         );
+      } else {
+        // Not silence any more: the kit IS there, and the agent's first menu should wear it
+        // instead of spending a turn baking one of its own.
+        notes.push(`Baked the "${preset}" UI kit (sprites/ui/${kitId}); no UI nodes to skin yet.`);
       }
+
+      return {
+        kitId,
+        preset,
+        manifestPath: UI_KIT_MANIFEST_PROJECT_PATH,
+        prefabs,
+        typography: manifest.typography,
+      };
     } catch (error) {
       notes.push(
         `The UI kit was not generated: ${error instanceof Error ? error.message : String(error)}`
       );
+      return null;
     }
+  }
+
+  /**
+   * Build the window prefabs off the baked kit.
+   *
+   * Per-template try/catch rather than one around the loop: the two templates fail independently
+   * (a missing part is per-template), and losing the settings window because the dialog threw
+   * would be a worse answer than writing the one that works.
+   */
+  private async writeUiKitPrefabs(
+    theme: ForgeTheme,
+    manifest: KitManifest,
+    notes: string[]
+  ): Promise<string[]> {
+    const written: string[] = [];
+    let builder: UiKitPrefabBuilder;
+    try {
+      builder = await this.uiKitPrefabs();
+    } catch (error) {
+      notes.push(
+        `The UI window prefabs were not built: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return written;
+    }
+    for (const templateId of UI_KIT_BOOTSTRAP_TEMPLATES) {
+      try {
+        const built = await builder.buildAndWrite(templateId, theme, { manifest });
+        written.push(built.resourcePath);
+      } catch (error) {
+        notes.push(
+          `The "${templateId}" UI prefab was not built: ${error instanceof Error ? error.message : String(error)}`
+        );
+      }
+    }
+    return written;
   }
 
   /**
@@ -1183,6 +1335,7 @@ export class PrototypeBootstrapService {
     prompt: string,
     references: readonly PrototypeBriefReference[],
     resolution: TunableResolution,
+    uiKit: RecipeUiKitResult | null,
     notes: string[],
     options?: { readonly preserveDecisions?: boolean }
   ): Promise<void> {
@@ -1200,12 +1353,13 @@ export class PrototypeBootstrapService {
       await this.writeFile(FLOW_DECISIONS_PATH, renderDecisionsMarkdown(), notes);
     }
     if (
+      uiKit ||
       brief.style.artStyle ||
       brief.style.mood ||
       brief.style.theme ||
       brief.style.palette.length > 0
     ) {
-      await this.writeFile(FLOW_STYLE_PATH, renderStyleMarkdown(brief, references), notes);
+      await this.writeFile(FLOW_STYLE_PATH, renderStyleMarkdown(brief, references, uiKit), notes);
     }
   }
 
@@ -1462,6 +1616,25 @@ export class PrototypeBootstrapService {
   }
 
   /** Every `.pix3scene` in the fresh project, scenes/ first (prefabs live under it). */
+  /**
+   * `manifest` plus whatever `fonts` the project on disk currently declares.
+   *
+   * A merge would be wrong here: the manifest being saved is freshly built and carries no fonts at
+   * all, so the disk copy is the only source. Absent or empty → the built manifest unchanged, so a
+   * failed/offline bake cannot write an empty `fonts` key over anything.
+   */
+  private async withBakedFonts(manifest: ProjectManifest): Promise<ProjectManifest> {
+    try {
+      const current = await this.projectService.loadProjectManifest();
+      if (current.fonts && current.fonts.length > 0) {
+        return { ...manifest, fonts: current.fonts };
+      }
+    } catch {
+      // Unreadable manifest — the caller's own save is the one that reports a real problem.
+    }
+    return manifest;
+  }
+
   private async listScenes(): Promise<string[]> {
     const found: string[] = [];
     const walk = async (path: string, depth: number): Promise<void> => {
@@ -2333,10 +2506,58 @@ export const renderDecisionsMarkdown = (): string =>
     '',
   ].join('\n');
 
+/**
+ * The `## UI kit` section of `design/style.md` — what the T0 bake left in the project.
+ *
+ * This is the half of the kit the pictures cannot carry, written for the AGENT: without it the
+ * agent knows there is a `sprites/ui/<hash>/` folder and nothing about what the hash means, which
+ * role a button should ask for, or that the pause menu it is about to draw already exists as a
+ * prefab. The three rules at the end are the moves that were being re-derived (badly) every run.
+ */
+const renderUiKitSection = (kit: RecipeUiKitResult): string[] => {
+  const t = kit.typography;
+  const faces =
+    t.cyrFamily && t.cyrFamily !== t.family
+      ? `\`${t.family}\` ${t.weight} (Cyrillic: \`${t.cyrFamily}\` ${t.cyrWeight})`
+      : `\`${t.family}\` ${t.weight}`;
+  return [
+    '## UI kit',
+    '',
+    `The project already wears a generated UI kit — the **${kit.preset}** preset, baked at T0. Do`,
+    'not draw UI backings by hand, and do not re-bake to change a colour.',
+    '',
+    `- **Kit id:** \`${kit.kitId}\``,
+    `- **Sprites:** \`sprites/ui/${kit.kitId}/\``,
+    `- **Manifest:** \`${kit.manifestPath}\` (every part, with its nine-slice insets)`,
+    `- **Caption face:** ${faces} — outline ${t.outlineWidth}px \`${t.outlineColor}\``,
+    '',
+    'Colour roles: `green` = primary action, `blue` = secondary, `red` = destructive,',
+    '`gray` = neutral chrome. A node gets the role its NAME asks for.',
+    '',
+    ...(kit.prefabs.length > 0
+      ? [
+          'Window prefabs (instance these, do not rebuild them):',
+          ...kit.prefabs.map(path => `- \`${path}\``),
+          '',
+        ]
+      : []),
+    'Rules:',
+    "1. A new UI node is skinned by `skin_ui { action: 'apply', nodeIds: [...] }` — and `create_node`",
+    '   already does it for you, so a button you create arrives wearing the kit.',
+    '2. A window / dialog / pause menu is a `CreatePrefabInstance` of a prefab above, never a',
+    '   hand-assembled `ColorRect2D`.',
+    "3. Re-colouring or re-shaping the kit is `skin_ui { action: 'restyle', theme: { ... } }`, which",
+    '   re-renders from the stored theme and moves every skinned node onto the new art. A fresh',
+    '   `bake` leaves the project half-themed.',
+    '',
+  ];
+};
+
 /** `design/style.md` — the tokens every generate-prompt reuses, so the art stays consistent. */
 export const renderStyleMarkdown = (
   brief: PrototypeBrief,
-  references: readonly PrototypeBriefReference[]
+  references: readonly PrototypeBriefReference[],
+  uiKit: RecipeUiKitResult | null = null
 ): string => {
   const styleRefs = references.filter(reference => reference.role === 'style');
   return [
@@ -2356,6 +2577,7 @@ export const renderStyleMarkdown = (
     'Use the tokens as WORDS. Pass a reference image to the generator only for the one asset it',
     'depicts — a full scene handed over as a reference comes back as a copied composition.',
     '',
+    ...(uiKit ? renderUiKitSection(uiKit) : []),
   ].join('\n');
 };
 

@@ -41,12 +41,17 @@ import {
   PLANNER_SYSTEM_PROMPT,
   RECIPE_CATALOG,
   THEME_TUNABLES,
+  UI_KIT_BOOTSTRAP_GLYPHS,
   UI_KIT_BOOTSTRAP_ROLES,
+  UI_KIT_BOOTSTRAP_TEMPLATES,
   UI_PRESET_FOR_THEME,
   deriveUiKitTheme,
   uiKitRoleForNodeName,
   type PrototypeBrief,
+  type RecipeUiKitResult,
 } from './PrototypeBootstrapService';
+import { kitIdForTheme } from '@/services/uikit-editor/UiKitProjectWriter';
+import { captionInkForRole, normalizeTheme, presetTheme } from '@/services/uikit';
 import { parseChecklist } from './FlowPlanService';
 import { resolveTunables, type RecipeTunable } from './recipe-contract';
 
@@ -1011,6 +1016,8 @@ const buildTransitionHarness = (options?: {
   readonly withoutProvider?: boolean;
   /** What the planner replies (raw text, so a garbage reply can be tested too). */
   readonly plannerReply?: string;
+  /** `fonts` the kit bake declared in `pix3project.yaml` while the transition was running. */
+  readonly bakedFonts?: ProjectManifest['fonts'];
 }): TransitionHarness => {
   resetAppState();
   const files = new Map<string, string>([
@@ -1057,6 +1064,13 @@ const buildTransitionHarness = (options?: {
       saveProjectManifest: async (manifest: ProjectManifest) => {
         saved.push(manifest);
       },
+      // What the project has on disk. The kit bake merges its typefaces into THIS during the
+      // transition, which is why the final save has to re-read instead of trusting the manifest it
+      // built before the bake.
+      loadProjectManifest: async () => ({
+        ...createDefaultProjectManifest(),
+        ...(options?.bakedFonts ? { fonts: options.bakedFonts } : {}),
+      }),
       reactivateCurrentProject: async (opts?: { entryScenePath?: string }) => {
         reactivated.push({ ...opts });
         // Reactivation is what makes a scene active again; the first agent turn waits for it.
@@ -1163,6 +1177,34 @@ const buildTransitionHarness = (options?: {
     catalog: { getModel: () => ({ capabilities: { supportsImages: false } }) },
     workspaceMode: { remember: () => undefined },
     browserStore: { requestPersistence: async () => true },
+    // The kit lane runs on every transition now, so the whole (canvas-bound) bake is doubled here.
+    uiKitTheme: async () => ({
+      load: async () => false,
+      getTheme: () => undefined,
+      getPresetName: () => '',
+      replaceTheme: (theme: unknown) => theme,
+    }),
+    uiKitWriter: async () => ({
+      readManifest: async () => null,
+      writeKit: async () => ({
+        kitId: 'feedface',
+        scale: 2,
+        paths: [],
+        manifest: { kitId: 'feedface', parts: {}, typography: {} },
+        warnings: [],
+      }),
+    }),
+    uiKitPrefabs: async () => ({
+      buildAndWrite: async (templateId: string) => ({
+        path: `prefabs/ui/${templateId}-feedface.pix3scene`,
+        resourcePath: `res://prefabs/ui/${templateId}-feedface.pix3scene`,
+        templateId,
+        kitId: 'feedface',
+        yaml: '',
+        nodeNames: [],
+        warnings: [],
+      }),
+    }),
   };
   for (const [key, value] of Object.entries(stubs)) {
     Object.defineProperty(service, key, { value, configurable: true });
@@ -1229,6 +1271,34 @@ describe('PrototypeBootstrapService.startPrototype', () => {
     // The recipe's own shape comes from the template it resolved to.
     expect(harness.saved[0].viewportBaseSize).toEqual({ width: 1080, height: 1920 });
     expect(harness.saved[0].defaultExportScenePath).toBe('scenes/main.pix3scene');
+  });
+
+  /**
+   * The bug this pins: the kit bake downloads the theme's woff2 files and declares them in
+   * `pix3project.yaml`, and the transition's own save then wrote a manifest built BEFORE the bake
+   * — wiping the declaration. The files were on disk, nothing registered them, and every caption
+   * drew in a substitute face.
+   */
+  it('keeps the fonts the kit bake declared while the transition was running', async () => {
+    const fonts = [
+      { family: 'Lilita One', path: 'fonts/lilita-one-400.woff2', weight: 400, style: 'normal' },
+    ] as ProjectManifest['fonts'];
+    const harness = buildTransitionHarness({ bakedFonts: fonts });
+
+    await harness.service.startPrototype({ startAgentTurn: false });
+
+    expect(harness.saved).toHaveLength(1);
+    expect(harness.saved[0].fonts).toEqual(fonts);
+    // …and the rest of the manifest is still the one the transition built.
+    expect(harness.saved[0].metadata?.flowStage).toBe('prototype');
+  });
+
+  it('does not write an empty fonts list when the bake declared none', async () => {
+    const harness = buildTransitionHarness();
+
+    await harness.service.startPrototype({ startAgentTurn: false });
+
+    expect(harness.saved[0].fonts).toBeUndefined();
   });
 
   it('flips the stage only after the recipe is fully on disk', async () => {
@@ -1599,6 +1669,46 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
     '',
   ].join('\n');
 
+  /**
+   * The typography cases need the three inputs the caption plan reads off the FILE: a caption, a
+   * height, and — on one node — a hand-set size that must survive. `HudLabel` is here because a
+   * `Label2D` is a caption node the expander did not use to touch at all.
+   */
+  const CAPTION_SCENE = [
+    'version: 1.0.0',
+    'root:',
+    '  - id: ui-root',
+    '    type: Group2D',
+    '    name: UI',
+    '    properties: {}',
+    '    children:',
+    '      - id: btn-play',
+    '        type: Button2D',
+    '        name: PlayButton',
+    '        properties:',
+    '          label: Play',
+    '          height: 96',
+    '          labelColor: "#141a2e"',
+    '        children: []',
+    '      - id: btn-back',
+    '        type: Button2D',
+    '        name: BackButton',
+    '        properties:',
+    '          label: Back',
+    '          height: 96',
+    '          labelFontSize: 30',
+    '        children: []',
+    '      - id: hud-score',
+    '        type: Label2D',
+    '        name: HudLabel',
+    '        properties:',
+    '          label: Score',
+    '          height: 40',
+    '          labelColor: "#abcdef"',
+    '        children: []',
+    '',
+  ].join('\n');
+
   const NO_UI_SCENE = [
     'version: 1.0.0',
     'root:',
@@ -1626,15 +1736,46 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
         };
       }
     }
-    return { kitId, parts };
+    return {
+      kitId,
+      parts,
+      // The caption recipe the T0 lane now writes onto every caption node. Values are distinctive
+      // so a spec can tell them from `UIControl2D`'s own defaults (16 px Arial, no outline).
+      typography: {
+        family: 'Lilita One',
+        cyrFamily: 'Rubik',
+        weight: 400,
+        cyrWeight: 800,
+        outlineWidth: 1.5,
+        outlineColor: '#181410',
+        shadowColor: '#181410',
+        shadowOffsetX: 0,
+        shadowOffsetY: 2,
+        letterSpacing: 1,
+        inkColor: '#ffffff',
+      },
+      theme: normalizeTheme({}),
+    };
   };
 
-  const buildSkinHarness = (scenes: Record<string, string>) => {
+  const buildSkinHarness = (
+    scenes: Record<string, string>,
+    options: {
+      /** A theme the user already saved in the UI Kit tab (`design/ui-theme.json`). */
+      readonly projectTheme?: { theme: unknown; preset: string };
+      /** What `readManifest()` answers — a kit already on disk. */
+      readonly existingManifest?: unknown;
+      /** Make the prefab builder throw, to check the note-not-failure contract. */
+      readonly prefabError?: string;
+    } = {}
+  ) => {
     const service = new PrototypeBootstrapService();
     const written = new Map<string, string>();
     const files = new Map(Object.entries(scenes));
     const writeCalls: Record<string, unknown>[] = [];
+    const prefabCalls: { templateId: string; theme: unknown; manifest: unknown }[] = [];
     let savedTheme: { theme: unknown; preset: string } | null = null;
+    let result: RecipeUiKitResult | null = null;
 
     Object.defineProperty(service, 'storage', {
       value: {
@@ -1660,6 +1801,11 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
     });
     Object.defineProperty(service, 'uiKitTheme', {
       value: async () => ({
+        // `load(true)` answers "a stored theme was adopted", which is what makes a theme the user
+        // built in the UI Kit tab win over the derived one.
+        load: async () => Boolean(options.projectTheme),
+        getTheme: () => options.projectTheme?.theme,
+        getPresetName: () => options.projectTheme?.preset ?? '',
         replaceTheme: (theme: unknown, preset: string) => {
           savedTheme = { theme, preset };
           return theme;
@@ -1669,8 +1815,9 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
     });
     Object.defineProperty(service, 'uiKitWriter', {
       value: async () => ({
-        writeKit: async (theme: unknown, options: Record<string, unknown>) => {
-          writeCalls.push({ theme, options });
+        readManifest: async () => options.existingManifest ?? null,
+        writeKit: async (theme: unknown, writeOptions: Record<string, unknown>) => {
+          writeCalls.push({ theme, options: writeOptions });
           return {
             kitId: 'cafebabe',
             scale: 2,
@@ -1682,16 +1829,40 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
       }),
       configurable: true,
     });
+    Object.defineProperty(service, 'uiKitPrefabs', {
+      value: async () => ({
+        buildAndWrite: async (
+          templateId: string,
+          theme: unknown,
+          buildOptions: { manifest?: unknown }
+        ) => {
+          if (options.prefabError) throw new Error(options.prefabError);
+          prefabCalls.push({ templateId, theme, manifest: buildOptions.manifest });
+          return {
+            path: `prefabs/ui/${templateId}-cafebabe.pix3scene`,
+            resourcePath: `res://prefabs/ui/${templateId}-cafebabe.pix3scene`,
+            templateId,
+            kitId: 'cafebabe',
+            yaml: '',
+            nodeNames: [],
+            warnings: [],
+          };
+        },
+      }),
+      configurable: true,
+    });
 
     return {
       service,
       written,
       writeCalls,
+      prefabCalls,
       theme: () => savedTheme,
+      result: () => result,
       skin: async (brief: PrototypeBrief, notes: string[] = []) => {
-        await (
+        result = await (
           service as unknown as {
-            skinRecipeUi(b: PrototypeBrief, n: string[]): Promise<void>;
+            skinRecipeUi(b: PrototypeBrief, n: string[]): Promise<RecipeUiKitResult | null>;
           }
         ).skinRecipeUi(brief, notes);
         return notes;
@@ -1716,6 +1887,15 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
       increments: [],
     }) as PrototypeBrief;
 
+  /** The `properties:` block of one node in a patched scene. */
+  const nodeBlock = (yaml: string, id: string): string => {
+    const start = yaml.indexOf(`id: ${id}`);
+    expect(start, id).toBeGreaterThan(-1);
+    const rest = yaml.slice(start + 1);
+    const next = rest.indexOf('      - id: ');
+    return next === -1 ? rest : rest.slice(0, next);
+  };
+
   it('paints Play green, Back blue and Quit red, with the nine-slice insets', async () => {
     const harness = buildSkinHarness({ 'scenes/main.pix3scene': SCENE });
 
@@ -1739,7 +1919,7 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
     expect(play).not.toContain('btn_red_normal');
   });
 
-  it('bakes only the roles it can use, and no glyph buttons', async () => {
+  it('bakes the roles the kit needs plus the prefabs glyph, and nothing more', async () => {
     const harness = buildSkinHarness({ 'scenes/main.pix3scene': SCENE });
 
     await harness.skin(uiBrief());
@@ -1747,8 +1927,11 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
     expect(harness.writeCalls).toHaveLength(1);
     expect(harness.writeCalls[0].options).toMatchObject({
       colorRoles: UI_KIT_BOOTSTRAP_ROLES,
-      iconButtons: false,
+      iconButtonGlyphs: UI_KIT_BOOTSTRAP_GLYPHS,
     });
+    // `sky` is what the window templates paint their frame with — without it the dialog prefab
+    // comes out untextured.
+    expect(UI_KIT_BOOTSTRAP_ROLES).toContain('sky');
     // The theme service is told BEFORE the bake — the writer saves what it holds, and the two
     // documents must describe one kit.
     expect(harness.theme()?.preset).toBe('Candy Pop');
@@ -1765,20 +1948,104 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
     );
   });
 
-  it('skips a project with no 2D UI nodes, silently and without baking', async () => {
+  /**
+   * The gap this closes: a skinned button used to keep the recipe's 16 px Arial and the
+   * `labelColor` picked for a flat amber placeholder, so the kit's own page and the game showed
+   * two different kits.
+   */
+  it('writes the kit caption recipe onto every caption node', async () => {
+    const harness = buildSkinHarness({ 'scenes/main.pix3scene': CAPTION_SCENE });
+
+    await harness.skin(uiBrief());
+
+    const patched = harness.written.get('scenes/main.pix3scene') ?? '';
+    const play = nodeBlock(patched, 'btn-play');
+    expect(play).toContain('labelFontFamily: Lilita One');
+    expect(play).toContain('labelFontWeight: 400');
+    expect(play).toContain('labelOutlineWidth: 1.5');
+    expect(play).toContain('labelLetterSpacing: 1');
+    // 96 x 0.38, because this button has never been sized by hand.
+    expect(play).toContain('labelFontSize: 36');
+
+    // A hand-set size survives a skin.
+    expect(nodeBlock(patched, 'btn-back')).toContain('labelFontSize: 30');
+
+    // A Label2D takes the typography too — and spells its outline the way its own schema does.
+    const hud = nodeBlock(patched, 'hud-score');
+    expect(hud).toContain('labelFontFamily: Lilita One');
+    expect(hud).toContain('outlineWidth: 1.5');
+    expect(hud).not.toContain('labelOutlineWidth');
+  });
+
+  it('re-inks a Button2D for its role but leaves a Label2D colour alone', async () => {
+    const harness = buildSkinHarness({ 'scenes/main.pix3scene': CAPTION_SCENE });
+
+    await harness.skin(uiBrief());
+
+    const patched = harness.written.get('scenes/main.pix3scene') ?? '';
+    // The recipe's ink was chosen for a flat amber placeholder; the button now sits on a green
+    // kit ground, so its caption colour is the kit's answer for that ground.
+    const play = nodeBlock(patched, 'btn-play');
+    const ink = captionInkForRole(deriveUiKitTheme(uiBrief()).theme, 'green');
+    expect(ink).toMatch(/^#[0-9a-f]{6}$/);
+    expect(play).toContain(`labelColor: "${ink}"`);
+    expect(play).not.toContain('#141a2e');
+    // A Label2D sits on the game's own background, so its colour is the recipe's business.
+    expect(nodeBlock(patched, 'hud-score')).toContain('labelColor: "#abcdef"');
+  });
+
+  /**
+   * The guard that used to return here in silence. The agent then built the first menu itself and
+   * spent a turn baking a kit — the very move T0 exists to remove.
+   */
+  it('bakes the kit even when the recipe has no UI node yet, and says so', async () => {
     const harness = buildSkinHarness({ 'scenes/world.pix3scene': NO_UI_SCENE });
 
     const notes = await harness.skin(uiBrief());
 
-    expect(harness.writeCalls).toHaveLength(0);
-    expect(harness.written.size).toBe(0);
-    expect(notes).toEqual([]);
+    expect(harness.writeCalls).toHaveLength(1);
+    // Nothing to patch, so no scene was rewritten — but the kit is on disk.
+    expect([...harness.written.keys()]).toEqual([]);
+    expect(notes.join(' ')).toContain('Baked the "Candy Pop" UI kit (sprites/ui/cafebabe)');
+    expect(notes.join(' ')).toContain('no UI nodes to skin yet');
+    expect(harness.result()?.kitId).toBe('cafebabe');
+  });
+
+  it('writes the window prefabs off the baked kit', async () => {
+    const harness = buildSkinHarness({ 'scenes/main.pix3scene': SCENE });
+
+    await harness.skin(uiBrief());
+
+    expect(harness.prefabCalls.map(call => call.templateId)).toEqual([
+      ...UI_KIT_BOOTSTRAP_TEMPLATES,
+    ]);
+    // Built against the kit that was just baked, never a re-read of the project.
+    expect(harness.prefabCalls[0].manifest).toMatchObject({ kitId: 'cafebabe' });
+    expect(harness.result()?.prefabs).toEqual([
+      'res://prefabs/ui/dialog-cafebabe.pix3scene',
+      'res://prefabs/ui/settings-cafebabe.pix3scene',
+    ]);
+  });
+
+  it('degrades a failed prefab build into a note and keeps the skin', async () => {
+    const harness = buildSkinHarness(
+      { 'scenes/main.pix3scene': SCENE },
+      { prefabError: 'no project is open' }
+    );
+
+    const notes = await harness.skin(uiBrief());
+
+    expect(notes.join(' ')).toContain('no project is open');
+    expect(harness.result()?.prefabs).toEqual([]);
+    // The buttons are still dressed — a prefab is not the reason to lose a kit.
+    expect(harness.written.get('scenes/main.pix3scene')).toContain('btn_green_normal');
   });
 
   it('degrades a failed bake into a note instead of failing the transition', async () => {
     const harness = buildSkinHarness({ 'scenes/main.pix3scene': SCENE });
     Object.defineProperty(harness.service, 'uiKitWriter', {
       value: async () => ({
+        readManifest: async () => null,
         writeKit: async () => {
           throw new Error('canvas is not available');
         },
@@ -1790,5 +2057,128 @@ describe('PrototypeBootstrapService: deterministic UI skinning', () => {
 
     expect(notes.join(' ')).toContain('canvas is not available');
     expect(harness.written.size).toBe(0);
+    expect(harness.result()).toBeNull();
+  });
+
+  /**
+   * A theme the user built in the UI Kit tab before pressing the CTA is a DECISION. Deriving one
+   * from the palette on top of it threw that decision away without saying anything.
+   */
+  it('prefers a theme already saved in the project over the derived one', async () => {
+    const projectTheme = normalizeTheme(presetTheme('Brawl Stars'));
+    const harness = buildSkinHarness(
+      { 'scenes/main.pix3scene': SCENE },
+      { projectTheme: { theme: projectTheme, preset: 'My Kit' } }
+    );
+
+    const notes = await harness.skin(uiBrief());
+
+    expect(notes.join(' ')).toContain('Used your UI Kit theme (My Kit)');
+    expect(harness.writeCalls[0].theme).toEqual(projectTheme);
+    // The derived theme is never written back over the user's.
+    expect(harness.theme()).toBeNull();
+    expect(harness.result()?.preset).toBe('My Kit');
+  });
+
+  it('skips the bake when the project already holds a kit for this exact theme', async () => {
+    const { theme } = deriveUiKitTheme(uiBrief());
+    const kitId = kitIdForTheme(theme);
+    const harness = buildSkinHarness(
+      { 'scenes/main.pix3scene': SCENE },
+      { existingManifest: stubManifest(kitId) }
+    );
+
+    const notes = await harness.skin(uiBrief());
+
+    expect(harness.writeCalls).toHaveLength(0);
+    expect(notes.join(' ')).toContain('Reused the "Candy Pop" UI kit already baked');
+    // The skin still lands — off the manifest that was already there.
+    expect(harness.written.get('scenes/main.pix3scene')).toContain(
+      `sprites/ui/${kitId}/btn_green_normal_250x88.png`
+    );
+    // And the prefabs are still checked: a kit can exist without them.
+    expect(harness.prefabCalls).toHaveLength(UI_KIT_BOOTSTRAP_TEMPLATES.length);
+  });
+
+  it('re-bakes when the stored kit was built from another theme', async () => {
+    const harness = buildSkinHarness(
+      { 'scenes/main.pix3scene': SCENE },
+      { existingManifest: stubManifest('00000000') }
+    );
+
+    await harness.skin(uiBrief());
+
+    expect(harness.writeCalls).toHaveLength(1);
+  });
+});
+
+/**
+ * The `## UI kit` section of `design/style.md`: what the agent reads on its first turn to know
+ * that a kit exists, which role a button should ask for, and that the pause menu it is about to
+ * draw already exists as a prefab.
+ */
+describe('renderStyleMarkdown: the UI kit section', () => {
+  const kit = (over: Partial<RecipeUiKitResult> = {}): RecipeUiKitResult => ({
+    kitId: 'cafebabe',
+    preset: 'Candy Pop',
+    manifestPath: 'design/ui-kit.json',
+    prefabs: [
+      'res://prefabs/ui/dialog-cafebabe.pix3scene',
+      'res://prefabs/ui/settings-cafebabe.pix3scene',
+    ],
+    typography: {
+      family: 'Lilita One',
+      cyrFamily: 'Rubik',
+      weight: 400,
+      cyrWeight: 800,
+      outlineWidth: 1.5,
+      outlineColor: '#181410',
+      shadowColor: '#181410',
+      shadowOffsetX: 0,
+      shadowOffsetY: 2,
+      letterSpacing: 1,
+      inkColor: '#ffffff',
+    },
+    ...over,
+  });
+
+  const brief = (): PrototypeBrief =>
+    ({
+      title: 'Bubbles',
+      pitch: 'pop them',
+      recipeId: FALLBACK_RECIPE_ID,
+      style: { palette: ['#101020'], artStyle: 'flat', mood: 'calm', theme: 'pastel' },
+      entities: [],
+      tunables: {},
+      winLose: { win: 'clear', lose: 'miss' },
+      increments: [],
+    }) as PrototypeBrief;
+
+  it('names the kit, its folder, the roles, the face and the prefabs', () => {
+    const markdown = renderStyleMarkdown(brief(), [], kit());
+
+    expect(markdown).toContain('## UI kit');
+    expect(markdown).toContain('`cafebabe`');
+    expect(markdown).toContain('`sprites/ui/cafebabe/`');
+    expect(markdown).toContain('`design/ui-kit.json`');
+    expect(markdown).toContain('Candy Pop');
+    expect(markdown).toContain('`Lilita One` 400');
+    expect(markdown).toContain('Cyrillic: `Rubik` 800');
+    expect(markdown).toContain('`green` = primary action');
+    expect(markdown).toContain('`red` = destructive');
+    expect(markdown).toContain('`res://prefabs/ui/dialog-cafebabe.pix3scene`');
+    // The three moves the agent used to re-derive, badly.
+    expect(markdown).toContain('skin_ui');
+    expect(markdown).toContain('CreatePrefabInstance');
+    expect(markdown).toContain("action: 'restyle'");
+  });
+
+  it('leaves the prefab list out when nothing was built, and the section out with no kit', () => {
+    const withoutPrefabs = renderStyleMarkdown(brief(), [], kit({ prefabs: [] }));
+    expect(withoutPrefabs).toContain('## UI kit');
+    expect(withoutPrefabs).not.toContain('Window prefabs');
+
+    // The old two-argument call still renders exactly the document it used to.
+    expect(renderStyleMarkdown(brief(), [])).not.toContain('## UI kit');
   });
 });

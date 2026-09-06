@@ -181,6 +181,7 @@ export {
 export {
   buildTemplate,
   buildTypography,
+  captionInkForRole,
   walkTemplate,
   TEMPLATE_TYPE_SCALE,
   type TemplateAnchor,

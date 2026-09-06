@@ -14,6 +14,12 @@ import {
 } from '@pix3/runtime';
 import { DEFAULT_THEME, buildTemplate, normalizeTheme, walkTemplate } from '@/services/uikit';
 import { UiKitPrefabBuilder, UI_PREFAB_ROOT } from '@/services/uikit-editor/UiKitPrefabBuilder';
+import { UiKitProjectWriter } from '@/services/uikit-editor/UiKitProjectWriter';
+import {
+  UI_KIT_BOOTSTRAP_GLYPHS,
+  UI_KIT_BOOTSTRAP_ROLES,
+  UI_KIT_BOOTSTRAP_TEMPLATES,
+} from '@/services/flow/PrototypeBootstrapService';
 import {
   iconPartKey,
   partKey,
@@ -286,5 +292,66 @@ describe('UiKitPrefabBuilder.buildAndWrite', () => {
     await expect(builder.buildAndWrite('dialog', normalizeTheme(DEFAULT_THEME))).rejects.toThrow(
       /No project/
     );
+  });
+});
+
+/**
+ * The T0 bake and the window prefabs are one contract, and it is easy to break from either side:
+ * the templates paint their frame with the `sky` role and their close control with the `close`
+ * glyph, and the expander bakes a NARROWED set (four roles, no glyphs, originally). This measures
+ * the two against each other rather than trusting either list — a real kit is baked with the
+ * expander's own options, both prefabs are built off it, and any missing part is a warning the
+ * builder itself raises.
+ */
+describe('the T0 bake covers every part the window prefabs reference', () => {
+  const PNG = () => new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' });
+
+  const bakeLikeT0 = async () => {
+    const writer = new UiKitProjectWriter();
+    let handles = 0;
+    Object.defineProperty(writer, 'assets', {
+      value: {
+        importBlob: async () => ({ id: `handle-${(handles += 1)}` }),
+        save: async (_id: string, path: string) => ({ path }),
+        discard: () => undefined,
+      },
+      configurable: true,
+    });
+    Object.defineProperty(writer, 'storage', {
+      value: {
+        createDirectory: async () => undefined,
+        writeTextFile: async () => undefined,
+        readTextFile: async () => {
+          throw new Error('not found');
+        },
+      },
+      configurable: true,
+    });
+    Object.defineProperty(writer, 'themeService', {
+      value: { save: async () => 'design/ui-theme.json' },
+      configurable: true,
+    });
+    writer.rasterize = async () => PNG();
+    writer.readPixels = async () => null;
+    writer.fetchFonts = async () => ({ files: [], warnings: [] });
+
+    appState.project.status = 'ready';
+    appState.project.id = 'proj-t0';
+    return writer.writeKit(normalizeTheme(DEFAULT_THEME), {
+      colorRoles: UI_KIT_BOOTSTRAP_ROLES,
+      iconButtonGlyphs: UI_KIT_BOOTSTRAP_GLYPHS,
+      fonts: false,
+    });
+  };
+
+  it('builds both templates with no untextured node', async () => {
+    const kit = await bakeLikeT0();
+    const theme = normalizeTheme(DEFAULT_THEME);
+    const { builder } = createBuilder();
+
+    for (const templateId of UI_KIT_BOOTSTRAP_TEMPLATES) {
+      const built = builder.buildYaml(templateId, theme, kit.manifest);
+      expect(built.warnings, templateId).toEqual([]);
+    }
   });
 });

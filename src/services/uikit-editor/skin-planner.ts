@@ -81,6 +81,17 @@ export interface CaptionPlanOptions {
   height?: number;
   /** The node's current `labelFontSize`; a hand-set size is never overwritten. */
   currentFontSize?: number;
+  /**
+   * The caption colour (`labelColor`, on `Label2D` too — it inherits the property from
+   * `UIControl2D`), written only when a caller asks for it.
+   *
+   * Opt-in on purpose, and the asymmetry is the point. The T0 expander DOES pass it, because the
+   * recipe ships a `labelColor` picked for a flat amber placeholder and a button wearing a green
+   * kit skin needs the ink that kit's own ground asks for. The manual "Apply to selection" and
+   * `skin_ui apply` do NOT, because a colour the user chose has to survive a re-skin — exactly
+   * like a hand-set `labelFontSize`.
+   */
+  inkColor?: string;
 }
 
 /**
@@ -118,6 +129,8 @@ export function planCaptionPatches(
     write('labelShadowOffsetY', t.shadowOffsetY),
     write('labelLetterSpacing', t.letterSpacing),
   ];
+  // Only when asked: see `CaptionPlanOptions.inkColor`.
+  if (options.inkColor) writes.push(write('labelColor', options.inkColor));
   // Size only when nobody has chosen one: a hand-tuned caption must survive a re-skin.
   const height = options.height ?? 0;
   if (
@@ -188,6 +201,28 @@ const PLANNERS: Record<string, SkinPlanner> = {
 
 /** The node types a kit knows how to skin. */
 export const SKINNABLE_NODE_TYPES: readonly string[] = Object.keys(PLANNERS);
+
+/**
+ * The colour role a UI node's NAME asks for.
+ *
+ * A heuristic, and cheap on purpose: the alternative is a model turn per button, and the whole
+ * argument for doing cosmetics in code is that a turn spent here buys nothing a table cannot
+ * decide. Destructive is checked first so a "Reset progress" button does not read as a
+ * confirmation just because it contains "set".
+ *
+ * Lives with the planner rather than with the T0 flow that first needed it: it is a rule about
+ * SKINNING, and `create_node` now applies the same rule to a node the agent just made.
+ */
+export const uiKitRoleForNodeName = (name: string): PaletteId => {
+  const n = name.toLowerCase();
+  if (/(^|[^a-z])(quit|exit|delete|remove|reset|clear|danger|health|hp|lives?)/.test(n)) {
+    return 'red';
+  }
+  if (/(^|[^a-z])(play|start|ok|confirm|accept|yes|go|next|continue|resume|retry)/.test(n)) {
+    return 'green';
+  }
+  return 'blue';
+};
 
 /** The interactive UI node types — the ones the T0 expander skins on its own. */
 export const UI_CONTROL_NODE_TYPES: readonly string[] = [

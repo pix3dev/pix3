@@ -23,6 +23,12 @@ export interface ApplyUiKitSkinCommandParams {
    * the default) size. Default true: art without typography is half a kit.
    */
   typography?: boolean;
+  /**
+   * Also write `labelColor`. Left unset by the panel, by `run_command` and by `skin_ui apply` —
+   * see {@link ApplyUiKitSkinOperationParams.inkColor} for why re-skinning must not repaint a
+   * caption someone chose.
+   */
+  inkColor?: string;
 }
 
 export const DEFAULT_UIKIT_COLOR_ROLE: PaletteId = 'blue';
@@ -121,6 +127,7 @@ export class ApplyUiKitSkinCommand extends CommandBase<void, void> {
         colorRole: this.params.colorRole ?? DEFAULT_UIKIT_COLOR_ROLE,
         manifest,
         ...(this.params.typography === false ? { typography: false } : {}),
+        ...(this.params.inkColor ? { inkColor: this.params.inkColor } : {}),
       })
     );
 

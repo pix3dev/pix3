@@ -398,6 +398,16 @@ export interface SceneNodeRef {
   readonly id: string;
   readonly name: string;
   readonly type: string;
+  /**
+   * The node's raw `properties` map, exactly as the YAML carries it.
+   *
+   * Present so a caller can decide from the values already on disk. The T0 skinner needs three
+   * of them per control - `label` (a Cyrillic caption is drawn by another face), `height` (the
+   * caption size is a ratio of it) and `labelFontSize` (a hand-set size must survive a re-skin)
+   * - and reading them here costs nothing, while loading the scene into a graph to ask would
+   * cost the whole point of patching files. Absent when the node declares no properties.
+   */
+  readonly properties?: Record<string, unknown>;
 }
 
 /**
@@ -423,10 +433,17 @@ export const listSceneNodes = (sceneText: string): SceneNodeRef[] => {
     if (!node || typeof node !== 'object') return;
     const record = node as Record<string, unknown>;
     if (typeof record.id === 'string' && typeof record.type === 'string') {
+      const properties =
+        record.properties &&
+        typeof record.properties === 'object' &&
+        !Array.isArray(record.properties)
+          ? (record.properties as Record<string, unknown>)
+          : undefined;
       out.push({
         id: record.id,
         name: typeof record.name === 'string' ? record.name : record.id,
         type: record.type,
+        ...(properties ? { properties } : {}),
       });
     }
     const children = record.children;

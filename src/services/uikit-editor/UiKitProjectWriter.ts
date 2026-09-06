@@ -12,6 +12,7 @@ import {
   frameMeta,
   isNineSliceable,
   normalizeTheme,
+  resolveIconName,
   skinBuildTheme,
   type ButtonSkinState,
   type ForgeTheme,
@@ -107,6 +108,15 @@ export interface KitWriteOptions {
   fonts?: boolean;
   /** Bake the glyph buttons of {@link ICON_BUTTON_GLYPHS}. Default true. */
   iconButtons?: boolean;
+  /**
+   * Bake only these glyphs (names or aliases of {@link ICON_BUTTON_GLYPHS}) instead of all of
+   * them. Ignored when `iconButtons` is false.
+   *
+   * The middle ground the T0 expander needs: a recipe's HUD references no glyph at all, so the
+   * expander bakes with `iconButtons: false` — but the dialog PREFAB it now also writes wears a
+   * glyph close button, and one glyph is 4 pictures where the full set is 28.
+   */
+  iconButtonGlyphs?: readonly string[];
   /** Extra colour roles for EVERY glyph, beyond each glyph's own semantic role. */
   iconButtonRoles?: readonly PaletteId[];
   /** Progress ticks, so a panel can show "17 / 76" without polling. */
@@ -437,7 +447,11 @@ export class UiKitProjectWriter {
     }
 
     if (options.iconButtons !== false) {
+      const wanted = options.iconButtonGlyphs
+        ? new Set(options.iconButtonGlyphs.map(name => resolveIconName(name)))
+        : null;
       for (const [icon, semanticRole] of Object.entries(ICON_BUTTON_GLYPHS)) {
+        if (wanted && !wanted.has(resolveIconName(icon))) continue;
         const iconRoles = [...new Set([semanticRole, ...(options.iconButtonRoles ?? [])])];
         for (const role of iconRoles) {
           for (const state of BUTTON_STATES) {

@@ -56,6 +56,7 @@ import { Scene3DGenService } from '@/services/model-gen/scene/Scene3DGenService'
 import { AgentVisionService } from '@/services/agent/AgentVisionService';
 import {
   PALETTE,
+  captionInkForRole,
   normalizeTheme,
   presetNames,
   presetTheme,
@@ -63,9 +64,11 @@ import {
   type PaletteId,
 } from '@/services/uikit';
 import {
+  CAPTION_NODE_TYPES,
   SKINNABLE_NODE_TYPES,
   UI_CONTROL_NODE_TYPES,
   planSkinPatches,
+  uiKitRoleForNodeName,
 } from '@/services/uikit-editor/skin-planner';
 import type { KitManifest, UiKitProjectWriter } from '@/services/uikit-editor/UiKitProjectWriter';
 import type { UiKitThemeService } from '@/services/uikit-editor/UiKitThemeService';
@@ -2497,6 +2500,10 @@ export class AgentToolRegistry {
         }
       }
     }
+    // A fresh Button2D used to arrive as a grey rectangle and stay one until the agent remembered
+    // `skin_ui apply` — which, measured, it often did not. The project's own kit is the default
+    // look, so wearing it is not something to be asked for.
+    const skin = await this.autoSkinCreatedNode(nodeId, options.texturePath);
     await this.saveActiveSceneBestEffort();
 
     const graph = this.sceneManager.getActiveSceneGraph();
@@ -2520,6 +2527,8 @@ export class AgentToolRegistry {
       nodeType: node?.type ?? nodeType,
       name: node?.name,
       ...(Object.keys(propertyErrors).length > 0 ? { propertyErrors } : {}),
+      ...(skin.skinned ? { skinned: skin.skinned } : {}),
+      ...(skin.warning ? { skinWarning: skin.warning } : {}),
       ...(duplicateNodeIds.length > 0
         ? {
             duplicateNameNodeIds: duplicateNodeIds,
@@ -2527,6 +2536,59 @@ export class AgentToolRegistry {
           }
         : {}),
     };
+  }
+
+  /**
+   * Dress a just-created node in the project's baked UI kit.
+   *
+   * Three no-ops, each deliberate: a node type the kit cannot dress, an explicit `texturePath`
+   * (the caller said what the art is, so the kit would be overwriting an instruction), and a
+   * project with no `design/ui-kit.json` at all — the last one is silent because a project that
+   * never baked a kit is not misconfigured.
+   *
+   * The colour role comes from the node's NAME, the same rule the T0 expander uses, and the ink
+   * comes with it: this node is being dressed for the first time, which is the one case where
+   * `labelColor` may be written (a re-skin must not repaint a chosen colour).
+   */
+  private async autoSkinCreatedNode(
+    nodeId: string,
+    texturePath: string | null | undefined
+  ): Promise<{ skinned?: { kitId: string; colorRole: PaletteId }; warning?: string }> {
+    const graph = this.sceneManager.getActiveSceneGraph();
+    const node = nodeId ? graph?.nodeMap.get(nodeId) : undefined;
+    if (!node || texturePath) return {};
+    if (!SKINNABLE_NODE_TYPES.includes(node.type) && !CAPTION_NODE_TYPES.includes(node.type)) {
+      return {};
+    }
+
+    try {
+      const manifest = await (await this.uiKitWriter()).readManifest();
+      if (!manifest) return {};
+
+      const colorRole = uiKitRoleForNodeName(node.name);
+      const { ApplyUiKitSkinCommand } = await import('@/features/uikit/ApplyUiKitSkinCommand');
+      const didMutate = await this.dispatcher.execute(
+        new ApplyUiKitSkinCommand({
+          nodeIds: [nodeId],
+          colorRole,
+          manifest,
+          // Only a button's caption sits on a coloured kit ground; a Label2D sits on the game's
+          // own background and keeps whatever colour the caller (or the default) gave it — the
+          // same split the T0 expander makes.
+          ...(node.type === 'Button2D'
+            ? { inkColor: captionInkForRole(manifest.theme, colorRole) }
+            : {}),
+        })
+      );
+      return didMutate ? { skinned: { kitId: manifest.kitId, colorRole } } : {};
+    } catch (error) {
+      // The node exists and is correct; only its clothes failed.
+      return {
+        warning: `The node was created but the UI kit could not be applied: ${
+          error instanceof Error ? error.message : String(error)
+        }. Run skin_ui { action: "apply", nodeIds: ["${nodeId}"] } to retry.`,
+      };
+    }
   }
 
   private async convertNodeType(args: Record<string, unknown>): Promise<Record<string, unknown>> {

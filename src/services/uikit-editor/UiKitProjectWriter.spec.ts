@@ -1,7 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appState, resetAppState } from '@/state';
-import { DEFAULT_THEME, buildSkin, normalizeTheme, presetTheme } from '@/services/uikit';
+import {
+  BUTTON_STATES,
+  DEFAULT_THEME,
+  buildSkin,
+  normalizeTheme,
+  presetTheme,
+} from '@/services/uikit';
 import { UI_THEME_PATH, UI_KIT_MANIFEST_PATH } from '@/services/uikit-editor/UiKitThemeService';
 import {
   DEFAULT_BUTTON_SIZE,
@@ -182,6 +188,41 @@ describe('UiKitProjectWriter.writeKit', () => {
 
     expect(result.manifest.parts[iconPartKey('close', 'red', 'normal')]).toBeUndefined();
     expect(result.manifest.parts[partKey('button', 'green', 'normal')]).toBeDefined();
+  });
+
+  /**
+   * The middle ground: the T0 expander's window prefabs wear exactly one glyph (the dialog's
+   * close control), and 4 pictures is a very different bake from the full set's 28.
+   */
+  it('bakes only the named glyphs when iconButtonGlyphs is given', async () => {
+    const { writer } = createWriter();
+
+    const result = await writer.writeKit(normalizeTheme(DEFAULT_THEME), {
+      colorRoles: ['green'],
+      iconButtonGlyphs: ['close'],
+    });
+
+    const icons = Object.values(result.manifest.parts).filter(
+      part => part.component === 'icon-button'
+    );
+    expect(icons).toHaveLength(BUTTON_STATES.length);
+    expect(new Set(icons.map(part => part.icon))).toEqual(new Set(['close']));
+    expect(result.manifest.parts[iconPartKey('close', 'red', 'normal')]).toBeDefined();
+    expect(result.manifest.parts[iconPartKey('gear', 'bluegray', 'normal')]).toBeUndefined();
+  });
+
+  it('ignores iconButtonGlyphs when the glyphs are switched off entirely', async () => {
+    const { writer } = createWriter();
+
+    const result = await writer.writeKit(normalizeTheme(DEFAULT_THEME), {
+      colorRoles: ['green'],
+      iconButtons: false,
+      iconButtonGlyphs: ['close'],
+    });
+
+    expect(
+      Object.values(result.manifest.parts).filter(part => part.component === 'icon-button')
+    ).toHaveLength(0);
   });
 
   /**

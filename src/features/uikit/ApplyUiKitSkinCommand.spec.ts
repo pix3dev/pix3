@@ -184,6 +184,55 @@ describe('ApplyUiKitSkinOperation', () => {
     expect(plain.properties.texture).toBeUndefined();
   });
 
+  /**
+   * The asymmetry the T0 expander depends on. A caption colour is a CHOICE — the recipe picks one
+   * for its placeholder ground, the user picks one in the inspector — so a re-skin may not repaint
+   * it. Only a caller dressing a node for the first time passes `inkColor`.
+   */
+  it('leaves labelColor alone unless the caller passes inkColor', async () => {
+    const button = new Button2D({
+      id: 'btn-ink',
+      name: 'Play',
+      width: 250,
+      height: 88,
+      labelColor: '#141a2e',
+    });
+    const context = createContext([button]);
+
+    await new ApplyUiKitSkinOperation({
+      nodeIds: ['btn-ink'],
+      colorRole: 'blue',
+      manifest: createManifest(),
+    }).perform(context);
+
+    // The art and the face changed; the colour did not.
+    expect(button.textureNormal?.url).toBe('res://sprites/ui/abcd1234/btn_blue_normal.png');
+    expect(button.labelFontFamily).toBe('Lilita One');
+    expect(button.labelColor).toBe('#141a2e');
+  });
+
+  it('writes labelColor — and undoes it — when inkColor is given', async () => {
+    const button = new Button2D({
+      id: 'btn-ink-2',
+      name: 'Play',
+      width: 250,
+      height: 88,
+      labelColor: '#141a2e',
+    });
+    const context = createContext([button]);
+
+    const result = await new ApplyUiKitSkinOperation({
+      nodeIds: ['btn-ink-2'],
+      colorRole: 'blue',
+      manifest: createManifest(),
+      inkColor: '#fff8e7',
+    }).perform(context);
+
+    expect(button.labelColor).toBe('#fff8e7');
+    await result.commit?.undo();
+    expect(button.labelColor).toBe('#141a2e');
+  });
+
   it('does nothing when nothing in the selection is skinnable', async () => {
     const plain = new NodeBase({ id: 'plain-2', type: 'Node3D', name: 'Rig' });
     const context = createContext([plain]);
@@ -213,6 +262,50 @@ describe('ApplyUiKitSkinCommand', () => {
     const result = new ApplyUiKitSkinCommand().preconditions(context);
     expect(result.canExecute).toBe(false);
     expect(result.canExecute === false && result.scope).toBe('selection');
+  });
+
+  /**
+   * `inkColor` has to survive the hop through the command, because that is the only door
+   * `create_node`'s auto-skin has to the operation.
+   */
+  it('forwards inkColor to the operation, and omits it when unset', async () => {
+    const forwarded: Record<string, unknown>[] = [];
+    const button = new Button2D({ id: 'btn-4', name: 'Play', width: 250, height: 88 });
+    const context = createContext([button]);
+    const manifest = createManifest();
+    const container = {
+      getOrCreateToken: <T>(token: T): T => token,
+      getService: (token: unknown): unknown => {
+        if (String((token as { name?: string })?.name) === 'UiKitProjectWriter') {
+          return { readManifest: async () => manifest };
+        }
+        return {
+          invokeAndPush: async (operation: unknown) => {
+            forwarded.push(
+              (operation as { params: Record<string, unknown> }).params as Record<string, unknown>
+            );
+            return true;
+          },
+        };
+      },
+    };
+    const commandContext = {
+      ...context,
+      container: container as unknown as OperationContext['container'],
+    } as unknown as Parameters<ApplyUiKitSkinCommand['execute']>[0];
+
+    await new ApplyUiKitSkinCommand({
+      nodeIds: ['btn-4'],
+      colorRole: 'green',
+      manifest,
+      inkColor: '#101010',
+    }).execute(commandContext);
+    await new ApplyUiKitSkinCommand({ nodeIds: ['btn-4'], colorRole: 'green', manifest }).execute(
+      commandContext
+    );
+
+    expect(forwarded[0].inkColor).toBe('#101010');
+    expect(forwarded[1]).not.toHaveProperty('inkColor');
   });
 
   it('blocks when no project is open', () => {

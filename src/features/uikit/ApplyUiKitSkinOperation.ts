@@ -24,6 +24,12 @@ export interface ApplyUiKitSkinOperationParams {
    * art without typography is half a kit: the button wears the skin and keeps 16 px Arial.
    */
   typography?: boolean;
+  /**
+   * Also write `labelColor`. Absent by default, and that is the contract: a colour the user
+   * picked has to survive a re-skin, exactly like a hand-set `labelFontSize`. Only a caller that
+   * is dressing a node for the FIRST time (the T0 expander, `create_node`'s auto-skin) passes it.
+   */
+  inkColor?: string;
 }
 
 /** One property write, resolved before anything is touched. */
@@ -78,6 +84,7 @@ export class ApplyUiKitSkinOperation implements Operation<OperationInvokeResult>
               text: readString(node, 'label'),
               height: readNumber(node, 'height'),
               currentFontSize: readNumber(node, 'labelFontSize'),
+              ...(this.params.inkColor ? { inkColor: this.params.inkColor } : {}),
             });
       if (plan.length === 0 && captions.length === 0) continue;
       for (const write of [...plan, ...captions]) {

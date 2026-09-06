@@ -20,6 +20,8 @@ import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
 import { ReparentNodeCommand } from '@/features/scene/ReparentNodeCommand';
+import { normalizeTheme } from '@/services/uikit';
+import type { KitManifest } from '@/services/uikit-editor/UiKitProjectWriter';
 
 interface CommandMeta {
   metadata: { id: string; title: string; menuPath?: string };
@@ -1892,6 +1894,140 @@ describe('AgentToolRegistry', () => {
       expect(result.ok).toBe(true);
       expect(result.warning).toBeUndefined();
       expect(result.duplicateNameNodeIds).toBeUndefined();
+    });
+  });
+
+  /**
+   * A Button2D the agent creates used to arrive as a grey rectangle and stay one until the agent
+   * remembered `skin_ui apply` — which, measured over real runs, it often did not. The project's
+   * own kit is the DEFAULT look, so wearing it is not something to be asked for.
+   */
+  describe('create_node auto-skin', () => {
+    const manifest = {
+      kitId: 'cafebabe',
+      parts: {},
+      theme: normalizeTheme({}),
+      typography: {},
+    } as unknown as KitManifest;
+
+    const run = async (
+      args: Record<string, unknown>,
+      over: {
+        readonly nodeType?: string;
+        readonly name?: string;
+        readonly manifest?: KitManifest | null;
+        readonly readManifest?: () => Promise<KitManifest | null>;
+      } = {}
+    ) => {
+      appState.project.status = 'ready';
+      const nodeType = over.nodeType ?? 'Button2D';
+      const name = over.name ?? 'PlayButton';
+      const nodeMap = new Map<string, NodeBase>();
+      const graph = { rootNodes: [], nodeMap };
+      const commands: unknown[] = [];
+      const dispatcher = {
+        execute: vi.fn(async (cmd: unknown) => {
+          commands.push(cmd);
+          if (!nodeMap.has('fresh')) {
+            nodeMap.set('fresh', makeNode({ nodeId: 'fresh', name, type: nodeType }));
+            appState.selection.primaryNodeId = 'fresh';
+          }
+          return true;
+        }),
+        executeById: vi.fn(),
+      };
+      const registry = buildRegistry({
+        dispatcher,
+        sceneManager: { getActiveSceneGraph: () => graph },
+        uiKitWriter: async () => ({
+          readManifest:
+            over.readManifest ??
+            (async () => (over.manifest === undefined ? manifest : over.manifest)),
+        }),
+      });
+      const result = (await registry.execute('create_node', {
+        nodeType,
+        name,
+        ...args,
+      })) as Record<string, unknown>;
+      return { result, commands };
+    };
+
+    /** The params of the dispatched ApplyUiKitSkinCommand, if one was dispatched. */
+    const skinParams = (commands: unknown[]): Record<string, unknown> | null => {
+      const command = commands.find(
+        cmd =>
+          (cmd as { metadata?: { id?: string } })?.metadata?.id === 'properties.apply-uikit-skin'
+      );
+      return command
+        ? ((command as { params: Record<string, unknown> }).params as Record<string, unknown>)
+        : null;
+    };
+
+    it('dresses a new Button2D in the project kit, at the role its name asks for', async () => {
+      const { result, commands } = await run({});
+
+      expect(result.ok).toBe(true);
+      expect(result.skinned).toEqual({ kitId: 'cafebabe', colorRole: 'green' });
+      const params = skinParams(commands);
+      expect(params).toMatchObject({ nodeIds: ['fresh'], colorRole: 'green' });
+      // A node dressed for the FIRST time is the one case where the caption colour may be written.
+      expect(String(params?.inkColor)).toMatch(/^#[0-9a-f]{6}$/);
+    });
+
+    it('gives a Label2D the caption recipe but never a caption colour', async () => {
+      const { result, commands } = await run({}, { nodeType: 'Label2D', name: 'Title' });
+
+      expect(result.skinned).toEqual({ kitId: 'cafebabe', colorRole: 'blue' });
+      // A label sits on the game's own background, not on a kit ground — its ink is not the
+      // kit's to decide (the same split the T0 expander makes).
+      expect(skinParams(commands)?.inkColor).toBeUndefined();
+    });
+
+    it('reads the role out of the name, like the T0 expander does', async () => {
+      const { result } = await run({}, { name: 'QuitButton' });
+      expect(result.skinned).toEqual({ kitId: 'cafebabe', colorRole: 'red' });
+    });
+
+    it('stays out of the way when the caller named the art', async () => {
+      const { result, commands } = await run({ texturePath: 'sprites/custom.png' });
+
+      expect(result.ok).toBe(true);
+      expect(result.skinned).toBeUndefined();
+      expect(skinParams(commands)).toBeNull();
+    });
+
+    it('is silent in a project that has never baked a kit', async () => {
+      const { result, commands } = await run({}, { manifest: null });
+
+      expect(result.ok).toBe(true);
+      expect(result.skinned).toBeUndefined();
+      expect(result.skinWarning).toBeUndefined();
+      expect(skinParams(commands)).toBeNull();
+    });
+
+    it('leaves a node type the kit cannot dress alone', async () => {
+      const { result, commands } = await run({}, { nodeType: 'ColorRect2D', name: 'Backdrop' });
+
+      expect(result.ok).toBe(true);
+      expect(result.skinned).toBeUndefined();
+      expect(skinParams(commands)).toBeNull();
+    });
+
+    it('reports a failed skin as a warning — the node was still created', async () => {
+      const { result } = await run(
+        {},
+        {
+          readManifest: async () => {
+            throw new Error('ui-kit.json is not valid JSON');
+          },
+        }
+      );
+
+      expect(result.ok).toBe(true);
+      expect(result.nodeId).toBe('fresh');
+      expect(String(result.skinWarning)).toContain('ui-kit.json is not valid JSON');
+      expect(String(result.skinWarning)).toContain('skin_ui');
     });
   });
 

@@ -399,11 +399,21 @@ The bare command is reachable too: `run_command properties.apply-uikit-skin` tak
 no arguments, so its zero-argument form is defined — current selection, role
 `blue`, manifest read from `design/ui-kit.json`.
 
-**Use — the T0 expander.** `PrototypeBootstrapService` derives a theme from the
-brief's palette (the one it writes to `design/style.md`), bakes the kit and skins
-every `Button2D` / `Checkbox2D` / `Slider2D` / `Bar2D` in the recipe scenes — with
-**zero agent turns**, so the first frame of a generated prototype is a themed UI
-rather than coloured rectangles.
+**Use — the T0 expander.** `PrototypeBootstrapService` bakes the kit and dresses
+the recipe with **zero agent turns**, so the first frame of a generated prototype
+is a themed UI rather than coloured rectangles. The theme is the one saved in
+`design/ui-theme.json` when the user built one in the UI Kit tab, otherwise it is
+derived from the brief's palette; a kit already baked for that exact theme is
+reused rather than re-rendered. Every `Button2D` / `Checkbox2D` / `Slider2D` /
+`Bar2D` / `Label2D` in the recipe scenes gets the art **and** the caption recipe
+(face, weight, outline, drop, tracking, and a size only if nobody set one) — a
+button also gets the `labelColor` its role's ground asks for, which is the one
+place a skin may repaint a caption. The kit is baked even when the recipe has no UI
+node yet, the `dialog` and `settings` window prefabs are written to `prefabs/ui/`,
+and `design/style.md` gains a `## UI kit` section naming the kitId, the roles, the
+face and the prefabs. From then on `create_node` auto-applies the kit to any
+skinnable node it makes (unless `texturePath` was given), so the agent never has to
+remember `skin_ui apply`.
 
 **The engine-vs-tool boundary** (get this wrong and the art fights the runtime):
 - **Captions belong to the engine.** Every PNG export is rendered without its

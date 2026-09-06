@@ -131,6 +131,19 @@ export function buildTypography(
   });
 }
 
+/**
+ * The caption colour a role's ground asks for — `inkColor` of {@link buildTypography}, on its own.
+ *
+ * Exported because a caller that skins ONE node does not want a whole typography block: the T0
+ * expander already has the manifest's recipe (which is judged against the kit's first role) and
+ * only needs the per-button answer, since a green primary and a gray secondary do not take the
+ * same ink. Kept next to `buildTypography` so the two can never disagree about how ink is
+ * derived.
+ */
+export function captionInkForRole(theme: ForgeTheme, colorRole: PaletteId): string {
+  return runBuild({ theme }, () => ink(C(colorRole)));
+}
+
 export interface TemplateNode {
   type: TemplateNodeType;
   /** Unique within the template — a host maps it onto a node name directly. */

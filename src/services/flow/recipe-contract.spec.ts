@@ -4,6 +4,7 @@ import { parse } from 'yaml';
 import {
   applyScenePatches,
   clampTunable,
+  listSceneNodes,
   looksLikeScene,
   paletteColorForRole,
   parseRecipePlaceholders,
@@ -258,5 +259,55 @@ describe('paletteColorForRole', () => {
     expect(paletteColorForRole('ui', ['#ffffff'])).toBe('#ffffff');
     expect(paletteColorForRole('player', ['#ffffff'])).toBe('#ffffff');
     expect(paletteColorForRole('player', [])).toBeNull();
+  });
+});
+
+/**
+ * `listSceneNodes` carries each node's raw `properties` because the T0 skinner decides from them:
+ * the caption picks the face, the height picks the caption size, and a `labelFontSize` already set
+ * by hand means "do not resize me". Reading them here is what keeps that lane a file edit.
+ */
+describe('listSceneNodes', () => {
+  const SCENE = [
+    'version: 1.0.0',
+    'root:',
+    '  - id: ui',
+    '    type: Group2D',
+    '    name: UI',
+    '    properties: {}',
+    '    children:',
+    '      - id: btn',
+    '        type: Button2D',
+    '        name: PlayButton',
+    '        properties:',
+    '          label: \u0418\u0433\u0440\u0430\u0442\u044c',
+    '          height: 96',
+    '          labelFontSize: 30',
+    '        children: []',
+    '      - id: bare',
+    '        type: Label2D',
+    '        name: Score',
+    '        children: []',
+    '',
+  ].join('\n');
+
+  it('hands over each node with the properties the file declares', () => {
+    const nodes = listSceneNodes(SCENE);
+
+    expect(nodes.map(node => node.id)).toEqual(['ui', 'btn', 'bare']);
+    const button = nodes.find(node => node.id === 'btn');
+    expect(button?.properties).toEqual({
+      label: '\u0418\u0433\u0440\u0430\u0442\u044c',
+      height: 96,
+      labelFontSize: 30,
+    });
+  });
+
+  it('omits the field entirely for a node that declares none', () => {
+    const nodes = listSceneNodes(SCENE);
+
+    expect(nodes.find(node => node.id === 'bare')).not.toHaveProperty('properties');
+    // An empty map IS a declaration, and stays one.
+    expect(nodes.find(node => node.id === 'ui')?.properties).toEqual({});
   });
 });
