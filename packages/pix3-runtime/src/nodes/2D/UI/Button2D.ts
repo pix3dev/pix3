@@ -1,4 +1,4 @@
-import { Mesh, MeshBasicMaterial, type Texture, Vector2 } from 'three';
+import { BufferGeometry, Mesh, MeshBasicMaterial, type Texture, Vector2 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
 import type { InstancePropertySchemaProvider } from '../../../fw/property-schema-utils';
@@ -12,6 +12,13 @@ import type { AttachedShaderEffect } from '../../../shader-effects/shader-effect
 import { coerceTextureResource, type TextureResourceRef } from '../../../core/TextureResource';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../../../core/shared-quad-geometry';
+import {
+  buildSkinGeometry,
+  isSliceBorderEmpty,
+  normalizeSliceBorder,
+  type SliceBorder2D,
+} from '../../../core/nine-slice-skin';
+import { getNaturalTextureSize } from '../../../core/texture-natural-size';
 import { BATCHABLE_2D_KEY } from '../../../core/batch-2d';
 import { getActiveLocalization } from '../../../core/localization/active-localization';
 
@@ -29,6 +36,8 @@ export interface Button2DProps extends UIControl2DProps {
   texturePressed?: TextureResourceRef | string | null;
   textureDisabled?: TextureResourceRef | string | null;
   stateTextureKeys?: Partial<Record<Button2DSpriteState, string>>;
+  /** 9-slice insets (source px) for the state skins. All-zero (default) = stretch. */
+  sliceBorder?: Partial<SliceBorder2D> | null;
   /** Registry-backed shader effects attached to the button skin material. */
   effects?: ShaderEffectEntry[];
 }
@@ -64,9 +73,23 @@ export class Button2D
    * ref stays as the universal fallback. Missing/empty entries = not localized.
    */
   stateTextureKeys: Partial<Record<Button2DSpriteState, string>>;
+  /**
+   * 9-slice insets in *source-texture pixels*. All-zero (the default) keeps the
+   * historical behaviour: one shared unit quad scaled to width x height, i.e. the
+   * skin is smeared. Any non-zero inset switches the skin mesh to a 3x3 patch
+   * whose corners keep their pixel size - so one 64x64 skin fits any button.
+   */
+  sliceBorder: SliceBorder2D;
 
   private buttonMesh: Mesh;
   private buttonMaterial: MeshBasicMaterial;
+  /** Per-instance 9-slice geometry while sliced; null = the shared unit quad. */
+  private skinGeometry: BufferGeometry | null = null;
+  /** Natural size of the skin texture currently on the material (0 = unknown). */
+  private skinTextureWidth = 0;
+  private skinTextureHeight = 0;
+  /** Mirrors `!effectStack.isEmpty` without reading it before it is constructed. */
+  private skinEffectsActive = false;
   /** Registry-backed shader effects on the skin material; while non-empty the
    * skin mesh opts out of the 2D quad batcher (see Sprite2D for the why). */
   private readonly effectStack: ShaderEffectStack;
@@ -91,6 +114,7 @@ export class Button2D
     this.texturePressed = coerceTextureResource(props.texturePressed ?? null);
     this.textureDisabled = coerceTextureResource(props.textureDisabled ?? null);
     this.stateTextureKeys = { ...(props.stateTextureKeys ?? {}) };
+    this.sliceBorder = normalizeSliceBorder(props.sliceBorder);
 
     // Create button mesh. Size lives on mesh.scale over the shared unit quad
     // so the skin can be quad-batched (see SHARED_UNIT_QUAD_GEOMETRY).
@@ -104,8 +128,9 @@ export class Button2D
     this.buttonMesh = new Mesh(SHARED_UNIT_QUAD_GEOMETRY, this.buttonMaterial);
     this.buttonMesh.scale.set(this.width, this.height, 1);
     this.buttonMesh.renderOrder = 999;
-    this.buttonMesh.userData[BATCHABLE_2D_KEY] = true;
     this.add(this.buttonMesh);
+    // Sets the geometry (unit quad or 9-slice patch) and the batching opt-out.
+    this.applySkinGeometry();
 
     this.refreshSkinState();
 
@@ -114,7 +139,8 @@ export class Button2D
       nodeType: 'Button2D',
       target: 'basic',
       onAttachmentsChanged: () => {
-        this.buttonMesh.userData[BATCHABLE_2D_KEY] = this.effectStack.isEmpty;
+        this.skinEffectsActive = !this.effectStack.isEmpty;
+        this.updateSkinBatchable();
       },
     });
     this.effectStack.install(this.buttonMaterial);
@@ -268,6 +294,83 @@ export class Button2D
     if (hadMap !== (texture !== null)) {
       this.buttonMaterial.needsUpdate = true;
     }
+    // 9-slice UVs are anchored in SOURCE pixels, so a state swap between skins of
+    // different natural sizes has to re-cut the patch. No-op while unsliced.
+    this.captureSkinTextureSize(texture);
+  }
+
+  /**
+   * Record the natural size of the skin texture now on the material and re-cut the
+   * 9-slice patch when it changed. Called on every state swap; cheap by design —
+   * it only rebuilds geometry when the border is non-zero AND the size moved.
+   */
+  private captureSkinTextureSize(texture: Texture | null): void {
+    let width = 0;
+    let height = 0;
+    if (texture?.image) {
+      const natural = getNaturalTextureSize(
+        texture.image as {
+          naturalWidth?: number;
+          naturalHeight?: number;
+          width?: number;
+          height?: number;
+        }
+      );
+      width = natural.width ?? 0;
+      height = natural.height ?? 0;
+    }
+    if (width === this.skinTextureWidth && height === this.skinTextureHeight) {
+      return;
+    }
+    this.skinTextureWidth = width;
+    this.skinTextureHeight = height;
+    if (!isSliceBorderEmpty(this.sliceBorder)) {
+      this.applySkinGeometry();
+    }
+  }
+
+  /**
+   * Point the skin mesh at the right geometry for the current border.
+   *
+   * Unsliced (the default) keeps the shared unit quad sized by `mesh.scale`, which
+   * is what lets the skin ride the 2D quad batcher. A sliced skin bakes pixel
+   * positions into its own `BufferGeometry` and therefore MUST opt out of the
+   * batcher — the batcher extracts four *unit* corners through `matrixWorld`, so a
+   * batched 9-slice would collapse back into a single stretched quad.
+   */
+  private applySkinGeometry(): void {
+    if (isSliceBorderEmpty(this.sliceBorder)) {
+      if (this.skinGeometry) {
+        this.skinGeometry.dispose();
+        this.skinGeometry = null;
+      }
+      this.buttonMesh.geometry = SHARED_UNIT_QUAD_GEOMETRY;
+      this.buttonMesh.scale.set(this.width, this.height, 1);
+    } else {
+      const next = buildSkinGeometry({
+        width: this.width,
+        height: this.height,
+        textureWidth: this.skinTextureWidth,
+        textureHeight: this.skinTextureHeight,
+        border: this.sliceBorder,
+      });
+      this.skinGeometry?.dispose();
+      this.skinGeometry = next;
+      this.buttonMesh.geometry = next;
+      this.buttonMesh.scale.set(1, 1, 1);
+    }
+    this.updateSkinBatchable();
+  }
+
+  private updateSkinBatchable(): void {
+    this.buttonMesh.userData[BATCHABLE_2D_KEY] =
+      !this.skinEffectsActive && isSliceBorderEmpty(this.sliceBorder);
+  }
+
+  /** Set the 9-slice insets (source px). All-zero restores the plain stretch. */
+  setSliceBorder(border: Partial<SliceBorder2D>): void {
+    this.sliceBorder = normalizeSliceBorder({ ...this.sliceBorder, ...border });
+    this.applySkinGeometry();
   }
 
   /**
@@ -360,7 +463,7 @@ export class Button2D
           setValue: (n, v) => {
             const btn = n as Button2D;
             btn.width = Number(v);
-            btn.buttonMesh.scale.set(btn.width, btn.height, 1);
+            btn.applySkinGeometry();
           },
         },
         {
@@ -371,7 +474,7 @@ export class Button2D
           setValue: (n, v) => {
             const btn = n as Button2D;
             btn.height = Number(v);
-            btn.buttonMesh.scale.set(btn.width, btn.height, 1);
+            btn.applySkinGeometry();
           },
         },
         {
@@ -470,6 +573,74 @@ export class Button2D
           getValue: n => (n as Button2D).textureDisabled ?? { type: 'texture', url: '' },
           setValue: (n, v) => {
             (n as Button2D).setStateTextureRef('disabled', v);
+          },
+        },
+        {
+          name: 'sliceBorderLeft',
+          type: 'number',
+          ui: {
+            label: 'Slice Left',
+            group: 'Skin',
+            description: 'Left 9-slice inset of the state skins (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Button2D).sliceBorder.left,
+          setValue: (n, v) => {
+            (n as Button2D).setSliceBorder({ left: Number(v) });
+          },
+        },
+        {
+          name: 'sliceBorderRight',
+          type: 'number',
+          ui: {
+            label: 'Slice Right',
+            group: 'Skin',
+            description: 'Right 9-slice inset of the state skins (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Button2D).sliceBorder.right,
+          setValue: (n, v) => {
+            (n as Button2D).setSliceBorder({ right: Number(v) });
+          },
+        },
+        {
+          name: 'sliceBorderTop',
+          type: 'number',
+          ui: {
+            label: 'Slice Top',
+            group: 'Skin',
+            description: 'Top 9-slice inset of the state skins (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Button2D).sliceBorder.top,
+          setValue: (n, v) => {
+            (n as Button2D).setSliceBorder({ top: Number(v) });
+          },
+        },
+        {
+          name: 'sliceBorderBottom',
+          type: 'number',
+          ui: {
+            label: 'Slice Bottom',
+            group: 'Skin',
+            description: 'Bottom 9-slice inset of the state skins (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Button2D).sliceBorder.bottom,
+          setValue: (n, v) => {
+            (n as Button2D).setSliceBorder({ bottom: Number(v) });
           },
         },
         {

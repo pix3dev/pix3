@@ -71,6 +71,20 @@ export interface ExportSettings {
   excludeGlobs: string[];
 }
 
+/**
+ * One `@font-face` the project registers at start-up. `path` is project-relative
+ * (`fonts/nunito-900-latin.woff2`); the loader reads it through the normal asset seam.
+ */
+export interface ProjectFontFace {
+  family: string;
+  path: string;
+  /** CSS weight; default 400. A face is identified by family + weight + style. */
+  weight: number | string;
+  style: 'normal' | 'italic';
+  /** Restricts the face to a subset (the Cyrillic block, say) so two files of one family coexist. */
+  unicodeRange?: string;
+}
+
 export interface ProjectManifest {
   version: string;
   autoloads: AutoloadConfig[];
@@ -90,6 +104,14 @@ export interface ProjectManifest {
   quality: QualitySettings;
   /** i18n/l10n settings; absent ⇒ localization inert (backward compatible). */
   localization?: LocalizationSettings;
+  /**
+   * Web fonts the project ships, registered as `FontFace`s before the first frame.
+   *
+   * Without this a scene could name any family it liked and the canvas quietly drew Arial —
+   * which is exactly how a generated UI kit lost its face between the forge preview and the
+   * game. Absent/empty ⇒ nothing is registered (backward compatible).
+   */
+  fonts?: ProjectFontFace[];
   metadata?: Record<string, unknown>;
 }
 
@@ -179,6 +201,35 @@ const normalizeQualitySettings = (input: unknown, platform: TargetPlatform): Qua
     shadows: typeof record.shadows === 'boolean' ? record.shadows : defaults.shadows,
     maxPixelRatio,
   };
+};
+
+/**
+ * Keep only well-formed faces: a family and a path are both required, and a malformed entry is
+ * dropped rather than thrown on — a bad font must not stop a project from opening.
+ */
+const normalizeFonts = (input: unknown): ProjectFontFace[] | undefined => {
+  if (!Array.isArray(input)) return undefined;
+  const out: ProjectFontFace[] = [];
+  const seen = new Set<string>();
+  for (const entry of input) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    const family = typeof record.family === 'string' ? record.family.trim() : '';
+    const path = typeof record.path === 'string' ? record.path.trim() : '';
+    if (!family || !path) continue;
+    const weight =
+      typeof record.weight === 'number' || typeof record.weight === 'string' ? record.weight : 400;
+    const style = record.style === 'italic' ? 'italic' : 'normal';
+    const key = `${family}|${weight}|${style}|${path}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const unicodeRange =
+      typeof record.unicodeRange === 'string' && record.unicodeRange.trim().length > 0
+        ? record.unicodeRange.trim()
+        : undefined;
+    out.push({ family, path, weight, style, ...(unicodeRange ? { unicodeRange } : {}) });
+  }
+  return out.length > 0 ? out : undefined;
 };
 
 const normalizeLocalization = (input: unknown): LocalizationSettings | undefined => {
@@ -341,6 +392,7 @@ export const normalizeProjectManifest = (input: unknown): ProjectManifest => {
     targetPlatform,
     quality: normalizeQualitySettings(record.quality, targetPlatform),
     localization: normalizeLocalization(record.localization),
+    fonts: normalizeFonts(record.fonts),
     metadata:
       record.metadata && typeof record.metadata === 'object'
         ? (record.metadata as Record<string, unknown>)

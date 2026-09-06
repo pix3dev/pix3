@@ -11,8 +11,10 @@
 export const UIKIT_FORGE_HASH = '#uikit';
 
 /**
- * The tool's own page, served verbatim from `public/`. Usable directly, without the editor shell:
- * the `#uikit` route embeds this same URL in a same-origin iframe.
+ * The tool's own page — a second Vite entry (`tools/uikit-forge.html` + `src/tools/uikit-forge/`),
+ * not a `public/` file, so it is typechecked and shares the generator core in
+ * `src/services/uikit/`. Usable directly, without the editor shell: the `#uikit` route embeds this
+ * same URL in a same-origin iframe.
  */
 export const UIKIT_FORGE_URL = '/tools/uikit-forge.html';
 

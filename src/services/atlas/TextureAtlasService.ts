@@ -53,6 +53,29 @@ const MIN_DIR_PREFIX_SEGMENTS = 4;
 
 /** Node types whose textures are safe to atlas (full-[0,1] UV sprites). */
 const ATLAS_ELIGIBLE_TYPES = new Set(['Sprite2D', 'Button2D', 'AnimatedSprite2D', 'Bar2D']);
+/**
+ * A non-zero nine-slice inset disqualifies an otherwise-eligible node: the patch
+ * geometry cuts its UVs against the full [0,1] range of a standalone image, and a
+ * view onto a packed sheet occupies a sub-rect of it. Same reason `TiledSprite2D`
+ * is absent from the set above and loads with `{ atlas: false }`.
+ */
+const SLICE_BORDER_KEYS = [
+  'sliceBorderLeft',
+  'sliceBorderRight',
+  'sliceBorderTop',
+  'sliceBorderBottom',
+] as const;
+
+function hasNineSliceBorder(properties: unknown): boolean {
+  if (!properties || typeof properties !== 'object') {
+    return false;
+  }
+  const record = properties as Record<string, unknown>;
+  return SLICE_BORDER_KEYS.some(key => {
+    const value = Number(record[key]);
+    return Number.isFinite(value) && value > 0;
+  });
+}
 
 export interface AtlasPrepResult {
   status: 'off' | 'empty' | 'hit' | 'miss' | 'error';
@@ -334,7 +357,8 @@ export class TextureAtlasService {
       };
       const type = typeof record.type === 'string' ? record.type : '';
       const propsText = record.properties ? JSON.stringify(record.properties) : '';
-      const bucket = ATLAS_ELIGIBLE_TYPES.has(type) ? eligible : ineligible;
+      const atlasSafe = ATLAS_ELIGIBLE_TYPES.has(type) && !hasNineSliceBorder(record.properties);
+      const bucket = atlasSafe ? eligible : ineligible;
       for (const ref of matchAll(propsText, IMAGE_REF_PATTERN)) {
         bucket.add(ref);
       }

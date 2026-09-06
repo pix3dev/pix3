@@ -16,6 +16,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | `.pix3scene` YAML format / validation | `docs/pix3-specification.md` → "Scene File Format" |
 | Script lifecycle / registry / serialization | `docs/pix3-specification.md` → "Script Component System" |
 | Prefabs / keyframe animation / localization / signals / groups | `docs/pix3-specification.md` → "Node Prefabs System" / "Keyframe Animation" / "Localization" / "Signals Engine" / "Groups Engine" |
+| Generate / apply UI skins (UI Kit Forge, `skin_ui`, `ui-kit.json`) | `docs/nodes-and-systems.md` → "2D UI kit generation"; file formats: `docs/pix3-specification.md` → "UI Kit Assets" |
 | 2D draw order, overlay flag, texture-goes-black bug | this file → "2D overlay rendering" |
 | Colour renders too dark in 3D / authoring a `color` property | this file → "Authored colours convert exactly once" |
 | Why the exported .html weighs what it does / export size | this file → "Playable export size" |

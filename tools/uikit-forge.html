@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UI Kit Forge</title>
+<link rel="icon" href="/icon.png">
+<!--
+  Standalone editor tool, built as a SECOND Vite entry (`build.rollupOptions.input.uikitForge`)
+  so it keeps its URL: /tools/uikit-forge.html in dev and dist/tools/uikit-forge.html in a build.
+
+  It is deliberately NOT part of the editor bundle. The page needs no project, no DI container
+  and no editor services — its first consumer is a person who may never open the editor at all —
+  and the editor embeds this same URL as a same-origin iframe from the `#uikit` route (see
+  `src/ui/tools/pix3-uikit-forge.ts`). Same-origin is load-bearing: the export path uses
+  `showDirectoryPicker()` and anchor downloads, which a cross-origin or sandboxed frame blocks.
+
+  Everything that DRAWS lives in `src/services/uikit/` — the host-agnostic core the editor-side
+  host shares. The page wiring is `src/tools/uikit-forge/`.
+-->
+<style>
+  /* Only the ground colour, so a cold load does not flash white before the stylesheet the
+     entry module pulls in (`src/tools/uikit-forge/uikit-forge.css`) arrives. */
+  html, body { height: 100%; margin: 0; background: #171d29; color: #dbe4f2; }
+</style>
+</head>
+<body>
+
+<aside>
+  <h1><span class="dot"></span>UI Kit Forge</h1>
+  <div class="controls" id="controls"></div>
+  <div class="asideFoot">
+    <div class="btnrow">
+      <button class="btn" type="button" id="btnRandom" data-icon="shuffle">Randomize</button>
+      <button class="btn" type="button" id="btnReset" data-icon="rotate-ccw">Reset</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn" type="button" id="btnPresetSave" data-icon="save">Save preset</button>
+      <button class="btn" type="button" id="btnPresetDel" data-icon="trash">Delete</button>
+    </div>
+    <div class="btnrow">
+      <button class="btn" type="button" id="btnThemeCopy" data-icon="copy">Copy theme</button>
+      <button class="btn" type="button" id="btnThemePaste" data-icon="clipboard">Paste</button>
+    </div>
+  </div>
+</aside>
+
+<main>
+  <header id="tabs"></header>
+  <div id="stageWrap"><div id="stage" class="bg-game"></div></div>
+  <footer>
+    <label for="expScale">Export scale
+      <select id="expScale">
+        <option value="1">1×</option><option value="2" selected>2×</option><option value="4">4×</option>
+      </select>
+    </label>
+    <label for="trimPad" title="The theme's `pad` lies INSIDE the frame — an untrimmed frame slices empty space">
+      <input type="checkbox" id="trimPad" checked> Trim padding
+    </label>
+    <button class="btn primary" type="button" id="btnKit" data-icon="package">Kit + style contract</button>
+    <button class="btn" type="button" id="btnAtlas" data-icon="grid">PNG atlas + JSON</button>
+    <button class="btn" type="button" id="btnIconsAtlas" data-icon="image">Glyphs</button>
+    <button class="btn" type="button" id="btnAllSvg" data-icon="folder">SVG to folder</button>
+    <button class="btn" type="button" id="btnHtml" data-icon="file-text">HTML gallery</button>
+    <span class="hint">"Kit + style contract" writes four files: the atlas, its manifest,
+      <code>tokens.json</code> and <code>STYLE.md</code> (roles, tokens, invariants — the input
+      for agent-driven development). The manifest is TexturePacker JSON-hash plus what a slicer
+      needs: <code>border</code>/<code>cap</code> (nine-slice, straight into
+      <code>TiledSprite2D.sliceBorder*</code>), <code>body</code>/<code>midY</code> (the opaque
+      body, for centring a caption), <code>anchors</code> (where the stripped captions belonged)
+      and <code>warnings</code>. Every PNG is drawn without its caption — the engine draws that.</span>
+  </footer>
+</main>
+
+<div id="toast" role="status" aria-live="polite"></div>
+<div id="busy"><div class="spinner"></div><div id="busyMsg">Generating…</div></div>
+
+<script type="module" src="/src/tools/uikit-forge/main.ts"></script>
+</body>
+</html>

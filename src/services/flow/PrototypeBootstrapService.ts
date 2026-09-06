@@ -1,4 +1,4 @@
-import { inject, injectable } from '@/fw/di';
+import { inject, injectable, injectLazy, type LazyService } from '@/fw/di';
 import { IDEA_TEMPLATE_ID } from '@/services/flow/FlowStageService';
 import { FLOW_REFERENCES_INDEX_PATH } from '@/services/flow/FlowReferencesService';
 import { extractDecisionEntries } from '@/services/flow/decision-log';
@@ -21,6 +21,7 @@ import { base64ToBlob, tintImage } from '@/services/image-gen/image-ops';
 import type { LlmImageBlock, LlmMessage } from '@/services/llm/LlmTypes';
 import {
   applyScenePatches,
+  listSceneNodes,
   looksLikeScene,
   paletteColorForRole,
   parseRecipePlaceholders,
@@ -33,6 +34,18 @@ import {
   type TunableResolution,
 } from '@/services/flow/recipe-contract';
 import { FlowReferencesService } from '@/services/flow/FlowReferencesService';
+import {
+  hexToHsl,
+  isHex,
+  lum,
+  normalizeTheme,
+  presetTheme,
+  type ForgeTheme,
+  type PaletteId,
+} from '@/services/uikit';
+import { UI_CONTROL_NODE_TYPES, planSkinPatches } from '@/services/uikit-editor/skin-planner';
+import type { UiKitThemeService } from '@/services/uikit-editor/UiKitThemeService';
+import type { UiKitProjectWriter } from '@/services/uikit-editor/UiKitProjectWriter';
 import { ideaTimeline } from '@/services/flow/idea-timeline';
 import { FlowStageService } from '@/services/flow/FlowStageService';
 import {
@@ -286,6 +299,114 @@ export const themedTunables = (
 };
 
 // ---------------------------------------------------------------------------
+// The UI kit the expander bakes (plan Ф5)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which UI Kit Forge preset each named look stands for.
+ *
+ * Deliberately a 1:1 table rather than a set of theme deltas: the presets already ARE the
+ * shape vocabulary ("Candy Pop" is round, glossy and soft-shadowed; "Flat" is none of those),
+ * so a look only has to name one. An unmapped look falls back to `Standard`.
+ */
+export const UI_PRESET_FOR_THEME: Readonly<Record<PrototypeTheme, string>> = {
+  neon: 'Brawl Stars',
+  pastel: 'Candy Pop',
+  retro: 'Bombastic',
+  minimal: 'Flat',
+};
+
+/** The palette roles the expander bakes — everything the four UI node types can ask for. */
+export const UI_KIT_BOOTSTRAP_ROLES: readonly PaletteId[] = ['green', 'blue', 'red', 'gray'];
+
+export interface DerivedUiKitTheme {
+  preset: string;
+  theme: ForgeTheme;
+}
+
+/**
+ * The project's `ForgeTheme`, derived from the brief with no model in the loop.
+ *
+ * Two inputs, both already settled by the time this runs: the named look picks the PRESET
+ * (shape, gloss, shadow, font), and the brief's palette — the same list `design/style.md`
+ * carries — pins the semantic ROLES as absolute hexes (plan §4: absolute colours, never
+ * deltas).
+ *
+ * The role mapping follows the palette convention this file already uses everywhere else
+ * ({@link paletteColorForRole}), NOT the raw array order: the palette arrives sorted by
+ * coverage, so index 0 is the dominant/background colour and a primary action button painted
+ * with it would vanish into the background. The accent (`player`) becomes the primary
+ * action colour, the middle of the ramp (`ui`) the secondary one, and danger takes the
+ * reddest hex the palette actually has, falling back to the second accent (`enemy`).
+ */
+export const deriveUiKitTheme = (brief: PrototypeBrief): DerivedUiKitTheme => {
+  const preset = UI_PRESET_FOR_THEME[effectiveTheme(brief)] ?? 'Standard';
+  const base = presetTheme(preset);
+
+  const hexes = (brief.style.palette ?? [])
+    .filter((value): value is string => isHex(value))
+    .map(value => value.trim().toLowerCase());
+  if (hexes.length === 0) {
+    return { preset, theme: normalizeTheme(base) };
+  }
+
+  // The darkest palette entry is the outline / recess tone, but only when it is genuinely dark:
+  // a pastel palette's darkest colour is still a pastel, and outlining with it loses every edge.
+  const darkest = [...hexes].sort((a, b) => lum(a) - lum(b))[0];
+  const darkTone = lum(darkest) < 40 ? darkest : base.darkTone;
+
+  const palette: Partial<Record<PaletteId, string>> = {};
+  const primary = paletteColorForRole('player', hexes);
+  const danger = reddestHex(hexes) ?? paletteColorForRole('enemy', hexes);
+  // The secondary action colour is what is LEFT after the other three roles have taken theirs:
+  // one hex serving two roles would make every button on the screen the same button, and the
+  // kit's own blue is a better secondary than a duplicate.
+  const rest = hexes.filter(hex => hex !== primary && hex !== danger && hex !== darkest);
+  const secondary = rest.length > 0 ? rest[rest.length - 1] : null;
+  if (primary) palette.green = primary;
+  if (secondary) palette.blue = secondary;
+  if (danger && danger !== primary) palette.red = danger;
+
+  return { preset, theme: normalizeTheme({ ...base, palette, darkTone }) };
+};
+
+/** The most saturated near-red hex of a palette, or null when it has none. */
+const reddestHex = (hexes: readonly string[]): string | null => {
+  let best: string | null = null;
+  let bestScore = -1;
+  for (const hex of hexes) {
+    const [h, sat, light] = hexToHsl(hex);
+    const distance = Math.min(Math.abs(h), Math.abs(360 - h));
+    if (distance > 25 || sat < 30 || light < 15 || light > 75) continue;
+    const score = sat - distance;
+    if (score > bestScore) {
+      bestScore = score;
+      best = hex;
+    }
+  }
+  return best;
+};
+
+/**
+ * The colour role a UI node's NAME asks for.
+ *
+ * A heuristic, and cheap on purpose: the alternative is a model turn per button, and the plan's
+ * whole argument for doing cosmetics in code is that a turn spent here buys nothing a table
+ * cannot decide. Destructive is checked first so a "Reset progress" button does not read as a
+ * confirmation just because it contains "set".
+ */
+export const uiKitRoleForNodeName = (name: string): PaletteId => {
+  const n = name.toLowerCase();
+  if (/(^|[^a-z])(quit|exit|delete|remove|reset|clear|danger|health|hp|lives?)/.test(n)) {
+    return 'red';
+  }
+  if (/(^|[^a-z])(play|start|ok|confirm|accept|yes|go|next|continue|resume|retry)/.test(n)) {
+    return 'green';
+  }
+  return 'blue';
+};
+
+// ---------------------------------------------------------------------------
 // Observable status
 // ---------------------------------------------------------------------------
 
@@ -418,6 +539,22 @@ export class PrototypeBootstrapService {
 
   @inject(FlowReferencesService)
   private readonly references!: FlowReferencesService;
+
+  /**
+   * The UI kit lane is injected LAZILY for two reasons: `UiKitThemeService` derives its own path
+   * from this module's `FLOW_STYLE_PATH`, so a static import here would close an
+   * initialization cycle, and the bake pulls the whole rasterization/asset pipeline behind it —
+   * which a session that never expands a recipe should not pay for.
+   */
+  @injectLazy(() =>
+    import('@/services/uikit-editor/UiKitThemeService').then(m => m.UiKitThemeService)
+  )
+  private readonly uiKitTheme!: LazyService<UiKitThemeService>;
+
+  @injectLazy(() =>
+    import('@/services/uikit-editor/UiKitProjectWriter').then(m => m.UiKitProjectWriter)
+  )
+  private readonly uiKitWriter!: LazyService<UiKitProjectWriter>;
 
   private status: PrototypeBootstrapStatus = IDLE_STATUS;
   private readonly listeners = new Set<(status: PrototypeBootstrapStatus) => void>();
@@ -809,6 +946,7 @@ export class PrototypeBootstrapService {
     const resolution = resolveTunables(themedTunables(brief), declared);
     await this.applyTunables(resolution, brief, declared, notes);
     await this.tintPlaceholders(placeholders, brief.style.palette, notes);
+    await this.skinRecipeUi(brief, notes);
     await this.writeDesignDocs(brief, prompt, references, resolution, notes, options);
   }
 
@@ -943,6 +1081,81 @@ export class PrototypeBootstrapService {
           `Could not tint ${path}: ${error instanceof Error ? error.message : String(error)}`
         );
       }
+    }
+  }
+
+  /**
+   * Dress the recipe's UI controls in a generated kit — deterministically, with no agent turn.
+   *
+   * Same brief in, same files out: the theme comes from the brief ({@link deriveUiKitTheme}), the
+   * kit folder is named by a hash of that theme, and the colour role of each control comes from
+   * its NAME. The whole thing is the argument in this file's header made concrete — cosmetics
+   * chosen by code cost nothing per project, while the same choices made by an agent cost a turn
+   * each.
+   *
+   * Two guards, both deliberate. A project with no 2D UI nodes is skipped in silence (a 3D-only
+   * or HUD-less recipe has nothing to wear a kit, and a note about it would be noise), and every
+   * failure degrades into a note: a prototype whose buttons are grey is a working prototype,
+   * whereas a transition that fails over a cosmetic bake is not.
+   */
+  private async skinRecipeUi(brief: PrototypeBrief, notes: string[]): Promise<void> {
+    try {
+      const targets: {
+        path: string;
+        text: string;
+        nodes: { id: string; name: string; type: string }[];
+      }[] = [];
+      for (const path of await this.listScenes()) {
+        const text = await this.storage.readTextFile(path);
+        if (!looksLikeScene(text)) continue;
+        const nodes = listSceneNodes(text).filter(node =>
+          UI_CONTROL_NODE_TYPES.includes(node.type)
+        );
+        if (nodes.length > 0) targets.push({ path, text, nodes });
+      }
+      if (targets.length === 0) return;
+
+      const { preset, theme } = deriveUiKitTheme(brief);
+      const themeService = await this.uiKitTheme();
+      // The writer saves whatever theme the service currently holds, so the service is the one
+      // that has to be told first — otherwise `design/ui-theme.json` and the baked PNGs describe
+      // two different kits.
+      themeService.replaceTheme(theme, preset);
+
+      const writer = await this.uiKitWriter();
+      const kit = await writer.writeKit(theme, {
+        colorRoles: UI_KIT_BOOTSTRAP_ROLES,
+        // Glyph buttons are for dialogs and templates; a recipe's HUD has none, and baking 28
+        // pictures nothing references would just slow the transition down.
+        iconButtons: false,
+      });
+
+      let skinned = 0;
+      for (const target of targets) {
+        const patches: ScenePatch[] = [];
+        for (const node of target.nodes) {
+          const role = uiKitRoleForNodeName(node.name);
+          for (const write of planSkinPatches(node.type, kit.manifest, role)) {
+            patches.push({ node: node.id, property: write.propertyPath, value: write.value });
+          }
+        }
+        if (patches.length === 0) continue;
+
+        const result = applyScenePatches(target.text, patches);
+        if (result.applied.length === 0) continue;
+        await this.storage.writeTextFile(target.path, result.text);
+        skinned += target.nodes.length;
+      }
+
+      if (skinned > 0) {
+        notes.push(
+          `Skinned ${skinned} UI node${skinned === 1 ? '' : 's'} with the generated "${preset}" UI kit (sprites/ui/${kit.kitId}).`
+        );
+      }
+    } catch (error) {
+      notes.push(
+        `The UI kit was not generated: ${error instanceof Error ? error.message : String(error)}`
+      );
     }
   }
 

@@ -1,7 +1,25 @@
-import { Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
+import {
+  BufferGeometry,
+  Mesh,
+  MeshBasicMaterial,
+  PlaneGeometry,
+  type Texture,
+  Vector2,
+} from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import type { PropertySchema } from '../../../fw/property-schema';
 import { installReactiveSchemaProperties } from '../../../fw/reactive-schema-properties';
+import { coerceTextureResource, type TextureResourceRef } from '../../../core/TextureResource';
+import { configure2DTexture } from '../../../core/configure-2d-texture';
+import { getNaturalTextureSize } from '../../../core/texture-natural-size';
+import {
+  buildSkinGeometry,
+  normalizeSliceBorder,
+  type SliceBorder2D,
+} from '../../../core/nine-slice-skin';
+
+/** The two skin slots a bar can be given a sprite for. */
+export type Bar2DTextureSlot = 'trough' | 'fill';
 
 export interface Bar2DProps extends UIControl2DProps {
   width?: number;
@@ -14,6 +32,12 @@ export interface Bar2DProps extends UIControl2DProps {
   showBorder?: boolean;
   borderColor?: string;
   borderWidth?: number;
+  /** Sprite for the empty trough behind the fill. */
+  textureTrough?: TextureResourceRef | string | null;
+  /** Sprite for the filled portion, re-cut (not squashed) as `value` moves. */
+  textureFill?: TextureResourceRef | string | null;
+  /** 9-slice insets (source px) applied to both the trough and the fill. */
+  sliceBorder?: Partial<SliceBorder2D> | null;
 }
 
 /**
@@ -31,6 +55,18 @@ export class Bar2D extends UIControl2D {
   showBorder: boolean;
   borderColor: string;
   borderWidth: number;
+  /**
+   * Skin slots. A set slot replaces the corresponding flat colour with the sprite
+   * (material colour goes white, like `Button2D` does for its state skins). The
+   * actual `Texture` objects arrive post-construction from the SceneLoader.
+   */
+  textureTrough: TextureResourceRef | null;
+  textureFill: TextureResourceRef | null;
+  /**
+   * 9-slice insets in *source-texture pixels*, applied to the trough and the fill.
+   * All-zero (the default) keeps the historical plain `PlaneGeometry` stretch.
+   */
+  sliceBorder: SliceBorder2D;
 
   private backgroundMesh: Mesh;
   private barMesh: Mesh;
@@ -38,9 +74,19 @@ export class Bar2D extends UIControl2D {
   private backgroundMaterial: MeshBasicMaterial;
   private barMaterial: MeshBasicMaterial;
   private borderMaterial: MeshBasicMaterial | null = null;
-  private backgroundGeometry: PlaneGeometry;
-  private barGeometry: PlaneGeometry;
+  private backgroundGeometry: BufferGeometry;
+  private barGeometry: BufferGeometry;
   private borderGeometry: PlaneGeometry | null = null;
+
+  private readonly slotTextures: Record<Bar2DTextureSlot, Texture | null> = {
+    trough: null,
+    fill: null,
+  };
+  /** Natural size of each slot's texture (0 = unknown), needed to cut 9-slice UVs. */
+  private readonly slotTextureSizes: Record<Bar2DTextureSlot, { width: number; height: number }> = {
+    trough: { width: 0, height: 0 },
+    fill: { width: 0, height: 0 },
+  };
 
   constructor(props: Bar2DProps) {
     super(props, 'Bar2D');
@@ -55,9 +101,13 @@ export class Bar2D extends UIControl2D {
     this.showBorder = props.showBorder ?? true;
     this.borderColor = props.borderColor ?? '#000000';
     this.borderWidth = props.borderWidth ?? 2;
+    this.textureTrough = coerceTextureResource(props.textureTrough ?? null);
+    this.textureFill = coerceTextureResource(props.textureFill ?? null);
+    this.sliceBorder = normalizeSliceBorder(props.sliceBorder);
 
-    // Create background
-    this.backgroundGeometry = new PlaneGeometry(this.width, this.height);
+    // Create background (trough). Built through the slot helper so an authored
+    // sliceBorder cuts a patch from the first frame, not only after a texture lands.
+    this.backgroundGeometry = this.buildSlotGeometry('trough', this.width, this.height);
     this.backgroundMaterial = new MeshBasicMaterial({
       color: this.backBackgroundColor,
       transparent: true,
@@ -146,13 +196,112 @@ export class Bar2D extends UIControl2D {
     const normalized = (this.value - this.minValue) / (this.maxValue - this.minValue);
     const filledWidth = Math.max(0, this.width * normalized);
 
-    // Update bar geometry
+    // Update bar geometry. With a 9-slice border the fill is re-CUT at the new
+    // width rather than squashed, so its caps keep their source-pixel size all the
+    // way down to an empty bar.
     this.barGeometry.dispose();
-    this.barGeometry = new PlaneGeometry(filledWidth, this.height);
+    this.barGeometry = this.buildSlotGeometry('fill', filledWidth, this.height);
     this.barMesh.geometry = this.barGeometry;
 
     // Position bar to fill from left
     this.barMesh.position.x = -this.width / 2 + filledWidth / 2;
+  }
+
+  /** Geometry for one slot: a plain quad, or a 9-slice patch when sliced. */
+  private buildSlotGeometry(slot: Bar2DTextureSlot, width: number, height: number): BufferGeometry {
+    const size = this.slotTextureSizes[slot];
+    return buildSkinGeometry({
+      width,
+      height,
+      textureWidth: size.width,
+      textureHeight: size.height,
+      border: this.sliceBorder,
+    });
+  }
+
+  /** Re-cut the trough (and the fill, via updateBarVisuals) after a size/border change. */
+  private rebuildTroughGeometry(): void {
+    this.backgroundGeometry.dispose();
+    this.backgroundGeometry = this.buildSlotGeometry('trough', this.width, this.height);
+    this.backgroundMesh.geometry = this.backgroundGeometry;
+    this.rebuildBorderGeometry();
+    this.updateBarVisuals();
+  }
+
+  /** Set the 9-slice insets (source px) for the trough and fill. All-zero = stretch. */
+  setSliceBorder(border: Partial<SliceBorder2D>): void {
+    this.sliceBorder = normalizeSliceBorder({ ...this.sliceBorder, ...border });
+    this.rebuildTroughGeometry();
+  }
+
+  /**
+   * Assign the loaded `Texture` for one skin slot (called by the SceneLoader after
+   * loading, mirroring `Button2D.setStateTexture`). Passing null clears the slot
+   * and the control falls back to its flat colour.
+   */
+  setSlotTexture(slot: Bar2DTextureSlot, texture: Texture | null): void {
+    if (texture) {
+      // sRGB + mipmaps disabled (see configure2DTexture for the why).
+      configure2DTexture(texture);
+    }
+    this.slotTextures[slot] = texture;
+
+    const natural =
+      texture?.image !== undefined && texture.image !== null
+        ? getNaturalTextureSize(
+            texture.image as {
+              naturalWidth?: number;
+              naturalHeight?: number;
+              width?: number;
+              height?: number;
+            }
+          )
+        : {};
+    this.slotTextureSizes[slot] = { width: natural.width ?? 0, height: natural.height ?? 0 };
+
+    const material = slot === 'trough' ? this.backgroundMaterial : this.barMaterial;
+    if (texture) {
+      material.map = texture;
+      material.color.set('#ffffff');
+      material.transparent = true;
+    } else {
+      material.map = null;
+      material.color.setStyle(slot === 'trough' ? this.backBackgroundColor : this.barColor);
+    }
+    material.needsUpdate = true;
+
+    // 9-slice UVs are anchored in source pixels, so the natural size has to be in
+    // place before the patch is cut.
+    this.rebuildTroughGeometry();
+  }
+
+  /** The authored path that should be loaded for a slot, or null. */
+  getSlotTexturePath(slot: Bar2DTextureSlot): string | null {
+    return slot === 'trough' ? (this.textureTrough?.url ?? null) : (this.textureFill?.url ?? null);
+  }
+
+  private setSlotTextureRef(slot: Bar2DTextureSlot, value: unknown): void {
+    const ref = coerceTextureResource(value);
+    const previous = this.getSlotTexturePath(slot);
+    if (slot === 'trough') {
+      this.textureTrough = ref;
+    } else {
+      this.textureFill = ref;
+    }
+    if (previous !== (ref?.url ?? null)) {
+      // The loaded Texture no longer matches the ref; drop it. The SceneLoader
+      // reloads from the ref on the next scene load / play.
+      this.setSlotTexture(slot, null);
+    }
+  }
+
+  /** Repaint one slot's flat colour, unless a sprite currently covers it. */
+  private refreshSlotColor(slot: Bar2DTextureSlot): void {
+    if (this.slotTextures[slot]) {
+      return;
+    }
+    const material = slot === 'trough' ? this.backgroundMaterial : this.barMaterial;
+    material.color.setStyle(slot === 'trough' ? this.backBackgroundColor : this.barColor);
   }
 
   static getPropertySchema(): PropertySchema {
@@ -170,11 +319,7 @@ export class Bar2D extends UIControl2D {
           setValue: (n, v) => {
             const bar = n as Bar2D;
             bar.width = Number(v);
-            bar.backgroundGeometry.dispose();
-            bar.backgroundGeometry = new PlaneGeometry(bar.width, bar.height);
-            bar.backgroundMesh.geometry = bar.backgroundGeometry;
-            bar.rebuildBorderGeometry();
-            bar.updateBarVisuals();
+            bar.rebuildTroughGeometry();
           },
         },
         {
@@ -185,11 +330,7 @@ export class Bar2D extends UIControl2D {
           setValue: (n, v) => {
             const bar = n as Bar2D;
             bar.height = Number(v);
-            bar.backgroundGeometry.dispose();
-            bar.backgroundGeometry = new PlaneGeometry(bar.width, bar.height);
-            bar.backgroundMesh.geometry = bar.backgroundGeometry;
-            bar.rebuildBorderGeometry();
-            bar.updateBarVisuals();
+            bar.rebuildTroughGeometry();
           },
         },
         {
@@ -237,7 +378,7 @@ export class Bar2D extends UIControl2D {
           setValue: (n, v) => {
             const bar = n as Bar2D;
             bar.backBackgroundColor = String(v);
-            bar.backgroundMaterial.color.setStyle(bar.backBackgroundColor);
+            bar.refreshSlotColor('trough');
           },
         },
         {
@@ -248,7 +389,105 @@ export class Bar2D extends UIControl2D {
           setValue: (n, v) => {
             const bar = n as Bar2D;
             bar.barColor = String(v);
-            bar.barMaterial.color.setStyle(bar.barColor);
+            bar.refreshSlotColor('fill');
+          },
+        },
+        {
+          name: 'textureTrough',
+          type: 'object',
+          ui: {
+            label: 'Trough Sprite',
+            group: 'Skin',
+            description: 'Sprite for the empty trough behind the fill',
+            editor: 'texture-resource',
+            resourceType: 'texture',
+          },
+          getValue: n => (n as Bar2D).textureTrough ?? { type: 'texture', url: '' },
+          setValue: (n, v) => {
+            (n as Bar2D).setSlotTextureRef('trough', v);
+          },
+        },
+        {
+          name: 'textureFill',
+          type: 'object',
+          ui: {
+            label: 'Fill Sprite',
+            group: 'Skin',
+            description: 'Sprite for the filled portion',
+            editor: 'texture-resource',
+            resourceType: 'texture',
+          },
+          getValue: n => (n as Bar2D).textureFill ?? { type: 'texture', url: '' },
+          setValue: (n, v) => {
+            (n as Bar2D).setSlotTextureRef('fill', v);
+          },
+        },
+        {
+          name: 'sliceBorderLeft',
+          type: 'number',
+          ui: {
+            label: 'Slice Left',
+            group: 'Skin',
+            description: 'Left 9-slice inset of the trough/fill sprites (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Bar2D).sliceBorder.left,
+          setValue: (n, v) => {
+            (n as Bar2D).setSliceBorder({ left: Number(v) });
+          },
+        },
+        {
+          name: 'sliceBorderRight',
+          type: 'number',
+          ui: {
+            label: 'Slice Right',
+            group: 'Skin',
+            description: 'Right 9-slice inset of the trough/fill sprites (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Bar2D).sliceBorder.right,
+          setValue: (n, v) => {
+            (n as Bar2D).setSliceBorder({ right: Number(v) });
+          },
+        },
+        {
+          name: 'sliceBorderTop',
+          type: 'number',
+          ui: {
+            label: 'Slice Top',
+            group: 'Skin',
+            description: 'Top 9-slice inset of the trough/fill sprites (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Bar2D).sliceBorder.top,
+          setValue: (n, v) => {
+            (n as Bar2D).setSliceBorder({ top: Number(v) });
+          },
+        },
+        {
+          name: 'sliceBorderBottom',
+          type: 'number',
+          ui: {
+            label: 'Slice Bottom',
+            group: 'Skin',
+            description: 'Bottom 9-slice inset of the trough/fill sprites (source px); 0 = stretch',
+            min: 0,
+            step: 1,
+            precision: 0,
+            unit: 'px',
+          },
+          getValue: n => (n as Bar2D).sliceBorder.bottom,
+          setValue: (n, v) => {
+            (n as Bar2D).setSliceBorder({ bottom: Number(v) });
           },
         },
         {
@@ -288,6 +527,7 @@ export class Bar2D extends UIControl2D {
       groups: {
         ...baseSchema.groups,
         Bar: { label: 'Bar', expanded: true },
+        Skin: { label: 'Skin', description: 'Sprites replacing the flat colours', expanded: true },
       },
     };
   }

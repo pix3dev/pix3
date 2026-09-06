@@ -29,12 +29,16 @@ describe('tool routes', () => {
     expect(isToolRouteHash('#welcome')).toBe(false);
   });
 
-  it('points at a page that is actually shipped in public/', () => {
-    const page = readFileSync(
-      resolve(repoRoot, 'public', UIKIT_FORGE_URL.replace(/^\//, '')),
-      'utf8'
-    );
+  it('points at a page that is actually a build entry', () => {
+    // The tool page is a second Vite entry at the repo root rather than a `public/` file, so the
+    // URL and the entry path have to agree: `/tools/uikit-forge.html` → `tools/uikit-forge.html`.
+    const entryPath = UIKIT_FORGE_URL.replace(/^\//, '');
+    const page = readFileSync(resolve(repoRoot, entryPath), 'utf8');
     expect(page).toContain('<!DOCTYPE html>');
+    expect(page).toContain('/src/tools/uikit-forge/main.ts');
+
+    const viteConfig = readFileSync(resolve(repoRoot, 'vite.config.ts'), 'utf8');
+    expect(viteConfig).toContain(`resolve(__dirname, '${entryPath}')`);
   });
 
   it('is excluded from the PWA navigation fallback', () => {

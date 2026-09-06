@@ -160,6 +160,11 @@ export default defineConfig(async ({ mode }) => {
         input: {
           main: resolve(__dirname, 'index.html'),
           player: resolve(__dirname, 'player.html'),
+          // UI Kit Forge: its own entry rather than a `public/` file, so the page is typechecked
+          // and shares the generator core with the editor (`src/services/uikit/`). The path keeps
+          // the URL the `#uikit` route frames — `/tools/uikit-forge.html` in dev,
+          // `dist/tools/uikit-forge.html` in a build.
+          uikitForge: resolve(__dirname, 'tools/uikit-forge.html'),
         },
         output: {
           manualChunks(id) {

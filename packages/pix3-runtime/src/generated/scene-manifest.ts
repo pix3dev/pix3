@@ -9,6 +9,17 @@ export const runtimeQuality: {
   shadows: true,
   maxPixelRatio: 2,
 };
+/**
+ * Web fonts the project ships (`ProjectManifest.fonts`), baked at export time. The player
+ * registers them before the first frame so a caption keeps the face it was designed in.
+ */
+export const runtimeFonts: readonly {
+  readonly family: string;
+  readonly path: string;
+  readonly weight?: number | string;
+  readonly style?: 'normal' | 'italic';
+  readonly unicodeRange?: string;
+}[] = [];
 export const runtimeLocalization: {
   readonly defaultLocale: string;
   readonly fallbackLocale?: string;

@@ -24,9 +24,10 @@ import { AnimatedSprite3D } from '../nodes/3D/AnimatedSprite3D';
 import { Particles3D } from '../nodes/3D/Particles3D';
 import { Joystick2D } from '../nodes/2D/UI/Joystick2D';
 import { Button2D, type Button2DSpriteState } from '../nodes/2D/UI/Button2D';
-import { Slider2D } from '../nodes/2D/UI/Slider2D';
-import { Bar2D } from '../nodes/2D/UI/Bar2D';
-import { Checkbox2D } from '../nodes/2D/UI/Checkbox2D';
+import { Slider2D, type Slider2DTextureSlot } from '../nodes/2D/UI/Slider2D';
+import { Bar2D, type Bar2DTextureSlot } from '../nodes/2D/UI/Bar2D';
+import { Checkbox2D, type Checkbox2DTextureSlot } from '../nodes/2D/UI/Checkbox2D';
+import type { SliceBorder2D } from './nine-slice-skin';
 import { InventorySlot2D } from '../nodes/2D/UI/InventorySlot2D';
 import { Label2D } from '../nodes/2D/UI/Label2D';
 import { ScrollContainer2D } from '../nodes/2D/UI/ScrollContainer2D';
@@ -45,7 +46,7 @@ import { VirtualCamera3D, VIRTUAL_CAMERA_DEFAULTS } from '../nodes/3D/VirtualCam
 import { PostProcess } from '../nodes/PostProcess';
 import { isKeyframeEasing } from '../animation/easing';
 
-import { Node2D, type Node2DLayoutConfig } from '../nodes/Node2D';
+import { Node2D, type Node2DFlowConfig, type Node2DLayoutConfig } from '../nodes/Node2D';
 import { AssetLoader } from './AssetLoader';
 import { ResourceManager } from './ResourceManager';
 import { ScriptRegistry } from './ScriptRegistry';
@@ -946,6 +947,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           width: this.asNumber(props.width, undefined),
           height: this.asNumber(props.height, undefined),
           color: typeof props.color === 'string' ? props.color : undefined,
@@ -971,6 +973,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           animationResourcePath,
           currentClip: typeof props.currentClip === 'string' ? props.currentClip : undefined,
@@ -1004,6 +1007,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           skeletonPath: this.asString(props.skeletonPath) ?? null,
           atlasPath: this.asString(props.atlasPath) ?? null,
@@ -1040,6 +1044,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           texture,
           textureKey: this.asString(props.textureKey),
@@ -1083,6 +1088,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           texture,
           width: this.asNumber(props.width, undefined),
@@ -1190,6 +1196,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           width: this.asNumber(props.width, 100),
           height: this.asNumber(props.height, 100),
@@ -1208,6 +1215,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           width: this.asNumber(props.width, 100),
           height: this.asNumber(props.height, 100),
@@ -1227,6 +1235,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           priority: this.asNumber(props.priority, d.priority),
           zoom: this.asNumber(props.zoom, d.zoom),
@@ -1263,6 +1272,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           width: this.asNumber(props.width, 100),
           height: this.asNumber(props.height, 100),
@@ -1325,6 +1335,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           radius: this.asNumber(props.radius, undefined),
           handleRadius: this.asNumber(props.handleRadius, undefined),
@@ -1364,6 +1375,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           width: this.asNumber(props.width, undefined),
           height: this.asNumber(props.height, undefined),
@@ -1373,9 +1385,7 @@ export class SceneLoader {
           buttonAction: this.asString(props.buttonAction),
           label: this.asString(props.label),
           labelKey: this.asString(props.labelKey),
-          labelFontFamily: this.asString(props.labelFontFamily),
-          labelFontSize: this.asNumber(props.labelFontSize, undefined),
-          labelColor: this.asString(props.labelColor),
+          ...this.readLabelStyle(props),
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           texturePath: this.asString(props.texturePath),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
@@ -1384,6 +1394,7 @@ export class SceneLoader {
           texturePressed: stateRefs[2][1],
           textureDisabled: stateRefs[3][1],
           stateTextureKeys,
+          sliceBorder: this.readSliceBorder(props),
         });
 
         for (const [state] of stateRefs) {
@@ -1416,12 +1427,11 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           label: this.asString(props.label),
           labelKey: this.asString(props.labelKey),
-          labelFontFamily: this.asString(props.labelFontFamily),
-          labelFontSize: this.asNumber(props.labelFontSize, undefined),
-          labelColor: this.asString(props.labelColor),
+          ...this.readLabelStyle(props),
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           labelVAlign: this.asString(props.labelVAlign) as 'top' | 'middle' | 'bottom' | undefined,
           width: this.asNumber(props.width, undefined),
@@ -1437,7 +1447,7 @@ export class SceneLoader {
       case 'Slider2D': {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
-        return new Slider2D({
+        const slider = new Slider2D({
           ...baseProps,
           position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
           scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
@@ -1446,6 +1456,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           width: this.asNumber(props.width, undefined),
           height: this.asNumber(props.height, undefined),
@@ -1459,18 +1470,39 @@ export class SceneLoader {
           axisName: this.asString(props.axisName),
           label: this.asString(props.label),
           labelKey: this.asString(props.labelKey),
-          labelFontFamily: this.asString(props.labelFontFamily),
-          labelFontSize: this.asNumber(props.labelFontSize, undefined),
-          labelColor: this.asString(props.labelColor),
+          ...this.readLabelStyle(props),
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           texturePath: this.asString(props.texturePath),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
+          textureTrack: coerceTextureResource(props.textureTrack ?? null),
+          textureFill: coerceTextureResource(props.textureFill ?? null),
+          textureThumb: coerceTextureResource(props.textureThumb ?? null),
+          sliceBorder: this.readSliceBorder(props),
         });
+
+        for (const slot of [
+          'track',
+          'fill',
+          'thumb',
+        ] as const satisfies readonly Slider2DTextureSlot[]) {
+          const path = slider.getSlotTexturePath(slot);
+          if (!path) continue;
+          try {
+            slider.setSlotTexture(slot, await this.assetLoader.loadTexture(path));
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading ${slot} texture for Slider2D "${slider.nodeId}":`,
+              error
+            );
+          }
+        }
+
+        return slider;
       }
       case 'Bar2D': {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
-        return new Bar2D({
+        const bar = new Bar2D({
           ...baseProps,
           position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
           scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
@@ -1479,6 +1511,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           width: this.asNumber(props.width, undefined),
           height: this.asNumber(props.height, undefined),
@@ -1492,18 +1525,34 @@ export class SceneLoader {
           borderWidth: this.asNumber(props.borderWidth, undefined),
           label: this.asString(props.label),
           labelKey: this.asString(props.labelKey),
-          labelFontFamily: this.asString(props.labelFontFamily),
-          labelFontSize: this.asNumber(props.labelFontSize, undefined),
-          labelColor: this.asString(props.labelColor),
+          ...this.readLabelStyle(props),
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           texturePath: this.asString(props.texturePath),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
+          textureTrough: coerceTextureResource(props.textureTrough ?? null),
+          textureFill: coerceTextureResource(props.textureFill ?? null),
+          sliceBorder: this.readSliceBorder(props),
         });
+
+        for (const slot of ['trough', 'fill'] as const satisfies readonly Bar2DTextureSlot[]) {
+          const path = bar.getSlotTexturePath(slot);
+          if (!path) continue;
+          try {
+            bar.setSlotTexture(slot, await this.assetLoader.loadTexture(path));
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading ${slot} texture for Bar2D "${bar.nodeId}":`,
+              error
+            );
+          }
+        }
+
+        return bar;
       }
       case 'Checkbox2D': {
         const props = baseProps.properties as Record<string, unknown>;
         const transform = this.asRecord(props.transform);
-        return new Checkbox2D({
+        const checkbox = new Checkbox2D({
           ...baseProps,
           position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
           scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
@@ -1512,6 +1561,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           size: this.asNumber(props.size, undefined),
           checked: typeof props.checked === 'boolean' ? props.checked : undefined,
@@ -1521,13 +1571,33 @@ export class SceneLoader {
           checkmarkAction: this.asString(props.checkmarkAction),
           label: this.asString(props.label),
           labelKey: this.asString(props.labelKey),
-          labelFontFamily: this.asString(props.labelFontFamily),
-          labelFontSize: this.asNumber(props.labelFontSize, undefined),
-          labelColor: this.asString(props.labelColor),
+          ...this.readLabelStyle(props),
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           texturePath: this.asString(props.texturePath),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
+          textureBox: coerceTextureResource(props.textureBox ?? null),
+          textureBoxChecked: coerceTextureResource(props.textureBoxChecked ?? null),
+          textureMark: coerceTextureResource(props.textureMark ?? null),
         });
+
+        for (const slot of [
+          'box',
+          'boxChecked',
+          'mark',
+        ] as const satisfies readonly Checkbox2DTextureSlot[]) {
+          const path = checkbox.getSlotTexturePath(slot);
+          if (!path) continue;
+          try {
+            checkbox.setSlotTexture(slot, await this.assetLoader.loadTexture(path));
+          } catch (error) {
+            console.warn(
+              `[SceneLoader] Error loading ${slot} texture for Checkbox2D "${checkbox.nodeId}":`,
+              error
+            );
+          }
+        }
+
+        return checkbox;
       }
       case 'InventorySlot2D': {
         const props = baseProps.properties as Record<string, unknown>;
@@ -1541,6 +1611,7 @@ export class SceneLoader {
               ? ((transform?.rotation ?? props.rotation) as number)
               : 0,
           layout: this.parseNode2DLayout(props),
+          flow: this.parseNode2DFlow(props),
           opacity: this.asNumber(props.opacity, undefined),
           width: this.asNumber(props.width, undefined),
           height: this.asNumber(props.height, undefined),
@@ -1554,9 +1625,7 @@ export class SceneLoader {
           selectedAction: this.asString(props.selectedAction),
           label: this.asString(props.label),
           labelKey: this.asString(props.labelKey),
-          labelFontFamily: this.asString(props.labelFontFamily),
-          labelFontSize: this.asNumber(props.labelFontSize, undefined),
-          labelColor: this.asString(props.labelColor),
+          ...this.readLabelStyle(props),
           labelAlign: this.asString(props.labelAlign) as 'left' | 'center' | 'right' | undefined,
           texturePath: this.asString(props.texturePath),
           enabled: typeof props.enabled === 'boolean' ? props.enabled : undefined,
@@ -2213,6 +2282,53 @@ export class SceneLoader {
     return fallback.clone();
   }
 
+  /**
+   * The four `sliceBorder*` scalars a skinned 2D control writes, read back as one
+   * border. Same YAML spelling `TiledSprite2D` uses, so a skin authored once can be
+   * pasted between a panel and a button.
+   */
+  /**
+   * The caption style every `UIControl2D` shares: family, size, colour, weight and the sticker
+   * decoration (outline + drop shadow + tracking) the UI kit's captions are drawn with. One
+   * reader, because six node types load the same block and a seventh will too.
+   */
+  private readLabelStyle(props: Record<string, unknown>): {
+    labelFontFamily?: string;
+    labelFontSize?: number;
+    labelColor?: string;
+    labelFontWeight?: number | string;
+    labelOutlineWidth?: number;
+    labelOutlineColor?: string;
+    labelShadowColor?: string | null;
+    labelShadowOffsetX?: number;
+    labelShadowOffsetY?: number;
+    labelLetterSpacing?: number;
+  } {
+    const weight = props.labelFontWeight;
+    return {
+      labelFontFamily: this.asString(props.labelFontFamily),
+      labelFontSize: this.asNumber(props.labelFontSize, undefined),
+      labelColor: this.asString(props.labelColor),
+      labelFontWeight:
+        typeof weight === 'number' || typeof weight === 'string' ? weight : undefined,
+      labelOutlineWidth: this.asNumber(props.labelOutlineWidth, undefined),
+      labelOutlineColor: this.asString(props.labelOutlineColor),
+      labelShadowColor: this.asString(props.labelShadowColor),
+      labelShadowOffsetX: this.asNumber(props.labelShadowOffsetX, undefined),
+      labelShadowOffsetY: this.asNumber(props.labelShadowOffsetY, undefined),
+      labelLetterSpacing: this.asNumber(props.labelLetterSpacing, undefined),
+    };
+  }
+
+  private readSliceBorder(props: Record<string, unknown>): SliceBorder2D {
+    return {
+      left: this.asNumber(props.sliceBorderLeft, 0),
+      right: this.asNumber(props.sliceBorderRight, 0),
+      top: this.asNumber(props.sliceBorderTop, 0),
+      bottom: this.asNumber(props.sliceBorderBottom, 0),
+    };
+  }
+
   private readVector2(value: unknown, fallback: Vector2): Vector2 {
     if (!value) {
       return fallback.clone();
@@ -2298,6 +2414,34 @@ export class SceneLoader {
 
   private asString(value: unknown): string | undefined {
     return typeof value === 'string' ? value : undefined;
+  }
+
+  /**
+   * Container flow (`Node2DFlowConfig`): a stacked column/row, as opposed to `layout`, which
+   * anchors ONE node to its parent's edges. Absent or `enabled: false` ⇒ children keep the
+   * positions they were authored at.
+   */
+  private parseNode2DFlow(props: Record<string, unknown>): Node2DFlowConfig | undefined {
+    const raw = props.flow;
+    if (!raw || typeof raw !== 'object') return undefined;
+    const record = raw as Record<string, unknown>;
+    if (record.enabled !== true) return undefined;
+    const num = (value: unknown): number | undefined =>
+      typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+    const direction = record.direction === 'horizontal' ? 'horizontal' : 'vertical';
+    const align =
+      record.align === 'center' || record.align === 'end'
+        ? (record.align as 'center' | 'end')
+        : 'start';
+    return {
+      enabled: true,
+      direction,
+      gap: num(record.gap),
+      paddingX: num(record.paddingX),
+      paddingY: num(record.paddingY),
+      align,
+      autoSize: record.autoSize === true,
+    };
   }
 
   private parseNode2DLayout(props: Record<string, unknown>): Node2DLayoutConfig | undefined {

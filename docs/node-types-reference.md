@@ -54,8 +54,19 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
 | `opacity` | number | 1 | Local opacity multiplier, inherited by child 2D nodes |
 | `zIndex` | number | 0 | Draw-order override, `-4096..4096` (integer). Higher draws on top |
 | `zAsRelative` | boolean | true | Add `zIndex` to the parent's effective z instead of treating it as absolute |
+| `flow.enabled` | boolean | false | Stack this container's children in tree order instead of leaving them where they were authored |
+| `flow.direction` | enum | vertical | `vertical` (a column) or `horizontal` (a row) |
+| `flow.gap` | number | 0 | Space between two children, px |
+| `flow.paddingX` / `flow.paddingY` | number | 0 | Inset from the container's edges |
+| `flow.align` | enum | start | Cross-axis placement of each child: `start`, `center`, `end` |
+| `flow.autoSize` | boolean | false | Grow the container along the flow axis so the last child fits |
 
 **Usage Notes:**
+- **Flow vs. anchors.** An anchor (`layout`) pins ONE node to its parent's edges; a
+  flow is the container deciding where each child begins. With `flow.enabled` the
+  container owns the main axis and each child's own anchor still owns the cross
+  one — a settings row can pin its toggle to the right edge while the column
+  decides how far down the row sits. This is why no `Layout2D` node exists.
 - Cannot have children by default (set `isContainer = true` to enable)
 - Transforms affect all children in local space
 - Rotation is clockwise, in degrees
@@ -213,11 +224,26 @@ An interactive button control for 2D user interfaces. Responds to pointer clicks
 | `hoverColor` | color | #5a5a5a | Background on hover |
 | `pressedColor` | color | #3a3a3a | Background when pressed |
 | `buttonAction` | string | "Submit" | Action identifier |
+| `textureNormal` | texture | null | Skin sprite for the idle state |
+| `textureHover` | texture | null | Skin sprite on hover; falls back to `textureNormal` |
+| `texturePressed` | texture | null | Skin sprite while pressed; falls back to `textureNormal` |
+| `textureDisabled` | texture | null | Skin sprite while disabled; falls back to `textureNormal` |
+| `sliceBorderLeft` | number | 0 | Left 9-slice inset of the state skins, in source px; 0 = stretch |
+| `sliceBorderRight` | number | 0 | Right 9-slice inset, in source px |
+| `sliceBorderTop` | number | 0 | Top 9-slice inset, in source px |
+| `sliceBorderBottom` | number | 0 | Bottom 9-slice inset, in source px |
 
 **Usage Notes:**
 - Emits button press events when clicked
 - Visual states: default, hover, pressed
 - Use `buttonAction` to identify button function in scripts
+- A state sprite replaces the flat colour for that state (the material tint goes white); with no
+  sprites at all the button keeps its colour behaviour
+- **Nine-slice**: set the four `sliceBorder*` insets (source-texture pixels, Godot's `patch_margin_*`) to stop the skin being smeared. The corners keep their pixel size while the edges and centre stretch, so one 64x64 sprite fits any size. All-zero (the default) is the plain stretch, unchanged.
+- The four insets apply to **every** state sprite, and each state's patch is cut against *its own*
+  natural size — a hover skin authored at 2x still gets the same physical corners
+- A sliced skin opts out of the 2D quad batcher (the batcher extracts four *unit* corners, which a
+  baked patch is not); an unsliced button still batches
 
 ---
 
@@ -232,9 +258,15 @@ A multiline text label for 2D UI. Wraps text to a fixed box, aligns it in both a
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `label` | string | "" | Text to display; `\n` breaks lines |
-| `labelFontFamily` | string | Arial | Font family |
+| `labelFontFamily` | string | Arial | Font family. A family the project ships (`ProjectManifest.fonts`) is registered before the first frame; anything else falls back to a system face |
 | `labelFontSize` | number | 16 | Font size in pixels |
+| `labelFontWeight` | number \| string | normal | CSS weight (400/700/900…) — a display face and its Cyrillic supplier usually differ |
 | `labelColor` | color | #ffffff | Text color |
+| `labelOutlineWidth` | number | 0 | Alias of `outlineWidth` below (the shared `UIControl2D` caption outline); one outline, two spellings |
+| `labelOutlineColor` | color | #000000 | Alias of `outlineColor` below |
+| `labelShadowColor` | color \| null | null | Drop-shadow colour; empty = no shadow |
+| `labelShadowOffsetX` / `labelShadowOffsetY` | number | 0 | Drop-shadow offset in px |
+| `labelLetterSpacing` | number | 0 | Extra px between glyphs |
 | `labelAlign` | enum | center | Horizontal alignment: `left`, `center`, `right` |
 | `labelVAlign` | enum | middle | Vertical alignment: `top`, `middle`, `bottom` |
 | `width` | number | 0 | Fixed box width; text word-wraps to it. 0 = auto-size (no wrap) |
@@ -276,9 +308,21 @@ A horizontal slider control for selecting numeric values. Useful for volume cont
 | `maxValue` | number | 100 | Maximum value |
 | `value` | number | 50 | Current value |
 | `axisName` | string | "Slider" | Identifier for axis |
+| `textureTrack` | texture | null | Sprite for the track background |
+| `textureFill` | texture | null | Sprite for the filled portion left of the handle |
+| `textureThumb` | texture | null | Sprite for the handle; never nine-sliced |
+| `sliceBorderLeft` | number | 0 | Left 9-slice inset of the track/fill sprites, in source px |
+| `sliceBorderRight` | number | 0 | Right 9-slice inset, in source px |
+| `sliceBorderTop` | number | 0 | Top 9-slice inset, in source px |
+| `sliceBorderBottom` | number | 0 | Bottom 9-slice inset, in source px |
 
 **Usage Notes:**
 - Drag the handle to change values
+- A slot's sprite replaces its flat colour (tint goes white); unset slots keep the colour
+- **Nine-slice**: set the four `sliceBorder*` insets (source-texture pixels, Godot's `patch_margin_*`) to stop the skin being smeared. The corners keep their pixel size while the edges and centre stretch, so one 64x64 sprite fits any size. All-zero (the default) is the plain stretch, unchanged.
+- The border applies to the track and the fill, never the thumb — a knob is drawn at its authored
+  size, so there is nothing to slice. The fill is **re-cut** as the value moves, so its caps keep
+  their pixel size instead of squashing
 - Value is clamped between min and max
 - Emits the pointer lifecycle signals (`pointerdown`/`pressed`/`pointerup`/`released`/`click`) but **no** state signal: the value is written during the drag, so by the time `released`/`click` fire, `value` is already the value the gesture produced. Read `slider.value` there, or track the live value through `input.getAxis(axisName)`.
 
@@ -326,6 +370,9 @@ A toggle checkbox control for boolean settings.
 | `checked` | boolean | false | Checked state |
 | `uncheckedColor` | color | #333333 | Unchecked border |
 | `checkedColor` | color | #4a9eff | Checked fill color |
+| `textureBox` | texture | null | Sprite for the box; also the checked fallback |
+| `textureBoxChecked` | texture | null | Optional sprite for the box while checked |
+| `textureMark` | texture | null | Sprite drawn over the box while checked (the tick) |
 
 **Signals:**
 
@@ -354,6 +401,10 @@ edit — and never fires when the assigned value equals the current one.
 - Toggle between checked/unchecked states
 - The hit area spans the box plus its label, so clicking the text toggles too
 - `checkmarkAction` pulses a virtual button for one frame and latches an axis (1/0) with the state
+- A sprite in a slot replaces the corresponding flat colour (the tint goes white). `textureBoxChecked`
+  is optional: without it the checked box keeps drawing `textureBox`
+- The mark exists **only while checked**, sprite or not. With `textureMark` it is a box-sized,
+  unrotated quad; without one it stays the historical tilted colour bar
 
 ---
 
@@ -373,11 +424,21 @@ A progress bar or health bar display.
 | `maxValue` | number | 100 | Maximum fill value |
 | `backgroundColor` | color | #333333 | Background color |
 | `fillColor` | color | #4a9eff | Fill bar color |
+| `textureTrough` | texture | null | Sprite for the empty trough behind the fill |
+| `textureFill` | texture | null | Sprite for the filled portion |
+| `sliceBorderLeft` | number | 0 | Left 9-slice inset of the trough/fill sprites, in source px |
+| `sliceBorderRight` | number | 0 | Right 9-slice inset, in source px |
+| `sliceBorderTop` | number | 0 | Top 9-slice inset, in source px |
+| `sliceBorderBottom` | number | 0 | Bottom 9-slice inset, in source px |
 
 **Usage Notes:**
 - Fill percentage = value / maxValue
 - Useful for health bars, mana bars, loading progress
 - Can be oriented horizontally
+- A slot's sprite replaces its flat colour (tint goes white); unset slots keep the colour
+- **Nine-slice**: set the four `sliceBorder*` insets (source-texture pixels, Godot's `patch_margin_*`) to stop the skin being smeared. The corners keep their pixel size while the edges and centre stretch, so one 64x64 sprite fits any size. All-zero (the default) is the plain stretch, unchanged.
+- The fill is **re-cut** at the new width every time `value` changes, so a sliced fill keeps its
+  end caps at full pixel size all the way down to an empty bar instead of squashing them
 
 ---
 
@@ -925,10 +986,10 @@ filter).
 | DirectionalLightNode | color, intensity, castShadow |
 | PointLightNode | color, intensity, distance, decay |
 | SpotLightNode | color, intensity, distance, angle, penumbra |
-| Button2D | width, height, backgroundColor, buttonAction |
-| Slider2D | width, minValue, maxValue, value |
+| Button2D | width, height, backgroundColor, buttonAction, textureNormal/Hover/Pressed/Disabled, sliceBorder* |
+| Slider2D | width, minValue, maxValue, value, textureTrack/Fill/Thumb, sliceBorder* |
 | Joystick2D | enabled, radius, floating, axisHorizontal, axisVertical |
-| Checkbox2D | width, checked |
-| Bar2D | width, value, maxValue |
+| Checkbox2D | width, checked, textureBox, textureBoxChecked, textureMark |
+| Bar2D | width, value, maxValue, textureTrough, textureFill, sliceBorder* |
 | InventorySlot2D | width, itemCount |
 | AudioPlayer | audioTrack, autoplay, loop, volume, bus, pitchVariation, volumeVariation |

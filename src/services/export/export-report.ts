@@ -33,6 +33,7 @@ const REASON_LABELS: Record<AssetInclusionReason, string> = {
   'script-reference': 'Referenced by a project script',
   'directory-expansion': 'Whole directory pulled in by a dynamic path',
   'atlas-page': 'Spine atlas page images',
+  'project-font': 'Web font declared by the project manifest',
   'locale-table': 'Locale tables',
   'locale-sprite': 'Localized sprite variants',
   'include-glob': 'Forced in by export includeGlobs',

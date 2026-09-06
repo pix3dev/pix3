@@ -7,7 +7,18 @@
  *
  * Text measurement is injected as a function so layout stays testable in
  * environments without a real canvas 2D context (happy-dom).
+ *
+ * Glyph styling itself (font shorthand, outline, drop shadow, glow, letter
+ * spacing) lives one level down in `styled-text.ts`, shared with `UIControl2D`
+ * captions so the two paint identically.
  */
+
+import {
+  applyTextStyle,
+  drawStyledText,
+  styledTextPadding,
+  type StyledTextDecoration,
+} from './styled-text';
 
 export type LabelHAlign = 'left' | 'center' | 'right';
 export type LabelVAlign = 'top' | 'middle' | 'bottom';
@@ -55,16 +66,22 @@ export function labelGlowPasses(glowStrength: number): number {
 export function labelDecorationPadding(
   fontSize: number,
   glowStrength = 0,
-  outlineWidth = 0
-): number {
-  const blur = labelGlowBlurPx(fontSize, glowStrength);
-  const outline = outlineWidth > 0 ? outlineWidth : 0;
-  if (blur <= 0 && outline <= 0) {
-    return 0;
+  outlineWidth = 0,
+  shadow?: {
+    color?: string | null;
+    offsetX?: number;
+    offsetY?: number;
+    blur?: number;
   }
-  // The visible extent of a canvas shadow is ~1.5× its blur radius; the stroke is
-  // centred on the glyph outline, so half of it sits outside.
-  return Math.ceil(blur * 1.5 + outline + 2);
+): number {
+  return styledTextPadding({
+    glowBlur: labelGlowBlurPx(fontSize, glowStrength),
+    outlineWidth,
+    shadowColor: shadow?.color ?? null,
+    shadowOffsetX: shadow?.offsetX ?? 0,
+    shadowOffsetY: shadow?.offsetY ?? 0,
+    shadowBlur: shadow?.blur ?? 0,
+  });
 }
 
 export interface LabelLayoutLine {
@@ -181,6 +198,16 @@ export interface LabelPaintOptions {
   outlineColor?: string;
   /** Outline half-width in logical px; 0 (default) = no outline. */
   outlineWidth?: number;
+  /** CSS font weight for the shorthand; omitted/`normal` = regular. */
+  fontWeight?: number | string;
+  /** Drop-shadow colour; empty/null (the default) = no shadow. */
+  shadowColor?: string | null;
+  shadowOffsetX?: number;
+  shadowOffsetY?: number;
+  /** Drop-shadow blur in logical px; 0 (default) = a hard offset silhouette. */
+  shadowBlur?: number;
+  /** Extra px between glyphs; 0 (default) = the font's own spacing. */
+  letterSpacing?: number;
 }
 
 /**
@@ -195,7 +222,12 @@ export function paintLabelCanvas(ctx: CanvasRenderingContext2D, options: LabelPa
 
   ctx.clearRect(0, 0, width, height);
   ctx.fillStyle = options.color;
-  ctx.font = `${options.fontSize}px ${options.fontFamily}`;
+  applyTextStyle(ctx, {
+    fontSize: options.fontSize,
+    fontFamily: options.fontFamily,
+    fontWeight: options.fontWeight,
+    letterSpacing: options.letterSpacing,
+  });
   ctx.textBaseline = 'middle';
 
   let x = width / 2;
@@ -222,13 +254,20 @@ export function paintLabelCanvas(ctx: CanvasRenderingContext2D, options: LabelPa
   const glowBlur = labelGlowBlurPx(options.fontSize, glowStrength);
   const glowPasses = labelGlowPasses(glowStrength);
   const glowColor = options.glowColor?.trim() ? options.glowColor : options.color;
-  const outlineWidth = Math.max(0, options.outlineWidth ?? 0);
-  if (outlineWidth > 0) {
-    ctx.lineJoin = 'round';
-    ctx.miterLimit = 2;
-    ctx.lineWidth = outlineWidth * 2;
-    ctx.strokeStyle = options.outlineColor?.trim() ? options.outlineColor : '#000000';
-  }
+  // One decoration record for every line: the shared painter owns the layering (shadow →
+  // outline → glow → fill) so a Label2D and a Button2D caption cannot come out different.
+  const decoration: StyledTextDecoration = {
+    color: options.color,
+    outlineWidth: options.outlineWidth,
+    outlineColor: options.outlineColor,
+    shadowColor: options.shadowColor,
+    shadowOffsetX: options.shadowOffsetX,
+    shadowOffsetY: options.shadowOffsetY,
+    shadowBlur: options.shadowBlur,
+    glowColor,
+    glowBlur,
+    glowPasses,
+  };
 
   let budget = options.visibleCharacters ?? Infinity;
   for (let i = 0; i < layout.lines.length; i++) {
@@ -242,18 +281,6 @@ export function paintLabelCanvas(ctx: CanvasRenderingContext2D, options: LabelPa
       continue;
     }
     const y = startY + i * layout.lineHeight + layout.lineHeight / 2;
-    if (outlineWidth > 0) {
-      ctx.strokeText(shown, x, y);
-    }
-    if (glowBlur > 0) {
-      ctx.save();
-      ctx.shadowColor = glowColor;
-      ctx.shadowBlur = glowBlur;
-      for (let pass = 0; pass < glowPasses; pass++) {
-        ctx.fillText(shown, x, y);
-      }
-      ctx.restore();
-    }
-    ctx.fillText(shown, x, y);
+    drawStyledText(ctx, shown, x, y, decoration);
   }
 }
