@@ -561,6 +561,10 @@ export class GamePlaySessionService {
       this.assetLoader.setAtlasResolver(null);
     }
 
+    // The project's own web fonts, registered before the first frame — otherwise a caption in a
+    // family the manifest ships is drawn by a system substitute at a different width.
+    runner.setProjectFonts(appState.project.manifest?.fonts ?? null);
+
     // Localization: hand the play instance the project's locale config and seed
     // it with the editor's current preview locale (so "preview ru → Play" starts
     // in ru). Null config ⇒ inert default; the game gets its own instance so a

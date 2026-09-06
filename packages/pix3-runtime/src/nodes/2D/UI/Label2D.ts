@@ -1,6 +1,7 @@
 import { CanvasTexture, Mesh, MeshBasicMaterial, PlaneGeometry, Vector2 } from 'three';
 import { UIControl2D, type UIControl2DProps } from './UIControl2D';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
+import { applyTextStyle } from '../../../core/styled-text';
 import {
   LABEL_AUTO_SIZE_BLEED,
   LABEL_GLOW_STRENGTH_LIMIT,
@@ -84,8 +85,11 @@ export class Label2D extends UIControl2D {
     this.typewriterSpeed = props.typewriterSpeed ?? 0;
     this.glowColor = props.glowColor ?? '#ffffff';
     this.glowStrength = Label2D.clampGlowStrength(props.glowStrength ?? 0);
-    this.outlineColor = props.outlineColor ?? '#000000';
-    this.outlineWidth = Math.max(0, props.outlineWidth ?? 0);
+    // `labelOutline*` is the caption outline every UIControl2D shares; here it aliases the
+    // label's own pair (see the accessors below), so a kit or a YAML that spells it either way
+    // lands in the same field.
+    this.outlineColor = props.outlineColor ?? props.labelOutlineColor ?? '#000000';
+    this.outlineWidth = Math.max(0, props.outlineWidth ?? props.labelOutlineWidth ?? 0);
 
     // Re-render with the Label2D-specific fields now that they are set (the
     // base constructor already ran updateLabel with defaults).
@@ -94,6 +98,32 @@ export class Label2D extends UIControl2D {
     // Last: `label.width = 200` from a script now re-wraps and repaints the text like the Inspector
     // does (the base label props are already accessors; this covers Label2D's own box fields).
     installReactiveSchemaProperties(this, Label2D.getPropertySchema);
+  }
+
+  /**
+   * `Label2D` predates the shared caption outline and keeps `outlineWidth` / `outlineColor` as the
+   * source of truth (they also size the canvas bleed). The inherited pair aliases them, so there is
+   * one outline on a label however it is addressed — and the inspector shows it once.
+   */
+  override get labelOutlineWidth(): number {
+    return this.outlineWidth ?? 0;
+  }
+
+  override set labelOutlineWidth(value: number) {
+    const next = Math.max(0, Number.isFinite(value) ? value : 0);
+    if (this.outlineWidth === next) return;
+    this.outlineWidth = next;
+    this.updateLabel();
+  }
+
+  override get labelOutlineColor(): string {
+    return this.outlineColor ?? '#000000';
+  }
+
+  override set labelOutlineColor(value: string) {
+    if (this.outlineColor === value) return;
+    this.outlineColor = value;
+    this.updateLabel();
   }
 
   override getDisplayText(): string {
@@ -205,7 +235,15 @@ export class Label2D extends UIControl2D {
     const ctx = this.renderState?.ctx ?? canvas.getContext('2d');
     if (!ctx) throw new Error('Could not get canvas 2D context');
 
-    ctx.font = `${fontSize}px ${this.labelFontFamily}`;
+    // Measure with the SAME font the paint uses — weight and tracking included, and the family
+    // quoted: a bare `16px Baloo 2` is invalid CSS, the assignment is dropped and the text is laid
+    // out in the default face while being painted in the right one.
+    applyTextStyle(ctx, {
+      fontSize,
+      fontFamily: this.labelFontFamily,
+      fontWeight: this.labelFontWeight,
+      letterSpacing: this.labelLetterSpacing,
+    });
     const layout = layoutLabelText(text, line => ctx.measureText(line).width, {
       fontSize,
       maxWidth: boxWidthProp > 0 ? boxWidthProp : 0,
@@ -214,7 +252,11 @@ export class Label2D extends UIControl2D {
     // Glow blur / outline stroke extend past the glyphs, so the canvas (and the
     // mesh that shows it) grows by the bleed on every side while the text stays
     // aligned to the authored box. Exactly 0 while both are off.
-    const pad = labelDecorationPadding(fontSize, this.glowStrength ?? 0, this.outlineWidth ?? 0);
+    const pad = labelDecorationPadding(fontSize, this.glowStrength ?? 0, this.outlineWidth ?? 0, {
+      color: this.labelShadowColor,
+      offsetX: this.labelShadowOffsetX,
+      offsetY: this.labelShadowOffsetY,
+    });
     const boxWidth =
       (boxWidthProp > 0 ? boxWidthProp : Math.ceil(layout.textWidth) + LABEL_AUTO_SIZE_BLEED) +
       pad * 2;
@@ -313,23 +355,35 @@ export class Label2D extends UIControl2D {
       glowStrength: this.glowStrength ?? 0,
       outlineColor: this.outlineColor,
       outlineWidth: this.outlineWidth ?? 0,
+      // Weight, drop shadow and tracking are the caption recipe every UI control shares
+      // (`UIControl2D`), so a label and a button caption of one kit are drawn alike.
+      fontWeight: this.labelFontWeight,
+      shadowColor: this.labelShadowColor,
+      shadowOffsetX: this.labelShadowOffsetX,
+      shadowOffsetY: this.labelShadowOffsetY,
+      letterSpacing: this.labelLetterSpacing,
     });
     this.labelTexture.needsUpdate = true;
   }
 
   static getPropertySchema(): PropertySchema {
     const baseSchema = UIControl2D.getPropertySchema();
-    const properties = baseSchema.properties.map(prop => {
-      // Upgrade the inherited free-text alignment to a dropdown for labels.
-      if (prop.name === 'labelAlign') {
-        return {
-          ...prop,
-          type: 'enum' as const,
-          ui: { ...prop.ui, options: [...LABEL_H_ALIGN_VALUES] },
-        };
-      }
-      return prop;
-    });
+    // The inherited outline pair aliases `outlineWidth` / `outlineColor` (declared below with the
+    // label's own range and copy), so it is dropped here rather than shown twice.
+    const ALIASED = new Set(['labelOutlineWidth', 'labelOutlineColor']);
+    const properties = baseSchema.properties
+      .filter(prop => !ALIASED.has(prop.name))
+      .map(prop => {
+        // Upgrade the inherited free-text alignment to a dropdown for labels.
+        if (prop.name === 'labelAlign') {
+          return {
+            ...prop,
+            type: 'enum' as const,
+            ui: { ...prop.ui, options: [...LABEL_H_ALIGN_VALUES] },
+          };
+        }
+        return prop;
+      });
     return {
       nodeType: 'Label2D',
       extends: 'UIControl2D',

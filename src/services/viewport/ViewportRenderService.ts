@@ -3023,6 +3023,9 @@ export class ViewportRendererService {
           }
         }
 
+        // Fill / thumb / mark: the sprites a control draws over its base skin. Without them the
+        // editor shows an empty trough where play mode shows a filled bar.
+        this.proxyRegistry.syncUIControlOverlays(node, visualRoot);
         this.proxyRegistry.updateUIControlLabelVisual(visualRoot, node);
         this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
       }

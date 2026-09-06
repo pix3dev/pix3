@@ -9,6 +9,7 @@ import {
   resolveExportSettings,
   type ExportSettings,
   type QualitySettings,
+  type ProjectFontFace,
 } from '@/core/ProjectManifest';
 import { createGlobMatcher } from '@/services/export/glob-match';
 import { collectNetKindPrefabPaths } from '@/core/net-kind-paths';
@@ -41,6 +42,7 @@ export type AssetInclusionReason =
   | 'script-reference'
   | 'directory-expansion'
   | 'atlas-page'
+  | 'project-font'
   | 'locale-table'
   | 'locale-sprite'
   | 'include-glob';
@@ -213,7 +215,8 @@ export class ProjectBuildService {
       entryScenePath,
       projectScriptFiles,
       exportSettings,
-      warnings
+      warnings,
+      context.state.project.manifest?.fonts ?? []
     );
     const usesSpine = this.scanFoundSpineNode;
     const mentionedNames = this.scanMentionedNames;
@@ -250,6 +253,7 @@ export class ProjectBuildService {
         assetPaths,
         quality,
         localization,
+        context.state.project.manifest?.fonts ?? [],
         { usesSpine, usesPostProcessing, usesNetwork }
       ),
       usesSpine,
@@ -400,7 +404,8 @@ export class ProjectBuildService {
     entryScenePath: string,
     projectScriptFiles: ReadonlyMap<string, string>,
     exportSettings: ExportSettings,
-    warnings: string[]
+    warnings: string[],
+    projectFonts: readonly ProjectFontFace[] = []
   ): Promise<{ assetPaths: string[]; reachability: Map<string, AssetReachabilityEntry> }> {
     const files = new Set<string>();
     const reachability = new Map<string, AssetReachabilityEntry>();
@@ -508,6 +513,16 @@ export class ProjectBuildService {
     // it were never scanned its own prefabs/frame textures would silently go
     // missing from the build.
     await this.drainResourceScan(scanQueue, directoryQueue, addResourcePath, warnings);
+
+    // The project's web fonts: named only by `pix3project.yaml`, so the `res://` scan of scenes
+    // and scripts can never see them — without this root a pruned export ships a manifest that
+    // points at files it deleted, and every caption falls back to a system face.
+    for (const face of projectFonts) {
+      const fontPath = this.normalizeResourcePath(face.path);
+      if (this.isConcreteResourcePath(fontPath)) {
+        addResourcePath(fontPath, 'project-font');
+      }
+    }
 
     await this.collectLocaleAssetPaths(addResourcePath, warnings);
     await this.collectSpineAtlasPagePaths(files, addResourcePath, warnings);
@@ -1128,6 +1143,7 @@ export class ProjectBuildService {
     assetPaths: readonly string[],
     quality: QualitySettings,
     localization: RuntimeLocalizationConfig,
+    fonts: readonly ProjectFontFace[],
     usage: {
       readonly usesSpine: boolean;
       readonly usesPostProcessing: boolean;
@@ -1156,7 +1172,8 @@ export class ProjectBuildService {
         entryScenePath,
         quality,
         localization,
-        this.collectNetKindPrefabPaths(assetPaths)
+        this.collectNetKindPrefabPaths(assetPaths),
+        fonts
       )
     );
     files.set('src/generated/spine-runtime.ts', this.buildSpineRuntimeModule(usage.usesSpine));
@@ -1321,7 +1338,8 @@ export class ProjectBuildService {
     activeScenePath: string,
     quality: QualitySettings,
     localization: RuntimeLocalizationConfig,
-    netKindPrefabPaths: readonly string[]
+    netKindPrefabPaths: readonly string[],
+    fonts: readonly ProjectFontFace[] = []
   ): string {
     const scenePathsJson = JSON.stringify(scenePaths, null, 2);
     const activeJson = JSON.stringify(activeScenePath);
@@ -1335,6 +1353,10 @@ export class ProjectBuildService {
       2
     );
     const localizationJson = localization ? JSON.stringify(localization, null, 2) : 'null';
+    // The project's web fonts travel as data, not as a discovery: a player registers them
+    // before the first frame, so a baked caption keeps the face it was designed in rather than
+    // falling back to a system one (`ProjectFontLoader`).
+    const fontsJson = JSON.stringify(fonts, null, 2);
 
     const netKindTableJson = JSON.stringify({ prefabs: netKindPrefabPaths, authored: [] }, null, 2);
 
@@ -1343,6 +1365,7 @@ export class ProjectBuildService {
       'export const activeScenePath = ' + activeJson + ';',
       'export const runtimeQuality = ' + qualityJson + ' as const;',
       'export const runtimeLocalization = ' + localizationJson + ' as const;',
+      'export const runtimeFonts = ' + fontsJson + ' as const;',
       '// Multiplayer kind table (D6): the wire Kind is the index into `prefabs`. Sorted by code',
       '// point so every export of this project agrees with the room allowlist; `authored` is the',
       '// reserved Phase-3 segment and appends after the prefabs so no kind ever shifts.',

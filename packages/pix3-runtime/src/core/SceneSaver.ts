@@ -310,6 +310,13 @@ export class SceneSaver {
       } else {
         delete props.layout;
       }
+
+      const flow = node.serializeFlow();
+      if (flow) {
+        props.flow = flow;
+      } else {
+        delete props.flow;
+      }
     } else if (node instanceof Group2D) {
       // Serialize Group2D with size properties
       props.width = node.width;
@@ -329,6 +336,13 @@ export class SceneSaver {
       } else {
         delete props.layout;
       }
+
+      const flow = node.serializeFlow();
+      if (flow) {
+        props.flow = flow;
+      } else {
+        delete props.flow;
+      }
     } else if (node instanceof Node2D) {
       // Generic Node2D transform
       const transform: Record<string, unknown> = {
@@ -344,6 +358,13 @@ export class SceneSaver {
         props.layout = layout;
       } else {
         delete props.layout;
+      }
+
+      const flow = node.serializeFlow();
+      if (flow) {
+        props.flow = flow;
+      } else {
+        delete props.flow;
       }
 
       // Persist authored local opacity when non-default.
@@ -608,6 +629,10 @@ export class SceneSaver {
         delete props.outlineWidth;
         delete props.outlineColor;
       }
+      // On a label the shared `labelOutline*` pair aliases the two above; writing both would
+      // put the same outline in the file twice.
+      delete props.labelOutlineWidth;
+      delete props.labelOutlineColor;
     } else if (node instanceof Slider2D) {
       this.serializeCommonUIControlProps(node, props);
       props.width = node.width;
@@ -908,6 +933,17 @@ export class SceneSaver {
     if (node.labelFontSize !== 16) props.labelFontSize = node.labelFontSize;
     if (node.labelColor !== '#ffffff') props.labelColor = node.labelColor;
     if (node.labelAlign !== 'center') props.labelAlign = node.labelAlign;
+    // `normal` and 400 are the same weight; the inspector's numeric editor writes the latter.
+    if (node.labelFontWeight !== 'normal' && node.labelFontWeight !== 400) {
+      props.labelFontWeight = node.labelFontWeight;
+    }
+    if (node.labelOutlineWidth !== 0) props.labelOutlineWidth = node.labelOutlineWidth;
+    if (node.labelOutlineColor !== '#000000') props.labelOutlineColor = node.labelOutlineColor;
+    if (node.labelShadowColor) props.labelShadowColor = node.labelShadowColor;
+    else delete props.labelShadowColor;
+    if (node.labelShadowOffsetX !== 0) props.labelShadowOffsetX = node.labelShadowOffsetX;
+    if (node.labelShadowOffsetY !== 0) props.labelShadowOffsetY = node.labelShadowOffsetY;
+    if (node.labelLetterSpacing !== 0) props.labelLetterSpacing = node.labelLetterSpacing;
     if (node.texturePath) props.texturePath = node.texturePath;
   }
 

@@ -10,6 +10,7 @@ import {
 } from 'three';
 import { Node2D, type Node2DProps } from '../../Node2D';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
+import { applyTextStyle, drawStyledText, styledTextPadding } from '../../../core/styled-text';
 import { resolveLocalizedText } from '../../../core/localization/active-localization';
 import type { PropertySchema } from '../../../fw/property-schema';
 import type { InteractionDescriptor, Interactive } from '../../../fw/interactive';
@@ -55,7 +56,18 @@ export interface UIControl2DProps extends Node2DProps {
   labelKey?: string;
   labelFontFamily?: string;
   labelFontSize?: number;
+  /** Numeric (400/700/900) or a CSS keyword; default `normal`. */
+  labelFontWeight?: number | string;
   labelColor?: string;
+  /** Caption outline half-width in px (the stroke is drawn at twice it); 0 = none. */
+  labelOutlineWidth?: number;
+  labelOutlineColor?: string;
+  /** Drop-shadow colour; `null`/empty = no shadow. */
+  labelShadowColor?: string | null;
+  labelShadowOffsetX?: number;
+  labelShadowOffsetY?: number;
+  /** Extra px between glyphs. */
+  labelLetterSpacing?: number;
   labelAlign?: 'left' | 'center' | 'right';
   texturePath?: string | null;
 }
@@ -95,6 +107,13 @@ export abstract class UIControl2D extends Node2D implements Interactive {
   private _labelFontSize: number;
   private _labelColor: string;
   private _labelAlign: 'left' | 'center' | 'right';
+  private _labelFontWeight: number | string;
+  private _labelOutlineWidth: number;
+  private _labelOutlineColor: string;
+  private _labelShadowColor: string | null;
+  private _labelShadowOffsetX: number;
+  private _labelShadowOffsetY: number;
+  private _labelLetterSpacing: number;
   /**
    * True once the constructor has finished, so setters know whether a re-render is safe: during
    * construction subclass fields (`size`, skin meshes) are not in place yet, and the base
@@ -154,6 +173,81 @@ export abstract class UIControl2D extends Node2D implements Interactive {
     this.refreshLabelIfReactive();
   }
 
+  get labelFontWeight(): number | string {
+    return this._labelFontWeight;
+  }
+
+  set labelFontWeight(value: number | string) {
+    if (this._labelFontWeight === value) return;
+    this._labelFontWeight = value;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelOutlineWidth(): number {
+    return this._labelOutlineWidth;
+  }
+
+  set labelOutlineWidth(value: number) {
+    const next = Math.max(0, Number.isFinite(value) ? value : 0);
+    if (this._labelOutlineWidth === next) return;
+    this._labelOutlineWidth = next;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelOutlineColor(): string {
+    return this._labelOutlineColor;
+  }
+
+  set labelOutlineColor(value: string) {
+    if (this._labelOutlineColor === value) return;
+    this._labelOutlineColor = value;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelShadowColor(): string | null {
+    return this._labelShadowColor;
+  }
+
+  set labelShadowColor(value: string | null) {
+    const next = value && value.trim().length > 0 ? value : null;
+    if (this._labelShadowColor === next) return;
+    this._labelShadowColor = next;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelShadowOffsetX(): number {
+    return this._labelShadowOffsetX;
+  }
+
+  set labelShadowOffsetX(value: number) {
+    const next = Number.isFinite(value) ? value : 0;
+    if (this._labelShadowOffsetX === next) return;
+    this._labelShadowOffsetX = next;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelShadowOffsetY(): number {
+    return this._labelShadowOffsetY;
+  }
+
+  set labelShadowOffsetY(value: number) {
+    const next = Number.isFinite(value) ? value : 0;
+    if (this._labelShadowOffsetY === next) return;
+    this._labelShadowOffsetY = next;
+    this.refreshLabelIfReactive();
+  }
+
+  get labelLetterSpacing(): number {
+    return this._labelLetterSpacing;
+  }
+
+  set labelLetterSpacing(value: number) {
+    const next = Number.isFinite(value) ? value : 0;
+    if (this._labelLetterSpacing === next) return;
+    this._labelLetterSpacing = next;
+    this.refreshLabelIfReactive();
+  }
+
   get labelAlign(): 'left' | 'center' | 'right' {
     return this._labelAlign;
   }
@@ -203,6 +297,13 @@ export abstract class UIControl2D extends Node2D implements Interactive {
     this._labelFontSize = props.labelFontSize ?? 16;
     this._labelColor = props.labelColor ?? '#ffffff';
     this._labelAlign = props.labelAlign ?? 'center';
+    this._labelFontWeight = props.labelFontWeight ?? 'normal';
+    this._labelOutlineWidth = Math.max(0, props.labelOutlineWidth ?? 0);
+    this._labelOutlineColor = props.labelOutlineColor ?? '#000000';
+    this._labelShadowColor = props.labelShadowColor?.trim() ? props.labelShadowColor : null;
+    this._labelShadowOffsetX = props.labelShadowOffsetX ?? 0;
+    this._labelShadowOffsetY = props.labelShadowOffsetY ?? 0;
+    this._labelLetterSpacing = props.labelLetterSpacing ?? 0;
     this.texturePath = props.texturePath ?? null;
 
     if (this.texturePath) {
@@ -850,23 +951,44 @@ export abstract class UIControl2D extends Node2D implements Interactive {
     ctx.fillStyle = 'rgba(0, 0, 0, 0)';
     ctx.fillRect(0, 0, width, height);
 
-    // Draw text
-    ctx.fillStyle = this.labelColor;
-    ctx.font = `${this.labelFontSize}px ${this.labelFontFamily}`;
+    // Draw text through the shared painter, so a control caption and a `Label2D` wear the
+    // same outline and drop shadow (both are the kit's sticker recipe — the generator bakes
+    // neither, since the engine draws every caption at runtime).
+    applyTextStyle(ctx, {
+      fontSize: this.labelFontSize,
+      fontFamily: this.labelFontFamily,
+      fontWeight: this.labelFontWeight,
+      letterSpacing: this.labelLetterSpacing,
+    });
     ctx.textBaseline = 'middle';
 
+    // The decoration grows outside the glyph, so an aligned caption is inset by it as well as
+    // by the fixed 10 px margin — otherwise a left-aligned outline is clipped by the canvas.
+    const decorationPad = styledTextPadding({
+      outlineWidth: this.labelOutlineWidth,
+      shadowColor: this.labelShadowColor,
+      shadowOffsetX: this.labelShadowOffsetX,
+      shadowOffsetY: this.labelShadowOffsetY,
+    });
     let x = width / 2;
     if (this.labelAlign === 'left') {
       ctx.textAlign = 'left';
-      x = 10;
+      x = 10 + decorationPad;
     } else if (this.labelAlign === 'right') {
       ctx.textAlign = 'right';
-      x = width - 10;
+      x = width - 10 - decorationPad;
     } else {
       ctx.textAlign = 'center';
     }
 
-    ctx.fillText(text, x, height / 2);
+    drawStyledText(ctx, text, x, height / 2, {
+      color: this.labelColor,
+      outlineWidth: this.labelOutlineWidth,
+      outlineColor: this.labelOutlineColor,
+      shadowColor: this.labelShadowColor,
+      shadowOffsetX: this.labelShadowOffsetX,
+      shadowOffsetY: this.labelShadowOffsetY,
+    });
 
     const texture = new CanvasTexture(canvas);
     texture.userData = {
@@ -1005,6 +1127,101 @@ export abstract class UIControl2D extends Node2D implements Interactive {
           getValue: n => (n as UIControl2D).labelFontSize,
           setValue: (n, v) => {
             (n as UIControl2D).labelFontSize = Number(v);
+          },
+        },
+        {
+          name: 'labelFontFamily',
+          type: 'string',
+          ui: {
+            label: 'Font Family',
+            group: 'Label',
+            description: 'A family registered by the project manifest, or a system font',
+          },
+          getValue: n => (n as UIControl2D).labelFontFamily,
+          setValue: (n, v) => {
+            (n as UIControl2D).labelFontFamily = String(v);
+          },
+        },
+        {
+          name: 'labelFontWeight',
+          type: 'number',
+          ui: { label: 'Font Weight', group: 'Label', min: 100, max: 900, step: 100 },
+          getValue: n => {
+            const weight = (n as UIControl2D).labelFontWeight;
+            if (typeof weight === 'number') return weight;
+            const keyword = weight.trim().toLowerCase();
+            if (keyword === 'bold') return 700;
+            const numeric = Number(keyword);
+            return Number.isFinite(numeric) && numeric > 0 ? numeric : 400;
+          },
+          setValue: (n, v) => {
+            (n as UIControl2D).labelFontWeight = Number(v);
+          },
+        },
+        {
+          name: 'labelOutlineWidth',
+          type: 'number',
+          ui: {
+            label: 'Outline Width',
+            group: 'Label',
+            min: 0,
+            max: 12,
+            step: 0.5,
+            description: 'Half-width in px; the sticker outline the UI kit draws captions with',
+          },
+          getValue: n => (n as UIControl2D).labelOutlineWidth,
+          setValue: (n, v) => {
+            (n as UIControl2D).labelOutlineWidth = Number(v);
+          },
+        },
+        {
+          name: 'labelOutlineColor',
+          type: 'color',
+          ui: { label: 'Outline Color', group: 'Label' },
+          getValue: n => (n as UIControl2D).labelOutlineColor,
+          setValue: (n, v) => {
+            (n as UIControl2D).labelOutlineColor = String(v);
+          },
+        },
+        {
+          name: 'labelShadowColor',
+          type: 'color',
+          ui: {
+            label: 'Shadow Color',
+            group: 'Label',
+            description: 'Empty = no drop shadow',
+          },
+          getValue: n => (n as UIControl2D).labelShadowColor ?? '',
+          setValue: (n, v) => {
+            const next = String(v).trim();
+            (n as UIControl2D).labelShadowColor = next.length > 0 ? next : null;
+          },
+        },
+        {
+          name: 'labelShadowOffsetY',
+          type: 'number',
+          ui: { label: 'Shadow Offset Y', group: 'Label', min: -12, max: 12, step: 0.5 },
+          getValue: n => (n as UIControl2D).labelShadowOffsetY,
+          setValue: (n, v) => {
+            (n as UIControl2D).labelShadowOffsetY = Number(v);
+          },
+        },
+        {
+          name: 'labelShadowOffsetX',
+          type: 'number',
+          ui: { label: 'Shadow Offset X', group: 'Label', min: -12, max: 12, step: 0.5 },
+          getValue: n => (n as UIControl2D).labelShadowOffsetX,
+          setValue: (n, v) => {
+            (n as UIControl2D).labelShadowOffsetX = Number(v);
+          },
+        },
+        {
+          name: 'labelLetterSpacing',
+          type: 'number',
+          ui: { label: 'Letter Spacing', group: 'Label', min: -4, max: 12, step: 0.1 },
+          getValue: n => (n as UIControl2D).labelLetterSpacing,
+          setValue: (n, v) => {
+            (n as UIControl2D).labelLetterSpacing = Number(v);
           },
         },
         {

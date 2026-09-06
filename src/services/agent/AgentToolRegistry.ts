@@ -1978,6 +1978,16 @@ export class AgentToolRegistry {
               description:
                 'Where to apply when `nodeIds` is omitted: "selection" (default) or "scene" — every UI control of the active scene.',
             },
+            typography: {
+              type: 'boolean',
+              description:
+                "Also write the kit's caption recipe (face, weight, outline, drop shadow, and a size for a caption still on the engine default). Default true — art alone leaves every button in 16 px Arial, which is a different kit from the one that was designed.",
+            },
+            fonts: {
+              type: 'boolean',
+              description:
+                "On bake/restyle, also download the theme's typefaces into `fonts/` and declare them in `pix3project.yaml`, so the game can actually draw in that face. Default true; pass false when offline.",
+            },
           },
           required: ['action'],
           additionalProperties: false,
@@ -4164,7 +4174,9 @@ export class AgentToolRegistry {
     themeService.replaceTheme(theme, presetArg || undefined);
 
     const writer = await this.uiKitWriter();
-    const result = await writer.writeKit(theme);
+    const result = await writer.writeKit(theme, {
+      ...(args.fonts === false ? { fonts: false } : {}),
+    });
     const sprites = result.paths.filter(path => path.endsWith('.png'));
 
     return {
@@ -4174,6 +4186,7 @@ export class AgentToolRegistry {
       scale: result.scale,
       preset: presetArg || themeService.getPresetName(),
       sprites: sprites.length,
+      elapsedMs: result.elapsedMs,
       spriteRoot: sprites.length > 0 ? sprites[0].slice(0, sprites[0].lastIndexOf('/')) : null,
       manifestPath: result.paths.find(path => path.endsWith('ui-kit.json')) ?? null,
       themePath: result.paths.find(path => path.endsWith('ui-theme.json')) ?? null,
@@ -4283,7 +4296,12 @@ export class AgentToolRegistry {
 
     const { ApplyUiKitSkinCommand } = await import('@/features/uikit/ApplyUiKitSkinCommand');
     const didMutate = await this.dispatcher.execute(
-      new ApplyUiKitSkinCommand({ nodeIds, colorRole, manifest: kit })
+      new ApplyUiKitSkinCommand({
+        nodeIds,
+        colorRole,
+        manifest: kit,
+        ...(args.typography === false ? { typography: false } : {}),
+      })
     );
 
     return {

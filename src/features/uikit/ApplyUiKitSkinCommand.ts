@@ -18,6 +18,11 @@ export interface ApplyUiKitSkinCommandParams {
   colorRole?: PaletteId;
   /** Skip the `design/ui-kit.json` read (the panel already has the manifest in hand). */
   manifest?: KitManifest;
+  /**
+   * Also write the kit's caption recipe — face, weight, outline, drop and (for a node still on
+   * the default) size. Default true: art without typography is half a kit.
+   */
+  typography?: boolean;
 }
 
 export const DEFAULT_UIKIT_COLOR_ROLE: PaletteId = 'blue';
@@ -115,6 +120,7 @@ export class ApplyUiKitSkinCommand extends CommandBase<void, void> {
         nodeIds,
         colorRole: this.params.colorRole ?? DEFAULT_UIKIT_COLOR_ROLE,
         manifest,
+        ...(this.params.typography === false ? { typography: false } : {}),
       })
     );
 

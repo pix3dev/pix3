@@ -354,3 +354,21 @@ pix3-uikit-forge-panel .uikit-msg.is-ok {
 pix3-uikit-forge-panel .uikit-msg.is-error {
   color: var(--danger);
 }
+
+/* The two bake switches: shipping the typefaces, and writing the caption recipe on apply. */
+pix3-uikit-forge-panel .uikit-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--pix3-text-secondary, #b6bcc6);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+pix3-uikit-forge-panel .uikit-toggle input {
+  accent-color: var(--pix3-accent-color, #f5ae39);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}

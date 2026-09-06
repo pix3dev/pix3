@@ -9,12 +9,21 @@ import { SceneManager, NodeBase } from '@pix3/runtime';
 import { UpdateObjectPropertyOperation } from '@/features/properties/UpdateObjectPropertyOperation';
 import type { PaletteId } from '@/services/uikit';
 import type { KitManifest } from '@/services/uikit-editor/UiKitProjectWriter';
-import { planSkinPatches, SKINNABLE_NODE_TYPES } from '@/services/uikit-editor/skin-planner';
+import {
+  planCaptionPatches,
+  planSkinPatches,
+  SKINNABLE_NODE_TYPES,
+} from '@/services/uikit-editor/skin-planner';
 
 export interface ApplyUiKitSkinOperationParams {
   nodeIds: readonly string[];
   colorRole: PaletteId;
   manifest: KitManifest;
+  /**
+   * Also write the kit's caption recipe (face, weight, outline, drop, size). Default true —
+   * art without typography is half a kit: the button wears the skin and keeps 16 px Arial.
+   */
+  typography?: boolean;
 }
 
 /** One property write, resolved before anything is touched. */
@@ -62,8 +71,16 @@ export class ApplyUiKitSkinOperation implements Operation<OperationInvokeResult>
       if (!(node instanceof NodeBase)) continue;
 
       const plan = planSkinPatches(node.type, this.params.manifest, this.params.colorRole);
-      if (plan.length === 0) continue;
-      for (const write of plan) {
+      const captions =
+        this.params.typography === false
+          ? []
+          : planCaptionPatches(this.params.manifest, node.type, {
+              text: readString(node, 'label'),
+              height: readNumber(node, 'height'),
+              currentFontSize: readNumber(node, 'labelFontSize'),
+            });
+      if (plan.length === 0 && captions.length === 0) continue;
+      for (const write of [...plan, ...captions]) {
         writes.push({ nodeId, propertyPath: write.propertyPath, value: write.value });
       }
       skinned += 1;
@@ -90,4 +107,15 @@ export class ApplyUiKitSkinOperation implements Operation<OperationInvokeResult>
       ),
     };
   }
+}
+
+/** A node's string property, when it has one — the planner only needs a hint. */
+function readString(node: NodeBase, key: string): string | undefined {
+  const value = (node as unknown as Record<string, unknown>)[key];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function readNumber(node: NodeBase, key: string): number | undefined {
+  const value = (node as unknown as Record<string, unknown>)[key];
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }

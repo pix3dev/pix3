@@ -18,6 +18,41 @@ export interface Node2DLayoutConfig {
   verticalAlign?: Node2DVerticalAlign;
 }
 
+/**
+ * Container flow: children are stacked by the parent instead of sitting where they were authored.
+ *
+ * This is the gap the anchors could not fill. `Node2DLayoutConfig` anchors a child to an EDGE of
+ * its parent, which places a close button or an OK row perfectly — but a column of settings rows
+ * needs each row to know where the previous one ended, and that is a container decision. A `flow`
+ * container owns the main axis; a child's own anchor still owns the cross axis.
+ *
+ * A `Layout2D` NODE is deliberately not what this is: that node was removed on purpose
+ * (`.plans/done/layout2d-implementation-plan.md`), so the flow lives on the container that
+ * already exists, exactly as the anchor config does.
+ */
+export interface Node2DFlowConfig {
+  enabled?: boolean;
+  direction?: 'vertical' | 'horizontal';
+  /** Space between two children, px. */
+  gap?: number;
+  paddingX?: number;
+  paddingY?: number;
+  /** Cross-axis placement of each child inside the container. */
+  align?: 'start' | 'center' | 'end';
+  /** Grow the container along the main axis so the last child fits. */
+  autoSize?: boolean;
+}
+
+interface ResolvedFlow {
+  enabled: boolean;
+  direction: 'vertical' | 'horizontal';
+  gap: number;
+  paddingX: number;
+  paddingY: number;
+  align: 'start' | 'center' | 'end';
+  autoSize: boolean;
+}
+
 export interface Node2DLayoutSize {
   width: number;
   height: number;
@@ -34,6 +69,7 @@ export interface Node2DProps extends Omit<NodeBaseProps, 'type'> {
   rotation?: number; // degrees
   opacity?: number;
   layout?: Node2DLayoutConfig;
+  flow?: Node2DFlowConfig;
   zIndex?: number;
   zAsRelative?: boolean;
 }
@@ -55,6 +91,7 @@ export class Node2D extends NodeBase {
   private _zIndex: number;
   private _zAsRelative: boolean;
   private _layoutEnabled: boolean;
+  private _flow: ResolvedFlow;
   private _horizontalAlign: Node2DHorizontalAlign;
   private _verticalAlign: Node2DVerticalAlign;
   private readonly authoredLayoutPosition = new Vector2();
@@ -88,6 +125,7 @@ export class Node2D extends NodeBase {
     this.rotation.set(0, 0, rotationRadians);
 
     const layout = Node2D.normalizeLayout(props.layout);
+    this._flow = Node2D.normalizeFlow(props.flow);
     this._layoutEnabled = layout.enabled;
     this._horizontalAlign = layout.horizontalAlign;
     this._verticalAlign = layout.verticalAlign;
@@ -371,6 +409,127 @@ export class Node2D extends NodeBase {
     return false;
   }
 
+  get flow(): ResolvedFlow {
+    return this._flow;
+  }
+
+  /** Change the container's flow; pass `{ enabled: false }` to hand children back their positions. */
+  setFlow(config: Node2DFlowConfig | null): void {
+    this._flow = Node2D.normalizeFlow(config ?? undefined);
+    if (this._flow.enabled) {
+      this.applyFlowLayout();
+    }
+  }
+
+  protected static normalizeFlow(config: Node2DFlowConfig | undefined): ResolvedFlow {
+    return {
+      enabled: config?.enabled === true,
+      direction: config?.direction === 'horizontal' ? 'horizontal' : 'vertical',
+      gap: Number.isFinite(config?.gap) ? Math.max(0, Number(config?.gap)) : 0,
+      paddingX: Number.isFinite(config?.paddingX) ? Math.max(0, Number(config?.paddingX)) : 0,
+      paddingY: Number.isFinite(config?.paddingY) ? Math.max(0, Number(config?.paddingY)) : 0,
+      align: config?.align === 'center' || config?.align === 'end' ? config.align : 'start',
+      autoSize: config?.autoSize === true,
+    };
+  }
+
+  /**
+   * Stack this container's visible 2D children along the flow axis, in TREE ORDER.
+   *
+   * Coordinates follow the engine's own convention: a child's position is its CENTRE, the origin
+   * is the container's centre, and y points UP — so a vertical flow walks DOWNWARD from the top
+   * padding, and "the next row" means a smaller y.
+   *
+   * A child's own anchor still decides the cross axis when it is enabled; the flow only claims
+   * the main one. That split is what lets a settings row anchor its toggle to the right edge
+   * while the column decides how far down the row sits.
+   */
+  applyFlowLayout(): void {
+    if (!this._flow.enabled) return;
+    const flow = this._flow;
+    const size = this.getCurrentLayoutSize();
+    const children = this.children.filter(
+      (child): child is Node2D => child instanceof Node2D && child.visible
+    );
+    if (children.length === 0) return;
+
+    const vertical = flow.direction === 'vertical';
+    const crossSpan = vertical ? size.width : size.height;
+    const crossPad = vertical ? flow.paddingX : flow.paddingY;
+    let cursor = vertical ? flow.paddingY : flow.paddingX;
+    for (const child of children) {
+      const childSize = child.getCurrentLayoutSize();
+      const main = vertical ? childSize.height : childSize.width;
+      const cross = vertical ? childSize.width : childSize.height;
+
+      // The cross axis belongs to the child's own anchor when it has one — the flow only claims
+      // the main axis. `align` places a child that does not anchor itself.
+      const anchored = child.layoutEnabled;
+      let crossOffset: number;
+      if (anchored) {
+        crossOffset = vertical ? child.position.x : child.position.y;
+      } else if (flow.align === 'center') {
+        crossOffset = 0;
+      } else if (flow.align === 'end') {
+        crossOffset = crossSpan / 2 - crossPad - cross / 2;
+      } else {
+        crossOffset = -crossSpan / 2 + crossPad + cross / 2;
+      }
+
+      // Down the column / rightwards along the row, from the container's top-left corner.
+      const mainOffset = vertical
+        ? size.height / 2 - cursor - main / 2
+        : -size.width / 2 + cursor + main / 2;
+
+      // The authored position is what the child's anchor resolves from, so the main axis is
+      // handed to it as authored; an anchored child keeps its own authored cross coordinate.
+      const authored = child.getAuthoredLayoutPosition();
+      if (vertical) {
+        child.position.set(crossOffset, mainOffset, child.position.z);
+        child.setAuthoredLayoutPosition(anchored ? authored.x : crossOffset, mainOffset);
+      } else {
+        child.position.set(mainOffset, crossOffset, child.position.z);
+        child.setAuthoredLayoutPosition(mainOffset, anchored ? authored.y : crossOffset);
+      }
+      cursor += main + flow.gap;
+    }
+
+    if (flow.autoSize) {
+      const used = cursor - flow.gap + (vertical ? flow.paddingY : flow.paddingX);
+      const next = vertical
+        ? { width: size.width, height: Math.max(used, 0) }
+        : { width: Math.max(used, 0), height: size.height };
+      this.setLayoutSizeIfPossible(next);
+      // The children were placed against the OLD span; with a new one their offsets shift.
+      if (next.height !== size.height || next.width !== size.width) {
+        this.applyFlowLayout();
+      }
+    }
+  }
+
+  /** Write back a size when the concrete node type has one; a plain group simply records it. */
+  protected setLayoutSizeIfPossible(size: Node2DLayoutSize): void {
+    const target = this as unknown as { width?: number; height?: number };
+    if (typeof target.width === 'number' && typeof target.height === 'number') {
+      target.width = size.width;
+      target.height = size.height;
+    }
+    this.authoredLayoutSize.set(size.width, size.height);
+  }
+
+  serializeFlow(): Record<string, unknown> | undefined {
+    if (!this._flow.enabled) return undefined;
+    return {
+      enabled: true,
+      direction: this._flow.direction,
+      gap: this._flow.gap,
+      paddingX: this._flow.paddingX,
+      paddingY: this._flow.paddingY,
+      align: this._flow.align,
+      autoSize: this._flow.autoSize,
+    };
+  }
+
   applyAnchoredLayoutRecursive(
     referenceCurrentSize: Node2DLayoutSize,
     referenceAuthoredSize?: Node2DLayoutSize
@@ -378,9 +537,21 @@ export class Node2D extends NodeBase {
     if (this._layoutEnabled) {
       this.applyAnchoredLayout(referenceCurrentSize, referenceAuthoredSize);
     }
+    // The container's own size is settled by now, so the column can be laid out — and it must
+    // happen before the children recurse, or each child would anchor against a stale slot.
+    this.applyFlowLayout();
 
     const nextCurrentSize = this.getCurrentLayoutSize();
-    const nextAuthoredSize = this.getAuthoredLayoutSize();
+    let nextAuthoredSize = this.getAuthoredLayoutSize();
+    if (this._flow.enabled) {
+      // The flow has already placed every child on the main axis against the CURRENT span, so a
+      // child's own anchor must see no size change there — otherwise a top-anchored row would be
+      // shifted by the container's growth a second time. The cross axis keeps the real delta.
+      nextAuthoredSize =
+        this._flow.direction === 'vertical'
+          ? { width: nextAuthoredSize.width, height: nextCurrentSize.height }
+          : { width: nextCurrentSize.width, height: nextAuthoredSize.height };
+    }
     for (const child of this.children) {
       if (child instanceof Node2D) {
         child.applyAnchoredLayoutRecursive(nextCurrentSize, nextAuthoredSize);
@@ -987,6 +1158,93 @@ export class Node2D extends NodeBase {
           },
         },
         {
+          name: 'flowEnabled',
+          type: 'boolean',
+          ui: {
+            label: 'Flow',
+            description:
+              'Stack this container’s children in tree order. Anchors place ONE node against ' +
+              'its parent; a flow decides where each child in a column or a row begins.',
+            group: 'Flow',
+          },
+          getValue: node => (node as Node2D).flow.enabled,
+          setValue: (node, value) => {
+            const target = node as Node2D;
+            target.setFlow({ ...target.flow, enabled: Boolean(value) });
+          },
+        },
+        {
+          name: 'flowDirection',
+          type: 'select',
+          ui: { label: 'Direction', group: 'Flow', options: ['vertical', 'horizontal'] },
+          getValue: node => (node as Node2D).flow.direction,
+          setValue: (node, value) => {
+            const target = node as Node2D;
+            const next = value === 'horizontal' ? 'horizontal' : 'vertical';
+            target.setFlow({ ...target.flow, direction: next });
+          },
+        },
+        {
+          name: 'flowGap',
+          type: 'number',
+          ui: { label: 'Gap', group: 'Flow', min: 0, max: 400, step: 1 },
+          getValue: node => (node as Node2D).flow.gap,
+          setValue: (node, value) => {
+            const target = node as Node2D;
+            target.setFlow({ ...target.flow, gap: Number(value) });
+          },
+        },
+        {
+          name: 'flowPaddingX',
+          type: 'number',
+          ui: { label: 'Padding X', group: 'Flow', min: 0, max: 400, step: 1 },
+          getValue: node => (node as Node2D).flow.paddingX,
+          setValue: (node, value) => {
+            const target = node as Node2D;
+            target.setFlow({ ...target.flow, paddingX: Number(value) });
+          },
+        },
+        {
+          name: 'flowPaddingY',
+          type: 'number',
+          ui: { label: 'Padding Y', group: 'Flow', min: 0, max: 400, step: 1 },
+          getValue: node => (node as Node2D).flow.paddingY,
+          setValue: (node, value) => {
+            const target = node as Node2D;
+            target.setFlow({ ...target.flow, paddingY: Number(value) });
+          },
+        },
+        {
+          name: 'flowAlign',
+          type: 'select',
+          ui: {
+            label: 'Cross Align',
+            group: 'Flow',
+            options: ['start', 'center', 'end'],
+            description: 'Where each child sits on the axis the flow does NOT own',
+          },
+          getValue: node => (node as Node2D).flow.align,
+          setValue: (node, value) => {
+            const target = node as Node2D;
+            const next = value === 'center' || value === 'end' ? value : 'start';
+            target.setFlow({ ...target.flow, align: next });
+          },
+        },
+        {
+          name: 'flowAutoSize',
+          type: 'boolean',
+          ui: {
+            label: 'Auto Size',
+            group: 'Flow',
+            description: 'Grow the container along the flow axis so the last child fits',
+          },
+          getValue: node => (node as Node2D).flow.autoSize,
+          setValue: (node, value) => {
+            const target = node as Node2D;
+            target.setFlow({ ...target.flow, autoSize: Boolean(value) });
+          },
+        },
+        {
           name: 'layoutEnabled',
           type: 'boolean',
           ui: {
@@ -1050,6 +1308,11 @@ export class Node2D extends NodeBase {
         Anchor: {
           label: 'Anchor',
           description: 'Anchor-based layout relative to the containing frame',
+          expanded: false,
+        },
+        Flow: {
+          label: 'Flow',
+          description: 'Stack this container’s children along one axis, in tree order',
           expanded: false,
         },
       },

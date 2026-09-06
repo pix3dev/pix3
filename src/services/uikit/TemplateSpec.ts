@@ -14,7 +14,7 @@
  * This module produces DATA ONLY. It creates no nodes, touches no scene, and knows nothing
  * about the editor — a host decides what the tree becomes.
  */
-import type { ForgeTheme, PaletteId } from './ForgeTheme';
+import { C, LABEL_EDGE, faceFor, ink, type ForgeTheme, type PaletteId } from './ForgeTheme';
 import { runBuild, type ForgeLang } from './build-context';
 import { SETTINGS_ROW } from './showcase';
 import { buildSkin, BUTTON_STATES, type ButtonSkinState, type SkinPart } from './SkinSpec';
@@ -31,6 +31,104 @@ export type TemplateNodeType =
 export interface TemplateAnchor {
   h: 'left' | 'center' | 'right';
   v: 'top' | 'center' | 'bottom';
+}
+
+/**
+ * Container flow: children stacked by the engine rather than by their authored positions.
+ *
+ * Mirrors `Node2D.flow`. A template still authors every child's rectangle, so a host whose
+ * runtime has no flow yet draws exactly the same picture — the flow only decides where a row
+ * ADDED BY HAND afterwards lands.
+ */
+export interface TemplateFlow {
+  enabled: boolean;
+  direction: 'vertical' | 'horizontal';
+  gap: number;
+  paddingX: number;
+  paddingY: number;
+  align: 'start' | 'center' | 'end';
+  autoSize: boolean;
+}
+
+/**
+ * The caption typography of a whole template, in DESIGN units — the same numbers the preview
+ * draws with, so a prefab and the picture the user approved cannot drift.
+ *
+ * Two families, because a kit is bilingual and most display faces are Latin-only: a caption
+ * picks `cyrFamily`/`cyrWeight` when its own characters need them (`ForgeTheme.faceFor`). A
+ * CSS stack cannot express this — it carries one weight, and the Latin display faces are 400.
+ */
+export interface TemplateTypography {
+  family: string;
+  cyrFamily: string;
+  weight: number;
+  cyrWeight: number;
+  /** Caption outline half-width, absolute px (`ForgeTheme.txtOut`). */
+  outlineWidth: number;
+  outlineColor: string;
+  /** `null` when the theme's drop is too small to read as a shadow. */
+  shadowColor: string | null;
+  shadowOffsetX: number;
+  shadowOffsetY: number;
+  letterSpacing: number;
+  /** Caption colour on the template's own panel ground. */
+  inkColor: string;
+}
+
+/**
+ * Caption size as a fraction of the element it sits in — the ratios the PREVIEW draws with,
+ * lifted from the generators so the two cannot drift:
+ * `compButton` (`skins/buttons.ts`) sizes its caption `h * 0.38`, `compHeaderPlate`
+ * (`skins/panels.ts`) its title `h * 0.44`, and the showcase's settings row draws its label at
+ * `SETTINGS_ROW.label` (23) inside a `SETTINGS_ROW.icon` (46) row — i.e. exactly half of it.
+ * Body text is the odd one out (no generator draws a paragraph): 0.30 of the action-button
+ * height puts it a step below a caption and a step above nothing.
+ */
+export const TEMPLATE_TYPE_SCALE = {
+  buttonCaption: 0.38,
+  headerTitle: 0.44,
+  rowLabel: 0.5,
+  bodyText: 0.3,
+} as const;
+
+/** A caption size in design px: a ratio of the element's own height, never a constant. */
+function captionSize(elementHeight: number, ratio: number): number {
+  return Math.max(8, Math.round(elementHeight * ratio));
+}
+
+/**
+ * The caption recipe of one template, read off the theme through its own accessors.
+ *
+ * Both families are resolved here rather than left as a CSS stack: a stack carries ONE
+ * weight, and the Latin display faces are weight 400, so a Cyrillic caption drawn through a
+ * stack comes out thin. A host picks the family per caption (`isCyrText`).
+ */
+export function buildTypography(
+  theme: ForgeTheme,
+  colorRole: PaletteId,
+  lang: ForgeLang | undefined
+): TemplateTypography {
+  return runBuild({ theme, lang }, () => {
+    const latin = faceFor('A');
+    // A Cyrillic probe, so the supplier answers rather than the primary.
+    const cyr = faceFor('\u0410\u0430');
+    const edge = LABEL_EDGE();
+    return {
+      family: latin.family,
+      cyrFamily: cyr.family,
+      weight: latin.weight,
+      cyrWeight: cyr.weight,
+      outlineWidth: Math.max(0, theme.txtOut),
+      outlineColor: edge,
+      // `label()` (svg-primitives) only draws the drop when it is above this threshold; below
+      // it the shadow is invisible and would only cost the engine a second text pass.
+      shadowColor: theme.txtDrop > 0.2 ? edge : null,
+      shadowOffsetX: 0,
+      shadowOffsetY: Math.max(0, theme.txtDrop),
+      letterSpacing: Math.max(0, theme.track),
+      inkColor: ink(C(colorRole)),
+    };
+  });
 }
 
 export interface TemplateNode {
@@ -52,6 +150,14 @@ export interface TemplateNode {
   h: number;
   /** Which edges of the parent this node sticks to — maps onto `Node2D.layout`. */
   anchor?: TemplateAnchor;
+  /** Container flow — maps onto `Node2D.flow`. Only a container carries one. */
+  flow?: TemplateFlow;
+  /**
+   * Caption size in DESIGN px, derived from this node's own height by
+   * {@link TEMPLATE_TYPE_SCALE}. Present on every node that can carry a caption; the family,
+   * weight, outline and shadow come from {@link TemplateSpec.typography}.
+   */
+  fontSize?: number;
   /** A caption the ENGINE draws (never baked into the art). */
   label?: string;
   children?: TemplateNode[];
@@ -63,6 +169,8 @@ export interface TemplateSpec {
   id: TemplateId;
   /** Every picture the tree references, by key. */
   parts: Record<string, SkinPart>;
+  /** How every caption in this tree is drawn. */
+  typography: TemplateTypography;
   root: TemplateNode;
 }
 
@@ -208,6 +316,7 @@ export function buildTemplate(
       w,
       h: L.headerH,
       anchor: { h: 'center', v: 'top' },
+      fontSize: captionSize(L.headerH, TEMPLATE_TYPE_SCALE.headerTitle),
       label: captions.title,
     },
     {
@@ -227,32 +336,65 @@ export function buildTemplate(
 
   if (id === 'settings') {
     const toggleStates = addButtonParts(parts, 'toggle', 'blue', R.toggle, 60, theme);
-    const labelX = R.padX + R.icon + R.gap;
-    const ctrlX = w - R.padX - R.toggle;
-    captions.rows.forEach((text, i) => {
-      const rowY = L.firstRowY + i * R.step;
-      children.push({
-        type: 'Label2D',
-        name: `Row${i + 1}Label`,
-        x: labelX,
-        y: rowY,
-        w: Math.max(40, ctrlX - R.gap - labelX),
-        h: R.icon,
-        anchor: { h: 'left', v: 'top' },
-        label: text,
-      });
-      children.push({
-        type: 'Button2D',
-        name: `Row${i + 1}Toggle`,
-        part: toggleStates.normal,
-        states: toggleStates,
-        x: ctrlX,
-        y: rowY - 4,
-        w: R.toggle,
-        h: 60,
-        anchor: { h: 'right', v: 'top' },
-        label: captions.on,
-      });
+    const rowW = Math.max(80, w - R.padX * 2);
+    const rowH = Math.max(R.icon, 60);
+    const labelW = Math.max(40, rowW - R.toggle - R.gap);
+    // The rows are a COLUMN, not three nodes at three hard-coded y's. The container owns the
+    // spacing (`flow`), so a fourth row dropped in by hand lands where it belongs instead of on
+    // top of the third — which is the whole reason flow exists next to the anchors.
+    const rows: TemplateNode[] = captions.rows.map((text, i) => ({
+      type: 'Group2D' as const,
+      name: `Row${i + 1}`,
+      x: 0,
+      y: i * R.step,
+      w: rowW,
+      h: rowH,
+      children: [
+        {
+          type: 'Label2D' as const,
+          name: `Row${i + 1}Label`,
+          x: 0,
+          y: 0,
+          w: labelW,
+          h: rowH,
+          anchor: { h: 'left', v: 'center' },
+          fontSize: captionSize(R.icon, TEMPLATE_TYPE_SCALE.rowLabel),
+          label: text,
+        },
+        {
+          type: 'Button2D' as const,
+          name: `Row${i + 1}Toggle`,
+          part: toggleStates.normal,
+          states: toggleStates,
+          x: rowW - R.toggle,
+          y: (rowH - 60) / 2,
+          w: R.toggle,
+          h: 60,
+          anchor: { h: 'right', v: 'center' },
+          fontSize: captionSize(60, TEMPLATE_TYPE_SCALE.buttonCaption),
+          label: captions.on,
+        },
+      ],
+    }));
+
+    children.push({
+      type: 'Group2D',
+      name: 'Rows',
+      x: R.padX,
+      y: L.firstRowY,
+      w: rowW,
+      h: Math.max(rowH, rows.length * R.step - (R.step - rowH)),
+      anchor: { h: 'center', v: 'top' },
+      flow: {
+        enabled: true,
+        direction: 'vertical',
+        gap: Math.max(0, R.step - rowH),
+        paddingX: 0,
+        paddingY: 0,
+        align: 'center',
+        autoSize: false,
+      },
+      children: rows,
     });
   } else {
     children.push({
@@ -263,6 +405,7 @@ export function buildTemplate(
       w: w - R.padX * 2,
       h: Math.max(40, h - L.headerH - L.actionH - L.actionMargin * 2 - R.gap * 2),
       anchor: { h: 'center', v: 'top' },
+      fontSize: captionSize(L.actionH, TEMPLATE_TYPE_SCALE.bodyText),
       label: captions.body,
     });
   }
@@ -278,6 +421,7 @@ export function buildTemplate(
     w: L.actionW,
     h: L.actionH,
     anchor: { h: 'left', v: 'bottom' },
+    fontSize: captionSize(L.actionH, TEMPLATE_TYPE_SCALE.buttonCaption),
     label: captions.cancel,
   });
   children.push({
@@ -290,12 +434,14 @@ export function buildTemplate(
     w: L.actionW,
     h: L.actionH,
     anchor: { h: 'right', v: 'bottom' },
+    fontSize: captionSize(L.actionH, TEMPLATE_TYPE_SCALE.buttonCaption),
     label: captions.ok,
   });
 
   return {
     id,
     parts,
+    typography: buildTypography(theme, colorRole, opts.lang),
     root: {
       type: 'Group2D',
       name: id === 'settings' ? 'SettingsDialog' : 'Dialog',

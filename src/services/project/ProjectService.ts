@@ -27,6 +27,7 @@ import {
 } from '@/core/ProjectManifest';
 import {
   SceneManager,
+  loadProjectFonts,
   setProjectAODefault,
   setProjectTextureFiltering,
   type SceneGraph,
@@ -945,6 +946,20 @@ export class ProjectService {
       setProjectAODefault(manifest.ambientOcclusion);
       // Push the 2D texture filtering mode so texture loads pick it up.
       setProjectTextureFiltering(manifest.textureFiltering);
+      // Register the project's web fonts with the document. The editor draws its own canvas
+      // text for the viewport proxies, so without this a label in a project family reads in a
+      // system substitute in the editor while the game (which loads them in `SceneRunner`)
+      // draws it correctly — the two would disagree on the same scene.
+      void loadProjectFonts(manifest.fonts, {
+        readBlob: (resourcePath: string) =>
+          this.storage.readBlob(resourcePath.replace(/^res:\/\//, '')),
+      }).then(report => {
+        if (report.failed.length > 0) {
+          console.warn(
+            `[ProjectService] ${report.failed.length} project font(s) could not be registered.`
+          );
+        }
+      });
       return manifest;
     } catch {
       const fallback = createDefaultProjectManifest();
@@ -982,6 +997,18 @@ export class ProjectService {
                 : {}),
               locales: [...normalized.localization.locales],
             },
+          }
+        : {}),
+      // Only emit the block when the project actually ships fonts.
+      ...(normalized.fonts && normalized.fonts.length > 0
+        ? {
+            fonts: normalized.fonts.map(face => ({
+              family: face.family,
+              path: face.path,
+              weight: face.weight,
+              style: face.style,
+              ...(face.unicodeRange ? { unicodeRange: face.unicodeRange } : {}),
+            })),
           }
         : {}),
       metadata: normalized.metadata ?? {},

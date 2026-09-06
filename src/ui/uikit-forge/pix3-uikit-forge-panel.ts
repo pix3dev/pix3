@@ -212,6 +212,14 @@ export class UiKitForgePanel extends ComponentBase {
   @state() private lastPrefabPath: string | null = null;
   @state() private manifest: KitManifest | null = null;
   @state() private skinnableSelection = 0;
+  /**
+   * Ship the theme's typefaces with the project. On by default: a family NAME alone leaves the
+   * engine substituting a system face, which is exactly how a kit loses its look between the
+   * preview and the game. Off for an offline session, where the download would only warn.
+   */
+  @state() private withFonts = true;
+  /** Also write the caption recipe (face, weight, outline, size) when applying a kit. */
+  @state() private withTypography = true;
 
   private disposeTheme?: () => void;
   private disposeSelection?: () => void;
@@ -331,13 +339,18 @@ export class UiKitForgePanel extends ComponentBase {
     this.bakeProgress = { done: 0, total: 0 };
     try {
       const result = await this.writer.writeKit(this.theme, {
+        fonts: this.withFonts,
         onProgress: (done, total) => {
           this.bakeProgress = { done, total };
         },
       });
       this.manifest = result.manifest;
       this.bakeState = 'ok';
-      this.bakeMessage = `Kit ${result.kitId}: ${Object.keys(result.manifest.parts).length} sprites at ${result.scale}x`;
+      const seconds = (result.elapsedMs / 1000).toFixed(1);
+      this.bakeMessage =
+        `Kit ${result.kitId}: ${Object.keys(result.manifest.parts).length} sprites ` +
+        `at ${result.scale}x in ${seconds}s` +
+        (result.warnings.length ? ` · ${result.warnings.length} warning(s)` : '');
     } catch (error) {
       this.bakeState = 'error';
       this.bakeMessage = error instanceof Error ? error.message : String(error);
@@ -351,6 +364,7 @@ export class UiKitForgePanel extends ComponentBase {
     const applied = await this.commandDispatcher.execute(
       new ApplyUiKitSkinCommand({
         colorRole: this.colorRole,
+        typography: this.withTypography,
         ...(this.manifest ? { manifest: this.manifest } : {}),
       })
     );
@@ -638,6 +652,34 @@ export class UiKitForgePanel extends ComponentBase {
               : 'Save kit to project'}</span
           >
         </button>
+
+        <label
+          class="uikit-toggle"
+          title="Download the theme's typefaces into fonts/ and declare them in pix3project.yaml, so the game draws captions in the face the kit was designed in"
+        >
+          <input
+            type="checkbox"
+            .checked=${this.withFonts}
+            @change=${(e: Event) => {
+              this.withFonts = (e.target as HTMLInputElement).checked;
+            }}
+          />
+          <span>Ship fonts</span>
+        </label>
+
+        <label
+          class="uikit-toggle"
+          title="Applying a kit also writes the caption recipe: face, weight, outline, drop shadow, and a size for a caption still on the engine default"
+        >
+          <input
+            type="checkbox"
+            .checked=${this.withTypography}
+            @change=${(e: Event) => {
+              this.withTypography = (e.target as HTMLInputElement).checked;
+            }}
+          />
+          <span>Typography</span>
+        </label>
 
         <label class="uikit-field uikit-field-inline">
           <span>Role</span>

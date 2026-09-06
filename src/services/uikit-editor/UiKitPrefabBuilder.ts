@@ -21,6 +21,7 @@ import {
   type TemplateNode,
   type TemplateOptions,
   type TemplateSpec,
+  type TemplateTypography,
 } from '@/services/uikit';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import {
@@ -99,6 +100,7 @@ export class UiKitPrefabBuilder {
 
     const root = this.buildNode(spec.root, null, {
       manifest,
+      typography: spec.typography,
       warnings,
       usedNames,
       nextId,
@@ -213,7 +215,14 @@ export class UiKitPrefabBuilder {
 
     switch (template.type) {
       case 'Group2D':
-        return new Group2D({ ...common, width: w, height: h });
+        return new Group2D({
+          ...common,
+          width: w,
+          height: h,
+          // A flow container stacks its children in the engine, so a row added by hand later
+          // lands in the column rather than on top of the last one.
+          ...(template.flow?.enabled ? { flow: { ...template.flow } } : {}),
+        });
 
       case 'TiledSprite2D': {
         const part = this.resolvePart(template.part, ctx);
@@ -241,7 +250,8 @@ export class UiKitPrefabBuilder {
       case 'ColorRect2D':
         return new ColorRect2D({ ...common, width: w, height: h });
 
-      case 'Label2D':
+      case 'Label2D': {
+        const caption = this.captionProps(template, ctx);
         return new Label2D({
           ...common,
           width: w,
@@ -249,7 +259,10 @@ export class UiKitPrefabBuilder {
           label: template.label ?? '',
           labelAlign: 'center',
           labelVAlign: 'middle',
+          // `labelOutline*` aliases the label's own `outlineWidth` / `outlineColor`.
+          ...caption,
         });
+      }
 
       case 'Button2D': {
         const states = template.states ?? {};
@@ -260,6 +273,7 @@ export class UiKitPrefabBuilder {
           width: w,
           height: h,
           label: template.label ?? '',
+          ...this.captionProps(template, ctx),
           textureNormal: normal ? textureRef(normal) : null,
           textureHover: refOrNull(this.resolvePart(states.hover, ctx)),
           texturePressed: refOrNull(this.resolvePart(states.pressed, ctx)),
@@ -273,6 +287,49 @@ export class UiKitPrefabBuilder {
         throw new Error(`UI Kit prefab: unsupported template node type "${String(never)}"`);
       }
     }
+  }
+
+  /**
+   * The caption props a text-bearing node carries.
+   *
+   * This is the fix for "the prefab's captions are smaller than the game's": a template node
+   * knows its own font size (a ratio of its element's height — the very ratio the forge preview
+   * draws with), and the theme knows the face and the sticker decoration. Without them every
+   * node fell back to `UIControl2D`'s defaults — 16 px Arial, no outline — which is a different
+   * kit from the one the user approved on the page.
+   *
+   * The family is picked per CAPTION, not as a CSS stack: a stack carries one weight, and the
+   * Latin display faces are weight 400, so a Cyrillic caption drawn through one comes out thin.
+   */
+  private captionProps(
+    template: TemplateNode,
+    ctx: BuildContext
+  ): {
+    labelFontFamily: string;
+    labelFontSize: number;
+    labelFontWeight: number;
+    labelColor: string;
+    labelOutlineWidth: number;
+    labelOutlineColor: string;
+    labelShadowColor: string | null;
+    labelShadowOffsetX: number;
+    labelShadowOffsetY: number;
+    labelLetterSpacing: number;
+  } {
+    const t = ctx.typography;
+    const cyrillic = /[\u0400-\u04FF]/.test(template.label ?? '');
+    return {
+      labelFontFamily: cyrillic ? t.cyrFamily : t.family,
+      labelFontSize: Math.max(8, Math.round(template.fontSize ?? 16)),
+      labelFontWeight: cyrillic ? t.cyrWeight : t.weight,
+      labelColor: t.inkColor,
+      labelOutlineWidth: t.outlineWidth,
+      labelOutlineColor: t.outlineColor,
+      labelShadowColor: t.shadowColor,
+      labelShadowOffsetX: t.shadowOffsetX,
+      labelShadowOffsetY: t.shadowOffsetY,
+      labelLetterSpacing: t.letterSpacing,
+    };
   }
 
   /** The kit record a template part key names, or `null` when there is no kit / no such part. */
@@ -321,6 +378,7 @@ const TEMPLATE_PART_TO_KIT: Record<string, string> = {
 
 interface BuildContext {
   manifest: KitManifest | null;
+  typography: TemplateTypography;
   warnings: string[];
   usedNames: Set<string>;
   nextId: () => string;

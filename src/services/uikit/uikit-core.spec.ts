@@ -651,14 +651,28 @@ describe('buildTemplate', () => {
     for (const part of Object.values(spec.parts)) expect(part.svg).not.toContain('<text');
   });
 
-  it('lays out one row per settings entry', () => {
+  it('lays out one row per settings entry, inside a flow column', () => {
     const spec = buildTemplate('settings', THEME, { lang: 'en' });
-    const rows = collect(spec.root).filter(n => /^Row\d+Label$/.test(n.name));
-    expect(rows.length).toBe(3);
-    // The rows are stacked, not on top of each other.
+    const all = collect(spec.root);
+    expect(all.filter(n => /^Row\d+Label$/.test(n.name))).toHaveLength(3);
+
+    // Each row is a container of its own (label + control), and the COLUMN owns the spacing:
+    // that is what makes a fourth row added by hand land under the third instead of on it.
+    const column = all.find(n => n.name === 'Rows');
+    expect(column?.flow?.enabled).toBe(true);
+    expect(column?.flow?.direction).toBe('vertical');
+
+    const rows = (column?.children ?? []).filter(n => /^Row\d+$/.test(n.name));
+    expect(rows).toHaveLength(3);
     const ys = rows.map(r => r.y);
     expect(ys).toEqual([...ys].sort((a, b) => a - b));
     expect(new Set(ys).size).toBe(ys.length);
+
+    // A row's own children sit at the row's origin — the container places them, not the author.
+    for (const row of rows) {
+      const label = (row.children ?? []).find(n => n.type === 'Label2D');
+      expect(label?.y).toBe(0);
+    }
   });
 });
 

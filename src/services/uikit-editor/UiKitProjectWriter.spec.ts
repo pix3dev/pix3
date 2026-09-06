@@ -65,6 +65,8 @@ function createWriter(): Harness {
   // No canvas here, so the writer falls back to scaling the generator's design-unit border —
   // which is exactly the number the manifest must carry.
   writer.readPixels = vi.fn(async () => null);
+  // No network in a spec: the bake's font download answers empty (a warning-free "offline").
+  writer.fetchFonts = vi.fn(async () => ({ files: [], warnings: [] }));
 
   return { writer, saved, writeTextFile, themeSave, discard };
 }
@@ -183,12 +185,53 @@ describe('UiKitProjectWriter.writeKit', () => {
   });
 
   /**
-   * Caught live, not by a test: the manifest carried a 228 px top inset for a 512 px panel while
-   * `buildSkin` reported 66. `frameMeta` re-derives the insets from a theme, and the writer was
-   * handing it the AUTHOR's theme instead of the one the part was drawn with — the two differ by
-   * exactly the gloss cap.
+   * The manifest is what reaches `Bar2D.sliceBorder*`, so a wrong number here squashes a trough
+   * in the game even though the generator knew better. The writer used to re-derive the insets
+   * with the general `bevelRect` formula, which on a 240x36 trough returns caps that meet in the
+   * middle; the recess shapes have their own arithmetic and it has to survive into the file.
    */
-  it('re-measures the border with the theme the part was DRAWN with, cap included', async () => {
+  it('warns once about a theme that cannot be sliced, and never about a glyph button', async () => {
+    const { writer } = createWriter();
+    const skewed = normalizeTheme({ ...DEFAULT_THEME, skew: 6 });
+
+    const result = await writer.writeKit(skewed, { colorRoles: ['sky'], scale: 1 });
+
+    // A glyph button is unsliceable by construction (its icon sits where a nine-slice stretches),
+    // so 28 identical lines about it would bury the message that matters.
+    expect(result.warnings.some(w => w.startsWith('icon-button/'))).toBe(false);
+    expect(result.warnings.some(w => /skew\/puffy/.test(w))).toBe(true);
+    expect(result.manifest.parts[partKey('panel-body', 'sky')].sliceBorder).toBeNull();
+  });
+
+  it('keeps a stretchable middle for the recess and fill parts', async () => {
+    const { writer } = createWriter();
+    const theme = normalizeTheme({ ...DEFAULT_THEME, radius: 7, bevel: 5, outline: 1.5 });
+
+    const result = await writer.writeKit(theme, {
+      colorRoles: ['sky'],
+      scale: 2,
+      iconButtons: false,
+    });
+
+    for (const key of ['bar-trough', 'slot', 'slider-track']) {
+      const record = result.manifest.parts[partKey(key as never)];
+      expect(record, key).toBeDefined();
+      const border = record.sliceBorder;
+      expect(border, key).not.toBeNull();
+      if (!border) continue;
+      // Opposite caps leave a middle to stretch — the property that was lost.
+      expect(border.left + border.right, `${key} horizontal`).toBeLessThan(record.w);
+      expect(border.top + border.bottom, `${key} vertical`).toBeLessThan(record.h);
+    }
+  });
+
+  /**
+   * Caught live, not by a test: the manifest carried a 228 px top inset for a 512 px panel while
+   * `buildSkin` reported 66, because the insets were re-derived from the AUTHOR's theme instead
+   * of the one the part was drawn with (the two differ by exactly the gloss cap). The manifest
+   * now records the generator's own answer, scaled — this pins that the two agree.
+   */
+  it("records the generator's own border, gloss cap included", async () => {
     const { writer } = createWriter();
     // A canvas is available here: the writer measures the raster instead of scaling the
     // generator's own numbers, which is the path that went wrong.

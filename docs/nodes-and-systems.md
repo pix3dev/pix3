@@ -336,6 +336,51 @@ four project actions along the bottom.
   top-left/y-down → centre-origin/y-up conversion, and `TemplateNode.anchor` →
   `Node2D.layout` all live in the builder.
 
+**Typography travels with the kit.** The PNGs carry no text, so a caption is only
+as good as what the node is told to draw it with — and a node left on the engine
+defaults draws 16 px Arial with no outline, which is a different kit from the one
+the page showed. So `design/ui-kit.json` carries a `typography` block (primary and
+Cyrillic family with each face's OWN weight, outline width/colour, drop shadow,
+tracking, ink colour), `TemplateSpec` gives every captioned node a `fontSize`
+derived from its own element height (a button caption is `h × 0.38`, a header
+title `h × 0.44` — the ratios the preview draws with), and both the prefab builder
+and "Apply to selection" write those onto `Button2D` / `Label2D`. A size is only
+written when the node is still on the engine default, so a hand-tuned caption
+survives a re-skin; the "Typography" switch next to the bake turns the whole
+behaviour off.
+
+**The faces ship with the project.** A family NAME alone leaves the browser to
+substitute, so the bake also downloads the theme's typefaces (Latin plus the
+Cyrillic subset, each at its own weight) into `fonts/` and declares them in
+`pix3project.yaml` under `fonts:`. `ProjectFontLoader` registers them as
+`FontFace`s **before the first frame** — in play mode (`SceneRunner`, next to the
+localization seed), on project open in the editor, and at boot in an exported
+game, where the exporter also keeps the files as reachability roots. Offline, the
+download degrades to a warning and the caption falls back to a system face. Turn
+it off with the "Ship fonts" switch.
+
+**Rows are a column, not three hard-coded y's.** `Node2D` gained a container
+`flow` (`{ enabled, direction, gap, paddingX, paddingY, align, autoSize }`,
+inspector group "Flow") that stacks a container's children in tree order along one
+axis while each child's own anchor still owns the cross axis. That is the half of
+layout anchors could not do, and it is why the settings template's rows sit in a
+`Rows` container: a fourth row added by hand lands under the third instead of on
+top of it. It is deliberately NOT a return of the `Layout2D` node.
+
+**Where the nine-slice numbers come from.** The generator knows which shape it
+drew, so the manifest records ITS answer, scaled: a bevelled part through the
+general formula, a recess or a fill (`slot`, `slider-track`, `bar-trough`,
+`bar-fill`) through the one that matches how those are painted. Re-deriving them
+from the theme at bake time is what handed a 240x36 trough insets that met in the
+middle, leaving nothing to stretch. A part is `sliceBorder: null` — scaled whole —
+only when it cannot be sliced: a glyph button by construction, anything under a
+`skew`/`puffy` theme, and the latter is reported as a warning.
+
+**Bake cost.** Parts are rasterized and written in batches of eight, so the browser
+decodes one while the next is handed to it: a 104-sprite kit takes ~2.6 s where the
+sequential loop took 20-30 s. The elapsed time comes back in the result and is
+shown next to the bake.
+
 **Undo semantics.** Property changes undo, binary writes do not. Every skin write
 goes through `UpdateObjectPropertyOperation` and the commits are composed with
 `BulkOperationBuilder`, so one Ctrl+Z takes the whole outfit back off. Baking and

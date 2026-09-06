@@ -51,8 +51,82 @@ export function iconPartKey(icon: string, role: PaletteId, state: ButtonSkinStat
 export interface SkinPropertyWrite {
   propertyPath: string;
   value: unknown;
-  /** `texture` = a picture slot; `border` = one of the four nine-slice scalars. */
-  kind: 'texture' | 'border';
+  /**
+   * `texture` = a picture slot; `border` = one of the four nine-slice scalars;
+   * `typography` = part of the caption recipe (face, weight, outline, drop, tracking, size).
+   */
+  kind: 'texture' | 'border' | 'typography';
+}
+
+/** Node types that draw a caption and therefore take the kit's typography. */
+export const CAPTION_NODE_TYPES: readonly string[] = [
+  'Button2D',
+  'Label2D',
+  'Checkbox2D',
+  'Slider2D',
+];
+
+/** The default `UIControl2D.labelFontSize`: a node still on it has never been sized by hand. */
+export const DEFAULT_LABEL_FONT_SIZE = 16;
+
+/** The caption size a button-like control of this height wears (the preview's own ratio). */
+export function captionSizeForHeight(height: number): number {
+  return Math.max(8, Math.round(Math.max(1, height) * 0.38));
+}
+
+export interface CaptionPlanOptions {
+  /** The caption itself — a Cyrillic one is drawn by the supplier face, at ITS weight. */
+  text?: string;
+  /** The node's height, used only when its font size is still the default. */
+  height?: number;
+  /** The node's current `labelFontSize`; a hand-set size is never overwritten. */
+  currentFontSize?: number;
+}
+
+/**
+ * The caption recipe as property writes.
+ *
+ * Applying a kit used to touch only the art, so a skinned button kept 16 px Arial while the
+ * page that designed it showed a display face at `height × 0.38` with the kit's outline — two
+ * different kits on one screen. The manifest carries the recipe (`KitManifest.typography`), so
+ * this is a lookup rather than a re-render.
+ */
+export function planCaptionPatches(
+  manifest: KitManifest,
+  nodeType: string,
+  options: CaptionPlanOptions = {}
+): SkinPropertyWrite[] {
+  const t = manifest.typography;
+  if (!t || !CAPTION_NODE_TYPES.includes(nodeType)) return [];
+
+  const cyrillic = /[\u0400-\u04FF]/.test(options.text ?? '');
+  const write = (propertyPath: string, value: unknown): SkinPropertyWrite => ({
+    propertyPath,
+    value,
+    kind: 'typography',
+  });
+  // `Label2D` spells its outline `outlineWidth` / `outlineColor` (the inherited pair aliases them
+  // and is not in its schema), so the write has to use the name the node's schema knows.
+  const isLabel = nodeType === 'Label2D';
+  const writes: SkinPropertyWrite[] = [
+    write('labelFontFamily', cyrillic ? t.cyrFamily : t.family),
+    write('labelFontWeight', cyrillic ? t.cyrWeight : t.weight),
+    write(isLabel ? 'outlineWidth' : 'labelOutlineWidth', t.outlineWidth),
+    write(isLabel ? 'outlineColor' : 'labelOutlineColor', t.outlineColor),
+    write('labelShadowColor', t.shadowColor ?? ''),
+    write('labelShadowOffsetX', t.shadowOffsetX),
+    write('labelShadowOffsetY', t.shadowOffsetY),
+    write('labelLetterSpacing', t.letterSpacing),
+  ];
+  // Size only when nobody has chosen one: a hand-tuned caption must survive a re-skin.
+  const height = options.height ?? 0;
+  if (
+    height > 0 &&
+    (options.currentFontSize ?? DEFAULT_LABEL_FONT_SIZE) === DEFAULT_LABEL_FONT_SIZE
+  ) {
+    writes.push(write('labelFontSize', captionSizeForHeight(height)));
+  }
+  return writes;
 }
 
 /** What a node type wears, so the mapping is readable in one place. */

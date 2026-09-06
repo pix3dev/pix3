@@ -18,6 +18,7 @@ import {
   scenePaths,
   runtimeQuality,
   runtimeLocalization,
+  runtimeFonts,
 } from './generated/scene-manifest';
 import { registerProjectScripts } from './register-project-scripts';
 import { embeddedAssets } from 'virtual:runtime-embedded-assets';
@@ -73,6 +74,9 @@ async function bootstrap(): Promise<void> {
   // mid-session repoints entities every peer already spawned.
   installNetworkService(runner);
   runner.setBatching2DEnabled(true);
+  // Web fonts the project ships: awaited by the runner before the first frame, so a caption is
+  // never painted in a substituted face (see ProjectFontLoader).
+  runner.setProjectFonts(runtimeFonts ?? null);
   if (runtimeLocalization) {
     // Baked from pix3project.yaml (or auto-discovered locales/) at export time;
     // SceneRunner boots in defaultLocale so the first frame renders translated.

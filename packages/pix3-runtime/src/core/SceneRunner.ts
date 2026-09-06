@@ -17,6 +17,7 @@ import { SceneService, type FrameProfilerActivity } from './SceneService';
 import type { NetworkService } from '../net/NetworkService';
 import { AudioService, type ActiveAudioPlaybackSnapshot } from './AudioService';
 import { AssetLoader } from './AssetLoader';
+import { loadProjectFonts, type ProjectFontFaceSpec } from './ProjectFontLoader';
 import { ResourceManager } from './ResourceManager';
 import { Camera3D } from '../nodes/3D/Camera3D';
 import { NodeBase } from '../nodes/NodeBase';
@@ -171,6 +172,9 @@ export class SceneRunner {
    *  preview instance in-editor, or null in exports) — restored on `stop()`. */
   private previousActiveLocalization: LocalizationService | null = null;
   private localizationUnsub: (() => void) | null = null;
+  /** The project's web fonts (`ProjectManifest.fonts`), injected by the host before
+   *  `startScene`; null = nothing to register. */
+  private projectFonts: readonly ProjectFontFaceSpec[] | null = null;
   /** Config injected by the host before `startScene` (from the project manifest);
    *  null = no localization block ⇒ an inert default instance. */
   private localizationConfig: LocalizationConfig | null = null;
@@ -250,6 +254,16 @@ export class SceneRunner {
   /** Current batcher stats for the last frame, or null when batching is off. */
   getBatch2DStats(): Batch2DStats | null {
     return this.batch2D ? this.batch2D.stats : null;
+  }
+
+  /**
+   * The web fonts this project ships (`ProjectManifest.fonts`), registered before the first
+   * frame. Without them a scene naming a family gets a system substitute — the caption paints
+   * at a different width in a different face, which is the gap between a generated UI kit's
+   * preview and the game.
+   */
+  setProjectFonts(fonts: readonly ProjectFontFaceSpec[] | null): void {
+    this.projectFonts = fonts && fonts.length > 0 ? fonts : null;
   }
 
   /**
@@ -456,6 +470,13 @@ export class SceneRunner {
     // stop(), so re-apply the mute this mode implies to the fresh bus state.
     this.audioSilenced = false;
     this.applyTimeModeAudio();
+
+    // Fonts first, and awaited for the same reason the locale seed below is: a face that lands
+    // after the first frame repaints every caption, and a paused or unfocused session freezes on
+    // the frame drawn in the substituted face. Failures are reported inside and never thrown.
+    if (this.projectFonts) {
+      await loadProjectFonts(this.projectFonts, this.resourceManager);
+    }
 
     // Localization: create a play-mode instance (isolated from the editor
     // preview), activate it, and subscribe live re-render before the first tick

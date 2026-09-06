@@ -54,8 +54,19 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
 | `opacity` | number | 1 | Local opacity multiplier, inherited by child 2D nodes |
 | `zIndex` | number | 0 | Draw-order override, `-4096..4096` (integer). Higher draws on top |
 | `zAsRelative` | boolean | true | Add `zIndex` to the parent's effective z instead of treating it as absolute |
+| `flow.enabled` | boolean | false | Stack this container's children in tree order instead of leaving them where they were authored |
+| `flow.direction` | enum | vertical | `vertical` (a column) or `horizontal` (a row) |
+| `flow.gap` | number | 0 | Space between two children, px |
+| `flow.paddingX` / `flow.paddingY` | number | 0 | Inset from the container's edges |
+| `flow.align` | enum | start | Cross-axis placement of each child: `start`, `center`, `end` |
+| `flow.autoSize` | boolean | false | Grow the container along the flow axis so the last child fits |
 
 **Usage Notes:**
+- **Flow vs. anchors.** An anchor (`layout`) pins ONE node to its parent's edges; a
+  flow is the container deciding where each child begins. With `flow.enabled` the
+  container owns the main axis and each child's own anchor still owns the cross
+  one — a settings row can pin its toggle to the right edge while the column
+  decides how far down the row sits. This is why no `Layout2D` node exists.
 - Cannot have children by default (set `isContainer = true` to enable)
 - Transforms affect all children in local space
 - Rotation is clockwise, in degrees
@@ -247,9 +258,15 @@ A multiline text label for 2D UI. Wraps text to a fixed box, aligns it in both a
 | Property | Type | Default | Description |
 |----------|------|---------|-------------|
 | `label` | string | "" | Text to display; `\n` breaks lines |
-| `labelFontFamily` | string | Arial | Font family |
+| `labelFontFamily` | string | Arial | Font family. A family the project ships (`ProjectManifest.fonts`) is registered before the first frame; anything else falls back to a system face |
 | `labelFontSize` | number | 16 | Font size in pixels |
+| `labelFontWeight` | number \| string | normal | CSS weight (400/700/900…) — a display face and its Cyrillic supplier usually differ |
 | `labelColor` | color | #ffffff | Text color |
+| `labelOutlineWidth` | number | 0 | Alias of `outlineWidth` below (the shared `UIControl2D` caption outline); one outline, two spellings |
+| `labelOutlineColor` | color | #000000 | Alias of `outlineColor` below |
+| `labelShadowColor` | color \| null | null | Drop-shadow colour; empty = no shadow |
+| `labelShadowOffsetX` / `labelShadowOffsetY` | number | 0 | Drop-shadow offset in px |
+| `labelLetterSpacing` | number | 0 | Extra px between glyphs |
 | `labelAlign` | enum | center | Horizontal alignment: `left`, `center`, `right` |
 | `labelVAlign` | enum | middle | Vertical alignment: `top`, `middle`, `bottom` |
 | `width` | number | 0 | Fixed box width; text word-wraps to it. 0 = auto-size (no wrap) |

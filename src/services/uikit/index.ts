@@ -180,13 +180,17 @@ export {
 // templates
 export {
   buildTemplate,
+  buildTypography,
   walkTemplate,
+  TEMPLATE_TYPE_SCALE,
   type TemplateAnchor,
+  type TemplateFlow,
   type TemplateId,
   type TemplateNode,
   type TemplateNodeType,
   type TemplateOptions,
   type TemplateSpec,
+  type TemplateTypography,
 } from './TemplateSpec';
 
 // presets

@@ -32,9 +32,12 @@ import { Button2D } from '@pix3/runtime';
 import { Label2D } from '@pix3/runtime';
 import {
   LABEL_AUTO_SIZE_BLEED,
+  applyTextStyle,
+  drawStyledText,
   labelDecorationPadding,
   layoutLabelText,
   paintLabelCanvas,
+  styledTextPadding,
   type LabelLayout,
 } from '@pix3/runtime';
 import { Slider2D } from '@pix3/runtime';
@@ -153,6 +156,40 @@ export interface Viewport2DProxyRegistryDeps {
  * dispose paths) read and write them directly at many call sites; wrapping them
  * behind a method API would buy no behavioral benefit and much more diff risk.
  */
+/** One sprite a control draws over its base skin in the editor proxy. */
+interface UIControlOverlaySpec {
+  key: 'fill' | 'thumb' | 'mark';
+  texturePath: string;
+  /** Centre of the quad in the control's local space (origin centre, y up). */
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  border: SliceBorder2D | null;
+}
+
+const clamp01 = (value: number): number => Math.min(1, Math.max(0, value));
+
+/** A bar's filled fraction, however the node spells its range. */
+function barFillRatio(node: Bar2D): number {
+  const min = typeof node.minValue === 'number' ? node.minValue : 0;
+  const max = typeof node.maxValue === 'number' ? node.maxValue : 1;
+  const span = max - min;
+  return span === 0 ? 0 : (node.value - min) / span;
+}
+
+function sliderRatio(node: Slider2D): number {
+  const min = typeof node.minValue === 'number' ? node.minValue : 0;
+  const max = typeof node.maxValue === 'number' ? node.maxValue : 1;
+  const span = max - min;
+  return span === 0 ? 0 : (node.value - min) / span;
+}
+
+function sliderHandleSize(node: Slider2D, fallback: number): number {
+  const size = (node as unknown as { handleSize?: number }).handleSize;
+  return typeof size === 'number' && size > 0 ? size : fallback;
+}
+
 export class Viewport2DProxyRegistry {
   readonly group2DVisuals = new Map<string, THREE.Group>();
   readonly animatedSprite2DVisuals = new Map<string, THREE.Group>();
@@ -1903,6 +1940,181 @@ export class Viewport2DProxyRegistry {
     return node.texturePath ?? null;
   }
 
+  /**
+   * The sprites a control draws ON TOP of its base skin, and where they go.
+   *
+   * The proxy is one quad by construction, so it used to show only the base picture: a bar's
+   * trough with no fill, a slider with no thumb, a ticked checkbox with no tick. That is fine
+   * for positioning and wrong for judging a kit — the editor and play mode disagreed about the
+   * same scene. Each overlay is a quad of its own, in the control's local space (origin at the
+   * centre, y up), sized and placed exactly as the runtime node sizes its own.
+   *
+   * Returns `null` when this control has no overlay, so nothing is created for the common case.
+   */
+  getUIControlOverlaySpecs(node: UIControl2D): UIControlOverlaySpec[] | null {
+    const { width, height } = this.getUIControlDimensions(node);
+    if (node instanceof Checkbox2D) {
+      const mark = node.getSlotTexturePath('mark');
+      if (!mark || !node.checked) return null;
+      return [{ key: 'mark', texturePath: mark, x: 0, y: 0, width, height, border: null }];
+    }
+    if (node instanceof Bar2D) {
+      const fill = node.getSlotTexturePath('fill');
+      if (!fill) return null;
+      const ratio = clamp01(barFillRatio(node));
+      if (ratio <= 0) return null;
+      const fillWidth = width * ratio;
+      return [
+        {
+          key: 'fill',
+          texturePath: fill,
+          // Grows from the left edge: the quad's centre moves with its own width.
+          x: -width / 2 + fillWidth / 2,
+          y: 0,
+          width: fillWidth,
+          height,
+          border: node.sliceBorder,
+        },
+      ];
+    }
+    if (node instanceof Slider2D) {
+      const specs: UIControlOverlaySpec[] = [];
+      const ratio = clamp01(sliderRatio(node));
+      const fill = node.getSlotTexturePath('fill');
+      if (fill && ratio > 0) {
+        const fillWidth = width * ratio;
+        specs.push({
+          key: 'fill',
+          texturePath: fill,
+          x: -width / 2 + fillWidth / 2,
+          y: 0,
+          width: fillWidth,
+          height,
+          border: node.sliceBorder,
+        });
+      }
+      const thumb = node.getSlotTexturePath('thumb');
+      if (thumb) {
+        const size = sliderHandleSize(node, height);
+        specs.push({
+          key: 'thumb',
+          texturePath: thumb,
+          x: -width / 2 + width * ratio,
+          y: 0,
+          width: size,
+          height: size,
+          // A thumb is drawn at its own size and never stretched, so it is never sliced.
+          border: null,
+        });
+      }
+      return specs.length > 0 ? specs : null;
+    }
+    return null;
+  }
+
+  /**
+   * Bring a proxy's overlay quads in step with the node: create what appeared, drop what went
+   * away, and re-place what moved. Called from the viewport sync, so it runs on every change of
+   * `value` / `checked` as well as on a re-skin.
+   */
+  syncUIControlOverlays(node: UIControl2D, visualRoot: THREE.Group): void {
+    const specs = this.getUIControlOverlaySpecs(node) ?? [];
+    const existing =
+      (visualRoot.userData.overlayMeshes as Map<UIControlOverlaySpec['key'], THREE.Mesh>) ??
+      new Map<UIControlOverlaySpec['key'], THREE.Mesh>();
+    const wanted = new Set(specs.map(spec => spec.key));
+
+    for (const [key, mesh] of existing) {
+      if (wanted.has(key)) continue;
+      visualRoot.remove(mesh);
+      mesh.geometry.dispose();
+      if (mesh.material instanceof THREE.MeshBasicMaterial) {
+        mesh.material.map?.dispose();
+        mesh.material.dispose();
+      }
+      existing.delete(key);
+    }
+
+    for (const spec of specs) {
+      let mesh = existing.get(spec.key);
+      if (!mesh) {
+        const material = new THREE.MeshBasicMaterial({
+          color: 0xffffff,
+          side: THREE.DoubleSide,
+          transparent: true,
+          depthTest: false,
+        });
+        mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), material);
+        mesh.layers.set(LAYER_2D);
+        mesh.userData.isUIControl2DOverlay = true;
+        mesh.userData.nodeId = node.nodeId;
+        // Above the base skin of the SAME control. `assignRenderOrder` rebases every content
+        // mesh by (renderOrder, add order), so the overlay starts at the skin's CURRENT order —
+        // a fixed small number would sort under a skin that has already been rebased — and wins
+        // the tie by being added later; the label (added last, higher order) stays on top.
+        const controlMesh = visualRoot.userData.controlMesh as THREE.Object3D | undefined;
+        mesh.renderOrder = controlMesh?.renderOrder ?? 0;
+        visualRoot.add(mesh);
+        existing.set(spec.key, mesh);
+      }
+
+      mesh.position.set(spec.x, spec.y, 0);
+      mesh.scale.set(Math.max(spec.width, 0.0001), Math.max(spec.height, 0.0001), 1);
+
+      const material = mesh.material as THREE.MeshBasicMaterial;
+      if (mesh.userData.texturePath !== spec.texturePath) {
+        mesh.userData.texturePath = spec.texturePath;
+        material.map = null;
+        material.needsUpdate = true;
+        this.loadOverlayTexture(mesh, material, spec.texturePath);
+      }
+    }
+
+    visualRoot.userData.overlayMeshes = existing;
+  }
+
+  /**
+   * Read one overlay sprite through the project's blob seam — the same route the base skin
+   * takes, so an editor-only `res://` path resolves identically. A stale load (the node was
+   * re-skinned while the read was in flight) is dropped rather than painted.
+   */
+  private loadOverlayTexture(
+    mesh: THREE.Mesh,
+    material: THREE.MeshBasicMaterial,
+    texturePath: string
+  ): void {
+    void (async () => {
+      try {
+        const blob = await this.deps.readBlob(texturePath);
+        const blobUrl = URL.createObjectURL(blob);
+        new THREE.TextureLoader().load(
+          blobUrl,
+          texture => {
+            try {
+              if (mesh.userData.texturePath !== texturePath) {
+                texture.dispose();
+                return;
+              }
+              configureSpriteTexture(texture);
+              material.map = texture;
+              material.color.setHex(0xffffff);
+              material.needsUpdate = true;
+              // An async load marks nothing dirty; without this the overlay would only appear
+              // on the next 500 ms heartbeat.
+              this.deps.requestRender();
+            } finally {
+              URL.revokeObjectURL(blobUrl);
+            }
+          },
+          undefined,
+          () => URL.revokeObjectURL(blobUrl)
+        );
+      } catch {
+        // No sprite: the control keeps its base skin, which is what it showed before.
+      }
+    })();
+  }
+
   applyTextureTo2DMaterial(
     node: UIControl2D,
     material: THREE.MeshBasicMaterial,
@@ -1993,7 +2205,13 @@ export class Viewport2DProxyRegistry {
     this.labelMeasureCtx ??= document.createElement('canvas').getContext('2d');
     const measureCtx = this.labelMeasureCtx;
     if (measureCtx) {
-      measureCtx.font = `${fontSize}px ${node.labelFontFamily}`;
+      // Same font AND tracking as the paint, or the wrap is measured for a narrower text.
+      applyTextStyle(measureCtx, {
+        fontSize,
+        fontFamily: node.labelFontFamily,
+        fontWeight: node.labelFontWeight,
+        letterSpacing: node.labelLetterSpacing,
+      });
     }
     const layout = layoutLabelText(
       node.getDisplayText(),
@@ -2047,6 +2265,11 @@ export class Viewport2DProxyRegistry {
       glowStrength: node.glowStrength ?? 0,
       outlineColor: node.outlineColor,
       outlineWidth: node.outlineWidth ?? 0,
+      fontWeight: node.labelFontWeight,
+      shadowColor: node.labelShadowColor,
+      shadowOffsetX: node.labelShadowOffsetX,
+      shadowOffsetY: node.labelShadowOffsetY,
+      letterSpacing: node.labelLetterSpacing,
     });
 
     const texture = new THREE.CanvasTexture(canvas);
@@ -2090,11 +2313,23 @@ export class Viewport2DProxyRegistry {
       fallbackMaterial.userData.baseOpacity = 0;
       return new THREE.Mesh(fallbackGeometry, fallbackMaterial);
     }
-    measureCtx.font = `${fontSize}px ${node.labelFontFamily}`;
+    const textStyle = {
+      fontSize,
+      fontFamily: node.labelFontFamily,
+      fontWeight: node.labelFontWeight,
+      letterSpacing: node.labelLetterSpacing,
+    };
+    applyTextStyle(measureCtx, textStyle);
     const displayText = node.getDisplayText();
     const measured = measureCtx.measureText(displayText || ' ');
-    const logicalWidth = Math.max(32, Math.ceil(measured.width + paddingX * 2));
-    const logicalHeight = Math.max(20, Math.ceil(fontSize + paddingY * 2));
+    const decoration = styledTextPadding({
+      outlineWidth: node.labelOutlineWidth,
+      shadowColor: node.labelShadowColor,
+      shadowOffsetX: node.labelShadowOffsetX,
+      shadowOffsetY: node.labelShadowOffsetY,
+    });
+    const logicalWidth = Math.max(32, Math.ceil(measured.width + (paddingX + decoration) * 2));
+    const logicalHeight = Math.max(20, Math.ceil(fontSize + (paddingY + decoration) * 2));
 
     const canvas = document.createElement('canvas');
     canvas.width = Math.max(1, Math.round(logicalWidth * dpr));
@@ -2113,7 +2348,7 @@ export class Viewport2DProxyRegistry {
 
     ctx.clearRect(0, 0, logicalWidth, logicalHeight);
     ctx.fillStyle = node.labelColor;
-    ctx.font = `${fontSize}px ${node.labelFontFamily}`;
+    applyTextStyle(ctx, textStyle);
     ctx.textBaseline = 'middle';
 
     let x = logicalWidth / 2;
@@ -2127,7 +2362,14 @@ export class Viewport2DProxyRegistry {
       ctx.textAlign = 'center';
     }
 
-    ctx.fillText(displayText, x, logicalHeight / 2);
+    drawStyledText(ctx, displayText, x, logicalHeight / 2, {
+      color: node.labelColor,
+      outlineWidth: node.labelOutlineWidth,
+      outlineColor: node.labelOutlineColor,
+      shadowColor: node.labelShadowColor,
+      shadowOffsetX: node.labelShadowOffsetX,
+      shadowOffsetY: node.labelShadowOffsetY,
+    });
 
     const texture = new THREE.CanvasTexture(canvas);
     configureSpriteTexture(texture);
@@ -2174,6 +2416,9 @@ export class Viewport2DProxyRegistry {
     }
 
     const labelMesh = this.createUIControlLabelMesh(node);
+    // Never below the skin or its overlays, however far `assignRenderOrder` has rebased them.
+    const controlMesh = visualRoot.userData.controlMesh as THREE.Object3D | undefined;
+    labelMesh.renderOrder = Math.max(labelMesh.renderOrder, (controlMesh?.renderOrder ?? 0) + 1);
     visualRoot.add(labelMesh);
   }
 
