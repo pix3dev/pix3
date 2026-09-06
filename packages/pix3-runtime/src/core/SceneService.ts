@@ -376,6 +376,16 @@ export class SceneService {
     this.physics2dService?.step(dt);
   }
 
+  /**
+   * Collider wireframes for the debug overlay, or `null` when this scene never
+   * touched physics. Read by `SceneRunner` each frame while the editor's
+   * collider toggle is on — routed through here so the runner never names
+   * `Physics2DService` and the export can still strip it.
+   */
+  buildPhysics2DDebugBuffers(): { vertices: Float32Array; colors: Float32Array } | null {
+    return this.physics2dService ? this.physics2dService.buildDebugBuffers() : null;
+  }
+
   /** Drop every body and collider. Called by `SceneRunner.stop()`. */
   clearPhysics2D(): void {
     this.physics2dService?.clear();

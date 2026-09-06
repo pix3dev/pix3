@@ -133,6 +133,71 @@ export const STRIPPABLE_RUNTIME_MODULES: readonly StrippableRuntimeModule[] = [
   { modulePath: 'nodes/3D/PointLightNode', keepWhenMentioned: ['PointLightNode'] },
   { modulePath: 'nodes/3D/SpotLightNode', keepWhenMentioned: ['SpotLightNode'] },
 
+  // --- 2D collision and physics ---
+  {
+    // The polygon math: winding, convex decomposition, SAT, the world transform.
+    // It has no keep-names of its own — it is exactly as needed as the two
+    // services that use it, and the fixpoint below works that out.
+    modulePath: 'core/collision-shapes-2d',
+    keepWhenMentioned: [],
+    importers: ['core/Collision2DService', 'core/Physics2DService', 'core/physics-2d-narrowphase'],
+  },
+  {
+    modulePath: 'core/world-transform-2d',
+    keepWhenMentioned: [],
+    importers: ['core/Collision2DService', 'core/Physics2DService'],
+  },
+  {
+    modulePath: 'core/collision-polygon-config',
+    keepWhenMentioned: [],
+    importers: ['behaviors/Hitbox2DBehavior', 'behaviors/Collider2DBehavior'],
+  },
+  {
+    // Query-only 2D collision. `SceneService.collision2d` constructs it lazily,
+    // and a project that never writes the word cannot reach that getter — the
+    // NetworkService precedent, one line down.
+    modulePath: 'core/Collision2DService',
+    keepWhenMentioned: ['collision2d', 'Collision2D', 'Hitbox2D', 'core:Hitbox2D'],
+    // Hitbox2DBehavior imports only its TYPES, so it pins nothing; the behaviour
+    // is kept in step with the service through the shared `Hitbox2D` keep-name.
+    lazyValueImporters: ['core/SceneService'],
+  },
+  {
+    modulePath: 'core/physics-2d-narrowphase',
+    keepWhenMentioned: [],
+    importers: ['core/Physics2DService'],
+  },
+  {
+    // ~20 KiB of solver. Same lazy-getter argument as `collision2d`; and
+    // `SceneRunner` reaches it through `SceneService.stepPhysics2D`, so it adds
+    // no value import of its own.
+    modulePath: 'core/Physics2DService',
+    keepWhenMentioned: [
+      'physics2d',
+      'Physics2D',
+      'PhysicsBody2D',
+      'core:PhysicsBody2D',
+      'Collider2D',
+      'core:Collider2D',
+      'core:PhysicsWorld2D',
+    ],
+    // The three behaviours import only types from here (same as Hitbox2D), so
+    // the keep-names above are what tie them together.
+    lazyValueImporters: ['core/SceneService'],
+  },
+  {
+    modulePath: 'behaviors/PhysicsBody2DBehavior',
+    keepWhenMentioned: ['PhysicsBody2DBehavior', 'core:PhysicsBody2D'],
+  },
+  {
+    modulePath: 'behaviors/Collider2DBehavior',
+    keepWhenMentioned: ['Collider2DBehavior', 'core:Collider2D'],
+  },
+  {
+    modulePath: 'behaviors/PhysicsWorld2DBehavior',
+    keepWhenMentioned: ['PhysicsWorld2DBehavior', 'core:PhysicsWorld2D'],
+  },
+
   // --- multiplayer ---
   {
     // ~59 KiB with its protocol tree. `SceneService.network` is a getter that

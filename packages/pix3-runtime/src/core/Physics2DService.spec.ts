@@ -473,10 +473,28 @@ describe('Physics2DService — queries', () => {
     ]);
   });
 
-  it('produces a debug wireframe buffer of line-segment endpoints', () => {
-    const buffer = queryWorld().buildDebugVertices();
-    // Two colliders: a 4-vertex rect and a 16-segment circle, 4 floats per segment.
-    expect(buffer.length).toBe((4 + 16) * 4);
+  it('produces a debug wireframe in the overlay buffer layout', () => {
+    const { vertices, colors } = queryWorld().buildDebugBuffers();
+    // Two colliders: a 4-vertex rect and a 16-segment circle. The overlay wants
+    // three floats per point and two points per segment, plus RGBA per point.
+    const segments = 4 + 16;
+    expect(vertices.length).toBe(segments * 6);
+    expect(colors.length).toBe(segments * 8);
+  });
+
+  it('tints sensors differently from solid colliders in the debug wireframe', () => {
+    const world = new Physics2DService();
+    const solid = node('Solid', 0, 0);
+    addCollider(world, solid, { shape: 'rect', width: 10, height: 10 });
+    const trigger = node('Trigger', 500, 0);
+    addCollider(world, trigger, { shape: 'rect', width: 10, height: 10, sensor: true });
+    world.step(STEP);
+
+    const { colors } = world.buildDebugBuffers();
+    const solidTint = [colors[0], colors[1], colors[2]].join(',');
+    // Second collider's first point: 4 segments x 2 points x 4 floats in.
+    const sensorTint = [colors[32], colors[33], colors[34]].join(',');
+    expect(sensorTint).not.toBe(solidTint);
   });
 });
 

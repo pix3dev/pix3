@@ -20,8 +20,15 @@ import {
  * class was never constructed.
  */
 
-/** Component ids this module understands, in the order they should be drawn. */
-export const COLLIDER_COMPONENT_TYPES = ['core:Hitbox2D'] as const;
+/**
+ * Component ids this module understands.
+ *
+ * Both tiers are drawn because both are collision shapes the author placed and
+ * cannot otherwise see: `core:Hitbox2D` is the query-only tier, `core:Collider2D`
+ * the physics one. They share a config vocabulary (shape/size/offset/points), so
+ * one reader covers both.
+ */
+export const COLLIDER_COMPONENT_TYPES = ['core:Hitbox2D', 'core:Collider2D'] as const;
 
 export type ColliderShapeKind = 'rect' | 'circle' | 'polygon';
 
@@ -47,6 +54,8 @@ export interface ColliderShape {
   points: Point2D[];
   /** Offset applied on top of {@link points}, in node-local pixels. */
   offset: Point2D;
+  /** A physics sensor — drawn differently, since it detects but never blocks. */
+  sensor: boolean;
 }
 
 interface ComponentLike {
@@ -108,6 +117,7 @@ export function collectColliderShapes(node: NodeBase): ColliderShape[] {
         editable: !fromFrame,
         points,
         offset,
+        sensor: Boolean(config.sensor),
       });
       continue;
     }
@@ -134,6 +144,7 @@ export function collectColliderShapes(node: NodeBase): ColliderShape[] {
       editable: false,
       points: [],
       offset,
+      sensor: Boolean(config.sensor),
     });
   }
 

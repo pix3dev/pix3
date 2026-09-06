@@ -27,6 +27,8 @@ const HANDLE_RENDER_ORDER = 1200;
 
 const OUTLINE_COLOR = 0x1ebde3;
 const OUTLINE_COLOR_SELECTED = 0x7df9ff;
+/** Sensors detect but never block, so they read as a different kind of shape. */
+const OUTLINE_COLOR_SENSOR = 0x9ae66e;
 const HANDLE_COLOR = 0xf5ae39;
 const HANDLE_COLOR_HOVER = 0xffffff;
 const EDGE_HANDLE_COLOR = 0x7df9ff;
@@ -152,7 +154,11 @@ export class ViewportColliderGizmos {
       root.add(
         this.createOutline(
           entry.world,
-          selected.has(entry.shape.nodeId) ? OUTLINE_COLOR_SELECTED : OUTLINE_COLOR
+          entry.shape.sensor
+            ? OUTLINE_COLOR_SENSOR
+            : selected.has(entry.shape.nodeId)
+              ? OUTLINE_COLOR_SELECTED
+              : OUTLINE_COLOR
         )
       );
       if (entry.isEditTarget && entry.shape.editable) {
@@ -176,7 +182,7 @@ export class ViewportColliderGizmos {
     ];
     for (const entry of drawn) {
       parts.push(
-        `${entry.shape.nodeId}/${entry.shape.componentId}/${selected.has(entry.shape.nodeId) ? 1 : 0}/${
+        `${entry.shape.nodeId}/${entry.shape.componentId}/${entry.shape.sensor ? 's' : ''}${selected.has(entry.shape.nodeId) ? 1 : 0}/${
           entry.isEditTarget && entry.shape.editable ? 1 : 0
         }/${entry.world.map(p => `${Math.round(p.x * 100)},${Math.round(p.y * 100)}`).join(' ')}`
       );

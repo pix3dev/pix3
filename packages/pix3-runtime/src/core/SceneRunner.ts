@@ -156,6 +156,8 @@ export class SceneRunner {
   private currentFrameProfilerActivities: FrameProfilerActivity[] = [];
   /** Lazily created collider wireframe overlay (only while physics debug is on). */
   private physicsDebugOverlay: PhysicsDebugOverlay | null = null;
+  /** Separate instance: the 2D solver's wireframe uses the orthographic camera. */
+  private physics2DDebugOverlay: PhysicsDebugOverlay | null = null;
   /** Lazily created direction-axis gizmo overlay (only while axes debug is on). */
   private directionAxesOverlay: DirectionAxesOverlay | null = null;
   /** Lazily created post-processing composer (only while a PostProcess node is
@@ -593,6 +595,10 @@ export class SceneRunner {
     if (this.physicsDebugOverlay) {
       this.physicsDebugOverlay.dispose();
       this.physicsDebugOverlay = null;
+    }
+    if (this.physics2DDebugOverlay) {
+      this.physics2DDebugOverlay.dispose();
+      this.physics2DDebugOverlay = null;
     }
     if (this.directionAxesOverlay) {
       this.directionAxesOverlay.dispose();
@@ -1455,6 +1461,32 @@ export class SceneRunner {
     this.renderer.render(this.scene, this.orthographicCamera);
 
     this.scene.background = savedBg;
+
+    this.renderPhysics2DDebug();
+  }
+
+  /**
+   * Godot's "Visible Collision Shapes" for the built-in 2D solver, drawn over the
+   * 2D band with the orthographic camera.
+   *
+   * Distinct from the 3D overlay above it, which draws whatever a *game*
+   * published through `registerPhysicsDebugSource` (typically a Rapier world) and
+   * needs a 3D camera. A 2D collider lives in design pixels and would land
+   * nowhere useful projected through one.
+   */
+  private renderPhysics2DDebug(): void {
+    if (!isPhysicsDebugEnabled()) {
+      return;
+    }
+    const buffers = this.sceneService.buildPhysics2DDebugBuffers();
+    if (!buffers) {
+      return;
+    }
+    if (!this.physics2DDebugOverlay) {
+      this.physics2DDebugOverlay = new PhysicsDebugOverlay();
+    }
+    this.renderer.setAutoClear(false);
+    this.physics2DDebugOverlay.renderBuffers(this.renderer, this.orthographicCamera, buffers);
   }
 
   /** Draw the fixed-HUD overlay band (LAYER_2D_OVERLAY, identity overlay camera)

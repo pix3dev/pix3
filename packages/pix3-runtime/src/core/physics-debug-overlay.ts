@@ -75,6 +75,11 @@ export class PhysicsDebugOverlay {
     } catch {
       return false;
     }
+    return this.upload(buffers);
+  }
+
+  /** Upload one set of buffers. Returns true when there is geometry to draw. */
+  private upload(buffers: PhysicsDebugBuffers | null): boolean {
     if (!buffers?.vertices) {
       return false;
     }
@@ -135,6 +140,24 @@ export class PhysicsDebugOverlay {
   /** Draw the overlay if a source is registered and producing geometry. */
   render(renderer: RuntimeRenderer, camera: Camera): void {
     if (!this.sync()) {
+      return;
+    }
+    renderer.render(this.overlayScene, camera);
+  }
+
+  /**
+   * Draw buffers the caller already has, bypassing the registered source.
+   *
+   * The pull-based source is a *game's* physics world, drawn with the 3D camera.
+   * The engine's own 2D solver works in design pixels and has to be drawn with
+   * the orthographic camera instead — same geometry pipeline, different band.
+   */
+  renderBuffers(
+    renderer: RuntimeRenderer,
+    camera: Camera,
+    buffers: PhysicsDebugBuffers | null
+  ): void {
+    if (!this.upload(buffers)) {
       return;
     }
     renderer.render(this.overlayScene, camera);

@@ -535,20 +535,35 @@ export class Physics2DService {
       .map(entry => entry.source.node as NodeBase);
   }
 
-  /** The wireframe buffer for the debug overlay: pairs of world-space line ends. */
-  buildDebugVertices(): Float32Array {
+  /**
+   * The wireframe for the debug overlay, in the layout `PhysicsDebugOverlay`
+   * already speaks: three floats per point, two points per segment, plus an RGBA
+   * colour per point.
+   *
+   * Sensors draw green and sleeping bodies dim, because "is that collider even
+   * there?" and "why did this stop moving?" are the two questions the overlay
+   * exists to answer.
+   */
+  buildDebugBuffers(): { vertices: Float32Array; colors: Float32Array } {
     this.refreshShapes();
-    const points: number[] = [];
+    const vertices: number[] = [];
+    const colors: number[] = [];
     for (const entry of this.orderedColliders({ includeSensors: true })) {
       const parts =
         entry.shape.kind === 'circle' ? [circleAsPolygon(entry.shape)] : entry.shape.worldParts;
+      const tint = entry.sensor
+        ? [0.5, 0.95, 0.4]
+        : entry.body.sleeping
+          ? [0.45, 0.5, 0.55]
+          : [0.12, 0.74, 0.89];
       for (const part of parts) {
         for (let i = 0, j = part.length - 1; i < part.length; j = i++) {
-          points.push(part[j].x, part[j].y, part[i].x, part[i].y);
+          vertices.push(part[j].x, part[j].y, 0, part[i].x, part[i].y, 0);
+          colors.push(tint[0], tint[1], tint[2], 1, tint[0], tint[1], tint[2], 1);
         }
       }
     }
-    return new Float32Array(points);
+    return { vertices: new Float32Array(vertices), colors: new Float32Array(colors) };
   }
 
   /** Release every registration. Called when the scene stops. */
