@@ -127,3 +127,37 @@ export function resolveFramePointToLocal(
     angle: point.angle ?? 0,
   };
 }
+
+/**
+ * Map a frame's authored collision polygon onto the laid-out quad, yielding
+ * node-local vertices (y up) a collider can use directly.
+ *
+ * The two coordinate spaces differ in both origin and axis: `collisionPolygon`
+ * is in **absolute frame pixels** with y measured from the top of the frame's
+ * raster (what the sprite editor's overlay SVG draws over, and what
+ * `traceCollisionPolygon` produces), while node-local space is centred on the
+ * quad with y up. Normalizing by the frame's own pixel size is the step that
+ * makes a traced outline survive `sizeMode: 'native'`, per-clip scaling and both
+ * anchors — exactly like {@link resolveFramePointToLocal}, which takes its input
+ * already normalized.
+ *
+ * Returns `[]` when the frame size is unknown (`0x0`), because without it there
+ * is no way to place the vertices and a guessed scale would put the collider
+ * somewhere plausible but wrong.
+ */
+export function resolveFramePolygonToLocal(
+  polygon: readonly { x: number; y: number }[],
+  layout: AnimatedSpriteFrameLayout,
+  frameSize: AnimationSize | null
+): { x: number; y: number }[] {
+  const frameWidth = frameSize?.width ?? 0;
+  const frameHeight = frameSize?.height ?? 0;
+  if (frameWidth <= 0 || frameHeight <= 0 || polygon.length === 0) {
+    return [];
+  }
+
+  return polygon.map(point => ({
+    x: layout.offsetX + (point.x / frameWidth - 0.5) * layout.width,
+    y: layout.offsetY + (0.5 - point.y / frameHeight) * layout.height,
+  }));
+}

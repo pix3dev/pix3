@@ -77,7 +77,8 @@ export interface PropertyUIHints {
     | 'file-resource'
     | 'spine-preview'
     | 'sprite-size'
-    | 'localization-key';
+    | 'localization-key'
+    | 'collision-polygon';
 
   /**
    * For `editor: 'file-resource'` — file extensions (without the dot) the picker

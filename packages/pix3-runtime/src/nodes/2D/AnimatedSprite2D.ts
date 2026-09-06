@@ -33,6 +33,7 @@ import { FrameSequencePlayer } from '../../core/FrameSequencePlayer';
 import {
   resolveAnimatedSpriteFrameLayout,
   resolveFramePointToLocal,
+  resolveFramePolygonToLocal,
   type AnimatedSpriteAnchor2D,
   type AnimatedSpriteFrameLayout,
   type AnimatedSpriteSizeMode,
@@ -701,6 +702,36 @@ export class AnimatedSprite2D
   /** Names of every point defined anywhere in the active clip, in first-seen order. */
   getClipPointNames(): string[] {
     return collectClipPointNames(this.activeClip);
+  }
+
+  /**
+   * The frame's authored collision polygon in **node-local** space (y up) — the
+   * outline traced or drawn in the Sprite Editor, placed through the same layout
+   * math as the visible pixels. `[]` when the frame has no polygon or its pixel
+   * size was never stamped.
+   *
+   * This is what makes a per-frame outline an actual collider: `core:Hitbox2D`
+   * with `polygonSource: 'frame'` reads it every query, so the shape follows the
+   * animation frame by frame instead of being a box that approximates all of them.
+   *
+   * @param frameIndex Frame to read; defaults to the frame showing right now.
+   */
+  getFrameCollisionPolygon(frameIndex: number = this._currentFrame): { x: number; y: number }[] {
+    const frames = this.activeClip?.frames ?? [];
+    if (frames.length === 0) {
+      return [];
+    }
+    const index = Math.max(0, Math.min(Math.floor(frameIndex), frames.length - 1));
+    const frame = frames[index] ?? null;
+    if (!frame || !frame.collisionPolygon || frame.collisionPolygon.length < 3) {
+      return [];
+    }
+
+    return resolveFramePolygonToLocal(
+      frame.collisionPolygon,
+      this.resolveFrameLayout(frame, index),
+      this.resolveFrameSourceSize(frame, index)
+    );
   }
 
   protected override disposeResources(): void {
