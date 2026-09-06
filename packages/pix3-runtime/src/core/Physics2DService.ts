@@ -253,6 +253,10 @@ interface BodyEntry {
   bullet: boolean;
   canSleep: boolean;
   emitContacts: boolean;
+  /** Pose at the end of the previous step, for render interpolation. */
+  prevX: number;
+  prevY: number;
+  prevRotation: number;
   sleepTimer: number;
   sleeping: boolean;
   colliders: ColliderEntry[];
@@ -450,6 +454,9 @@ export class Physics2DService {
       invMass: 1,
       inertia: 1,
       invInertia: 1,
+      prevX: transform.x,
+      prevY: transform.y,
+      prevRotation: transform.rotation,
       gravityScale: 1,
       linearDamping: 0,
       angularDamping: 0,
@@ -623,6 +630,12 @@ export class Physics2DService {
       return;
     }
     this.syncFromNodes();
+    // Snapshot the pose the step starts from; `interpolate` blends from it.
+    for (const body of this.bodies.values()) {
+      body.prevX = body.x;
+      body.prevY = body.y;
+      body.prevRotation = body.rotation;
+    }
     this.refreshShapes();
     this.integrateVelocities(dt);
 
@@ -648,6 +661,43 @@ export class Physics2DService {
     this.writeBackToNodes();
     this.updateSleep(dt);
     this.flushSignals();
+  }
+
+  /**
+   * Blend every dynamic body between its pose at the start of the last step and
+   * its pose now, and write the result to the nodes.
+   *
+   * Physics runs at a fixed 1/60 while the display may not: on a 120 Hz screen
+   * every second frame otherwise shows the *same* pose, which reads as a regular
+   * stutter rather than as smooth motion. `alpha` is the fraction of a step the
+   * renderer is past the last one — `SceneRunner` already computes it for the ECS.
+   *
+   * Nothing else reads the interpolated value: the solver keeps working from
+   * `body.x/y`, so this only affects what is drawn, and a body that sleeps or is
+   * teleported lands exactly where the solver put it.
+   */
+  interpolate(alpha: number): void {
+    if (!Number.isFinite(alpha) || this.bodies.size === 0) {
+      return;
+    }
+    const t = alpha < 0 ? 0 : alpha > 1 ? 1 : alpha;
+    for (const body of this.orderedBodies()) {
+      if (body.bodyType !== 'dynamic' || body.sleeping) {
+        continue;
+      }
+      const x = body.x;
+      const y = body.y;
+      const rotation = body.rotation;
+      // Borrow the write-back path by moving the body to the blended pose and
+      // restoring it, so parent frames and rotation are handled in one place.
+      body.x = body.prevX + (x - body.prevX) * t;
+      body.y = body.prevY + (y - body.prevY) * t;
+      body.rotation = body.prevRotation + shortestAngle(body.prevRotation, rotation) * t;
+      this.writeBodyToNode(body);
+      body.x = x;
+      body.y = y;
+      body.rotation = rotation;
+    }
   }
 
   // --- queries ---
@@ -2229,6 +2279,9 @@ function makeStaticWorldBody(): BodyEntry {
     invMass: 0,
     inertia: 0,
     invInertia: 0,
+    prevX: 0,
+    prevY: 0,
+    prevRotation: 0,
     gravityScale: 0,
     linearDamping: 0,
     angularDamping: 0,
@@ -2557,6 +2610,20 @@ function applyAngularImpulse(body: BodyEntry, impulse: number): void {
   body.w += impulse * body.invInertia;
 }
 
+/**
+ * Signed difference from `from` to `to`, taken the short way round.
+ * Interpolating raw angles makes a body that crosses +-PI spin the long way.
+ */
+function shortestAngle(from: number, to: number): number {
+  let delta = (to - from) % (Math.PI * 2);
+  if (delta > Math.PI) {
+    delta -= Math.PI * 2;
+  } else if (delta < -Math.PI) {
+    delta += Math.PI * 2;
+  }
+  return delta;
+}
+
 function clamp(value: number, min: number, max: number): number {
   return value < min ? min : value > max ? max : value;
 }
@@ -2611,6 +2678,12 @@ function makeHandle(entry: BodyEntry): PhysicsBody2DHandle {
       entry.vx = 0;
       entry.vy = 0;
       entry.w = 0;
+      // Collapse the interpolation window onto the new pose. A teleport is a
+      // discontinuity, and blending across it would draw the body sliding to
+      // where it was moved instead of appearing there.
+      entry.prevX = entry.x;
+      entry.prevY = entry.y;
+      entry.prevRotation = entry.rotation;
       entry.sleeping = false;
       entry.sleepTimer = 0;
     },

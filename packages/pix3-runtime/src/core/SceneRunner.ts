@@ -1072,6 +1072,9 @@ export class SceneRunner {
     this.ecsService.setFrameMetrics(this.elapsedTime, this.frameNumber);
     this.ecsService.setInterpolationAlpha(alpha);
     this.ecsService.update(dt, alpha);
+    // Physics steps at a fixed rate; the display may not. Blend the poses with
+    // the same alpha so a 120 Hz screen does not show every pose twice.
+    this.sceneService.interpolatePhysics2D(alpha);
 
     this.renderer.beginStatsFrame();
     this.updateGameLogicSafe(dt);

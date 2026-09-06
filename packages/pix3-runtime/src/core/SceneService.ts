@@ -386,6 +386,15 @@ export class SceneService {
     return this.physics2dService ? this.physics2dService.buildDebugBuffers() : null;
   }
 
+  /**
+   * Blend physics poses between fixed steps for rendering. No-op when the scene
+   * never touched physics. Called once per frame by `SceneRunner`, after the
+   * fixed updates and with the same alpha the ECS gets.
+   */
+  interpolatePhysics2D(alpha: number): void {
+    this.physics2dService?.interpolate(alpha);
+  }
+
   /** Drop every body and collider. Called by `SceneRunner.stop()`. */
   clearPhysics2D(): void {
     this.physics2dService?.clear();
