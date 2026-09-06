@@ -111,6 +111,35 @@ export interface PhysicsBody2DHandle {
   wake(): void;
 }
 
+/** The live, solver-facing settings of a hinge. Angles are radians here. */
+export interface RevoluteJoint2DConfig {
+  limitEnabled: boolean;
+  lowerAngle: number;
+  upperAngle: number;
+  motorEnabled: boolean;
+  /** Target relative spin, radians per second. */
+  motorSpeed: number;
+  maxMotorTorque: number;
+  /**
+   * Let the two hinged bodies collide with each other. Off by default (as in
+   * Box2D): the parts of a hinge almost always overlap at the pivot, and a
+   * contact there fights the joint for control of the same two bodies —
+   * measured as ~8 px of pivot drift on a two-body hinge before this existed.
+   */
+  collideConnected: boolean;
+}
+
+/** The contract a hinge component implements (see `RevoluteJoint2DBehavior`). */
+export interface RevoluteJoint2DSource {
+  readonly node: NodeBase | null;
+  readonly enabled: boolean;
+  /** Pivot in the joint node's local pixels. */
+  getJointAnchor(): { x: number; y: number };
+  /** The other body, or null to hinge against the world. */
+  getConnectedNode(): NodeBase | null;
+  getJointConfig(): RevoluteJoint2DConfig;
+}
+
 /** Options accepted by every world query. */
 export interface Physics2DQueryOptions {
   /** Only consider colliders in this group. */
@@ -273,6 +302,38 @@ interface ContactPair {
   prepBy: number;
 }
 
+interface JointEntry {
+  source: RevoluteJoint2DSource;
+  /** The thing hinged TO: the connected body, or the static world. */
+  bodyA: BodyEntry;
+  /** The body the component sits on — the one that swings. */
+  bodyB: BodyEntry;
+  /** The pivot in each body's own frame, captured when the joint was bound. */
+  localAX: number;
+  localAY: number;
+  localBX: number;
+  localBY: number;
+  /** Relative body angle at bind time; limits are measured from it. */
+  referenceAngle: number;
+  /** World lever arms, refreshed each step. */
+  rax: number;
+  ray: number;
+  rbx: number;
+  rby: number;
+  /** Inverse of the 2x2 point-constraint mass. */
+  massXX: number;
+  massXY: number;
+  massYY: number;
+  angularMass: number;
+  /** Accumulated impulses, carried across steps (warm starting). */
+  impulseX: number;
+  impulseY: number;
+  motorImpulse: number;
+  lowerImpulse: number;
+  upperImpulse: number;
+  order: number;
+}
+
 /** Signals queued during a step and emitted after it, never mid-iteration. */
 interface QueuedSignal {
   node: NodeBase;
@@ -299,6 +360,8 @@ const BAUMGARTE = 0.2;
  * overlapping colliders) would otherwise be flung out at whatever depth it had.
  */
 const MAX_POSITION_CORRECTION = 4;
+/** Fraction of a joint's positional error corrected per position iteration. */
+const JOINT_POSITION_BIAS = 0.2;
 /** Below this approach speed a contact does not bounce, however elastic it is. */
 const RESTITUTION_THRESHOLD = 40;
 /** Sleep thresholds: px/s and rad/s sustained for `SLEEP_TIME` seconds. */
@@ -317,6 +380,9 @@ export class Physics2DService {
   /** Colliders with no body of their own or above them: implicit static geometry. */
   private readonly staticBody: BodyEntry;
   private readonly contacts = new Map<string, ContactPair>();
+  private readonly joints = new Map<RevoluteJoint2DSource, JointEntry>();
+  /** Body pairs a joint has asked the broadphase to ignore; see `collideConnected`. */
+  private jointedPairs = new Set<string>();
   /**
    * Pairs touching as of last step, keyed the same way as {@link contacts}.
    *
@@ -457,6 +523,87 @@ export class Physics2DService {
     }
   }
 
+  /**
+   * Bind a hinge. The pivot is resolved once, at registration: the authored
+   * anchor is a point in the joint node's local space, and both bodies remember
+   * where that world point sits in their own frame. Re-resolving it per step
+   * would make the joint chase whatever drift the solver left behind instead of
+   * correcting it.
+   */
+  registerJoint(source: RevoluteJoint2DSource): void {
+    const node = source.node;
+    if (!node || this.joints.has(source)) {
+      return;
+    }
+    const own = this.bodies.get(node);
+    if (!own) {
+      return; // a hinge needs something to hinge
+    }
+
+    // The component's own body is B, not A. Every angular term in the solver is
+    // `B relative to A`, so this is what makes the authored surface read the way
+    // a designer expects: a positive `motorSpeed` spins THIS node
+    // counter-clockwise, and the angle limits are this node's own swing range.
+    // With the roles the other way round a flipper set to +600 swings down.
+    const connected = source.getConnectedNode();
+    const bodyA = (connected ? this.bodies.get(connected) : null) ?? this.staticBody;
+    const bodyB = own;
+
+    const anchor = source.getJointAnchor();
+    const world = readWorldTransform2D(node);
+    const cosA = Math.cos(world.rotation);
+    const sinA = Math.sin(world.rotation);
+    const anchorWorldX = world.x + anchor.x * cosA - anchor.y * sinA;
+    const anchorWorldY = world.y + anchor.x * sinA + anchor.y * cosA;
+
+    const localA = toLocalAnchor(bodyA, anchorWorldX, anchorWorldY);
+    const localB = toLocalAnchor(bodyB, anchorWorldX, anchorWorldY);
+    this.joints.set(source, {
+      source,
+      bodyA,
+      bodyB,
+      localAX: localA.x,
+      localAY: localA.y,
+      localBX: localB.x,
+      localBY: localB.y,
+      referenceAngle: bodyB.rotation - bodyA.rotation,
+      rax: 0,
+      ray: 0,
+      rbx: 0,
+      rby: 0,
+      massXX: 0,
+      massXY: 0,
+      massYY: 0,
+      angularMass: 0,
+      impulseX: 0,
+      impulseY: 0,
+      motorImpulse: 0,
+      lowerImpulse: 0,
+      upperImpulse: 0,
+      order: this.orderCounter++,
+    });
+    this.refreshJointedPairs();
+  }
+
+  unregisterJoint(source: RevoluteJoint2DSource): void {
+    this.joints.delete(source);
+    this.refreshJointedPairs();
+  }
+
+  /** Recompute which body pairs the broadphase must skip. */
+  private refreshJointedPairs(): void {
+    this.jointedPairs = new Set<string>();
+    for (const joint of this.joints.values()) {
+      if (!joint.source.getJointConfig().collideConnected) {
+        this.jointedPairs.add(bodyPairKey(joint.bodyA, joint.bodyB));
+      }
+    }
+  }
+
+  get jointCount(): number {
+    return this.joints.size;
+  }
+
   /** Handle for a node's body, or null when it has none. */
   getBody(node: NodeBase | null | undefined): PhysicsBody2DHandle | null {
     const entry = node ? this.bodies.get(node) : null;
@@ -482,8 +629,11 @@ export class Physics2DService {
     const pairs = this.broadphase();
     this.narrowphase(pairs);
 
+    this.prepareJoints();
     this.warmStart();
+    this.warmStartJoints();
     for (let i = 0; i < VELOCITY_ITERATIONS; i++) {
+      this.solveJointVelocities(dt);
       this.solveVelocities(dt);
     }
 
@@ -492,6 +642,7 @@ export class Physics2DService {
 
     for (let i = 0; i < POSITION_ITERATIONS; i++) {
       this.solvePositions();
+      this.solveJointPositions();
     }
 
     this.writeBackToNodes();
@@ -888,6 +1039,8 @@ export class Physics2DService {
     this.colliders.clear();
     this.contacts.clear();
     this.touching.clear();
+    this.joints.clear();
+    this.jointedPairs.clear();
     this.signalQueue.length = 0;
     this.staticBody.colliders = [];
   }
@@ -1239,6 +1392,9 @@ export class Physics2DService {
     if (a.body === b.body) {
       return false; // a compound body does not collide with itself
     }
+    if (this.jointedPairs.has(bodyPairKey(a.body, b.body))) {
+      return false;
+    }
     if (a.body.bodyType !== 'dynamic' && b.body.bodyType !== 'dynamic') {
       return false; // two immovable things never resolve
     }
@@ -1583,6 +1739,198 @@ export class Physics2DService {
     }
 
     return false;
+  }
+
+  private orderedJoints(): JointEntry[] {
+    return [...this.joints.values()].sort((a, b) => a.order - b.order);
+  }
+
+  /** Per-step joint constants: world lever arms and the effective masses. */
+  private prepareJoints(): void {
+    for (const joint of this.orderedJoints()) {
+      const a = joint.bodyA;
+      const b = joint.bodyB;
+      const cosA = Math.cos(a.rotation);
+      const sinA = Math.sin(a.rotation);
+      const cosB = Math.cos(b.rotation);
+      const sinB = Math.sin(b.rotation);
+
+      joint.rax = joint.localAX * cosA - joint.localAY * sinA;
+      joint.ray = joint.localAX * sinA + joint.localAY * cosA;
+      joint.rbx = joint.localBX * cosB - joint.localBY * sinB;
+      joint.rby = joint.localBX * sinB + joint.localBY * cosB;
+
+      // 2x2 effective mass of the point constraint, then its inverse.
+      const mA = a.invMass;
+      const mB = b.invMass;
+      const iA = a.invInertia;
+      const iB = b.invInertia;
+      const k11 = mA + mB + iA * joint.ray * joint.ray + iB * joint.rby * joint.rby;
+      const k12 = -iA * joint.rax * joint.ray - iB * joint.rbx * joint.rby;
+      const k22 = mA + mB + iA * joint.rax * joint.rax + iB * joint.rbx * joint.rbx;
+      const determinant = k11 * k22 - k12 * k12;
+      if (Math.abs(determinant) > 1e-12) {
+        joint.massXX = k22 / determinant;
+        joint.massXY = -k12 / determinant;
+        joint.massYY = k11 / determinant;
+      } else {
+        joint.massXX = 0;
+        joint.massXY = 0;
+        joint.massYY = 0;
+      }
+
+      const angularMass = iA + iB;
+      joint.angularMass = angularMass > 0 ? 1 / angularMass : 0;
+
+      // A body driven by a motor must not doze off mid-swing.
+      const config = joint.source.getJointConfig();
+      this.syncJointedPair(joint, config.collideConnected);
+      if (config.motorEnabled && config.motorSpeed !== 0) {
+        this.wakeBody(a);
+        this.wakeBody(b);
+      }
+    }
+  }
+
+  /** Keep the broadphase skip-set in step with a live `collideConnected` edit. */
+  private syncJointedPair(joint: JointEntry, collideConnected: boolean): void {
+    const key = bodyPairKey(joint.bodyA, joint.bodyB);
+    if (collideConnected) {
+      this.jointedPairs.delete(key);
+    } else {
+      this.jointedPairs.add(key);
+    }
+  }
+
+  private warmStartJoints(): void {
+    for (const joint of this.orderedJoints()) {
+      const a = joint.bodyA;
+      const b = joint.bodyB;
+      const angular = joint.motorImpulse + joint.lowerImpulse - joint.upperImpulse;
+      applyImpulseAt(a, -joint.impulseX, -joint.impulseY, joint.rax, joint.ray);
+      applyImpulseAt(b, joint.impulseX, joint.impulseY, joint.rbx, joint.rby);
+      applyAngularImpulse(a, -angular);
+      applyAngularImpulse(b, angular);
+    }
+  }
+
+  /**
+   * Motor, then limits, then the pivot itself.
+   *
+   * The order matters: the point constraint is the one that must hold exactly (a
+   * hinge that comes apart is not a hinge), so it is solved last and gets the
+   * final say over whatever the motor and limits asked for.
+   */
+  private solveJointVelocities(dt: number): void {
+    for (const joint of this.orderedJoints()) {
+      const a = joint.bodyA;
+      const b = joint.bodyB;
+      if (!joint.source.enabled) {
+        continue;
+      }
+      const config = joint.source.getJointConfig();
+
+      if (config.motorEnabled && joint.angularMass > 0) {
+        const error = b.w - a.w - config.motorSpeed;
+        let impulse = -joint.angularMass * error;
+        const maxImpulse = config.maxMotorTorque * dt;
+        const total = clamp(joint.motorImpulse + impulse, -maxImpulse, maxImpulse);
+        impulse = total - joint.motorImpulse;
+        joint.motorImpulse = total;
+        applyAngularImpulse(a, -impulse);
+        applyAngularImpulse(b, impulse);
+      } else {
+        joint.motorImpulse = 0;
+      }
+
+      if (config.limitEnabled && joint.angularMass > 0) {
+        const angle = b.rotation - a.rotation - joint.referenceAngle;
+        // Each limit is one-sided, and what makes it so is the accumulated
+        // clamp, not the bias: while the joint is inside its range the bias term
+        // asks for a large impulse, the running total clamps to zero, and the
+        // applied increment is therefore nothing. The `max(C, 0) / dt` term is
+        // speculative — it lets the joint approach the stop only fast enough to
+        // reach it exactly this step, which is what stops a fast swing from
+        // overshooting and being yanked back.
+        {
+          const c = angle - config.lowerAngle;
+          let impulse = -joint.angularMass * (b.w - a.w + Math.max(c, 0) / dt);
+          const total = Math.max(joint.lowerImpulse + impulse, 0);
+          impulse = total - joint.lowerImpulse;
+          joint.lowerImpulse = total;
+          applyAngularImpulse(a, -impulse);
+          applyAngularImpulse(b, impulse);
+        }
+        {
+          const c = config.upperAngle - angle;
+          let impulse = -joint.angularMass * (a.w - b.w + Math.max(c, 0) / dt);
+          const total = Math.max(joint.upperImpulse + impulse, 0);
+          impulse = total - joint.upperImpulse;
+          joint.upperImpulse = total;
+          applyAngularImpulse(a, impulse);
+          applyAngularImpulse(b, -impulse);
+        }
+      } else {
+        joint.lowerImpulse = 0;
+        joint.upperImpulse = 0;
+      }
+
+      // Point constraint: drive the relative velocity at the pivot to zero.
+      const vax = a.vx - a.w * joint.ray;
+      const vay = a.vy + a.w * joint.rax;
+      const vbx = b.vx - b.w * joint.rby;
+      const vby = b.vy + b.w * joint.rbx;
+      const cdotX = vbx - vax;
+      const cdotY = vby - vay;
+      const impulseX = -(joint.massXX * cdotX + joint.massXY * cdotY);
+      const impulseY = -(joint.massXY * cdotX + joint.massYY * cdotY);
+      joint.impulseX += impulseX;
+      joint.impulseY += impulseY;
+      applyImpulseAt(a, -impulseX, -impulseY, joint.rax, joint.ray);
+      applyImpulseAt(b, impulseX, impulseY, joint.rbx, joint.rby);
+    }
+  }
+
+  /**
+   * Pull the two anchor points back together.
+   *
+   * Velocity-only hinges drift: every step leaves a little positional error that
+   * the next step's velocity solve has no term for, and over a few seconds a
+   * flipper visibly walks off its pivot.
+   */
+  private solveJointPositions(): void {
+    for (const joint of this.orderedJoints()) {
+      const a = joint.bodyA;
+      const b = joint.bodyB;
+      const totalInvMass = a.invMass + b.invMass;
+      if (totalInvMass <= 0) {
+        continue;
+      }
+
+      const cosA = Math.cos(a.rotation);
+      const sinA = Math.sin(a.rotation);
+      const cosB = Math.cos(b.rotation);
+      const sinB = Math.sin(b.rotation);
+      const ax = a.x + joint.localAX * cosA - joint.localAY * sinA;
+      const ay = a.y + joint.localAX * sinA + joint.localAY * cosA;
+      const bx = b.x + joint.localBX * cosB - joint.localBY * sinB;
+      const by = b.y + joint.localBX * sinB + joint.localBY * cosB;
+
+      const errorX = bx - ax;
+      const errorY = by - ay;
+      const error = Math.hypot(errorX, errorY);
+      if (error < PENETRATION_SLOP) {
+        continue;
+      }
+
+      const correction = Math.min(error, MAX_POSITION_CORRECTION) * JOINT_POSITION_BIAS;
+      const nx = errorX / error;
+      const ny = errorY / error;
+      a.x += (nx * correction * a.invMass) / totalInvMass;
+      a.y += (ny * correction * a.invMass) / totalInvMass;
+      b.x -= (nx * correction * b.invMass) / totalInvMass;
+      b.y -= (ny * correction * b.invMass) / totalInvMass;
+    }
   }
 
   private integratePositions(dt: number): void {
@@ -2146,6 +2494,11 @@ function boundsOverlap(a: Bounds2D, b: Bounds2D): boolean {
   return a.minX <= b.maxX && a.maxX >= b.minX && a.minY <= b.maxY && a.maxY >= b.minY;
 }
 
+/** Stable identity for an unordered pair of bodies. */
+function bodyPairKey(a: BodyEntry, b: BodyEntry): string {
+  return a.order < b.order ? `${a.order}/${b.order}` : `${b.order}/${a.order}`;
+}
+
 function pairKey(a: ColliderEntry, b: ColliderEntry): string {
   return a.order < b.order ? `${a.order}:${b.order}` : `${b.order}:${a.order}`;
 }
@@ -2185,6 +2538,23 @@ function applyImpulseAt(body: BodyEntry, ix: number, iy: number, rx: number, ry:
   body.vx += ix * body.invMass;
   body.vy += iy * body.invMass;
   body.w += (rx * iy - ry * ix) * body.invInertia;
+}
+
+/** Express a world point in a body's own frame. */
+function toLocalAnchor(body: BodyEntry, worldX: number, worldY: number): Point2D {
+  const dx = worldX - body.x;
+  const dy = worldY - body.y;
+  const cos = Math.cos(-body.rotation);
+  const sin = Math.sin(-body.rotation);
+  return { x: dx * cos - dy * sin, y: dx * sin + dy * cos };
+}
+
+/** Angular-only impulse, for the motor and limit constraints. */
+function applyAngularImpulse(body: BodyEntry, impulse: number): void {
+  if (body.sleeping || body.invInertia <= 0) {
+    return;
+  }
+  body.w += impulse * body.invInertia;
 }
 
 function clamp(value: number, min: number, max: number): number {

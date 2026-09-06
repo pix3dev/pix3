@@ -25,6 +25,7 @@ import { Hitbox2DBehavior } from './Hitbox2DBehavior';
 import { PhysicsBody2DBehavior } from './PhysicsBody2DBehavior';
 import { Collider2DBehavior } from './Collider2DBehavior';
 import { PhysicsWorld2DBehavior } from './PhysicsWorld2DBehavior';
+import { RevoluteJoint2DBehavior } from './RevoluteJoint2DBehavior';
 import { PointAttachmentBehavior } from './PointAttachmentBehavior';
 import { NetworkedNodeBehavior } from './NetworkedNodeBehavior';
 import { ReplicatedTransformBehavior } from './ReplicatedTransformBehavior';
@@ -220,6 +221,18 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Physics',
     componentClass: Collider2DBehavior,
     keywords: ['collider', 'physics', 'shape', 'polygon', 'sensor', 'area', '2d', 'collision'],
+  });
+
+  registry.registerComponent({
+    id: 'core:RevoluteJoint2D',
+    displayName: 'Revolute Joint 2D',
+    description:
+      'Hinge: pins this body to a pivot so it can only rotate about it. With no connected node ' +
+      'the hinge is fixed to the world — the pinball flipper / swinging door case. Optional ' +
+      'angle limits and a motor.',
+    category: 'Physics',
+    componentClass: RevoluteJoint2DBehavior,
+    keywords: ['joint', 'hinge', 'revolute', 'pivot', 'flipper', 'door', 'motor', 'physics', '2d'],
   });
 
   registry.registerComponent({

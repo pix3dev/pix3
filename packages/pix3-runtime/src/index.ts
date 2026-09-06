@@ -114,6 +114,7 @@ export * from './behaviors/Hitbox2DBehavior';
 export * from './behaviors/PhysicsBody2DBehavior';
 export * from './behaviors/Collider2DBehavior';
 export * from './behaviors/PhysicsWorld2DBehavior';
+export * from './behaviors/RevoluteJoint2DBehavior';
 export * from './behaviors/NetworkedNodeBehavior';
 export * from './behaviors/ReplicatedTransformBehavior';
 export * from './core/Collision2DService';

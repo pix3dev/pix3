@@ -180,6 +180,8 @@ export const STRIPPABLE_RUNTIME_MODULES: readonly StrippableRuntimeModule[] = [
       'Collider2D',
       'core:Collider2D',
       'core:PhysicsWorld2D',
+      'core:RevoluteJoint2D',
+      'RevoluteJoint2D',
     ],
     // The three behaviours import only types from here (same as Hitbox2D), so
     // the keep-names above are what tie them together.
@@ -196,6 +198,10 @@ export const STRIPPABLE_RUNTIME_MODULES: readonly StrippableRuntimeModule[] = [
   {
     modulePath: 'behaviors/PhysicsWorld2DBehavior',
     keepWhenMentioned: ['PhysicsWorld2DBehavior', 'core:PhysicsWorld2D'],
+  },
+  {
+    modulePath: 'behaviors/RevoluteJoint2DBehavior',
+    keepWhenMentioned: ['RevoluteJoint2DBehavior', 'core:RevoluteJoint2D'],
   },
 
   // --- multiplayer ---
