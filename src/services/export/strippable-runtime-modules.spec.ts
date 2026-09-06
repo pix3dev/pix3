@@ -184,6 +184,73 @@ describe('strippable runtime modules', () => {
       expect(paths).not.toContain('net/NetworkService');
     });
 
+    /**
+     * The physics tier is the largest thing the table can remove, and the graph
+     * checks above only prove the entries are *consistent* — these prove they do
+     * what they were added for.
+     */
+    describe('2D collision and physics', () => {
+      const PHYSICS_MODULES = [
+        'core/collision-shapes-2d',
+        'core/world-transform-2d',
+        'core/collision-polygon-config',
+        'core/Collision2DService',
+        'core/physics-2d-narrowphase',
+        'core/Physics2DService',
+        'behaviors/Hitbox2DBehavior',
+        'behaviors/PhysicsBody2DBehavior',
+        'behaviors/Collider2DBehavior',
+        'behaviors/PhysicsWorld2DBehavior',
+        'behaviors/RevoluteJoint2DBehavior',
+      ];
+
+      it('strips the whole tier from a project that mentions none of it', () => {
+        const paths = resolveStrippableRuntimeModules(() => false).map(e => e.modulePath);
+        for (const modulePath of PHYSICS_MODULES) {
+          expect(paths, `${modulePath} should be strippable`).toContain(modulePath);
+        }
+      });
+
+      it('keeps the solver and everything under it for a scene with a collider', () => {
+        const paths = resolveStrippableRuntimeModules(name => name === 'core:Collider2D').map(
+          e => e.modulePath
+        );
+        expect(paths).not.toContain('behaviors/Collider2DBehavior');
+        expect(paths).not.toContain('core/Physics2DService');
+        expect(paths).not.toContain('core/physics-2d-narrowphase');
+        expect(paths).not.toContain('core/collision-shapes-2d');
+        expect(paths).not.toContain('core/world-transform-2d');
+        expect(paths).not.toContain('core/collision-polygon-config');
+      });
+
+      it('keeps the query tier without dragging in the solver', () => {
+        const paths = resolveStrippableRuntimeModules(name => name === 'core:Hitbox2D').map(
+          e => e.modulePath
+        );
+        expect(paths).not.toContain('behaviors/Hitbox2DBehavior');
+        expect(paths).not.toContain('core/Collision2DService');
+        expect(paths).not.toContain('core/collision-shapes-2d');
+        // The solver is the expensive half and must not come along for the ride.
+        expect(paths).toContain('core/Physics2DService');
+        expect(paths).toContain('core/physics-2d-narrowphase');
+      });
+
+      it('keeps the solver for a scene that only sets gravity', () => {
+        const paths = resolveStrippableRuntimeModules(name => name === 'core:PhysicsWorld2D').map(
+          e => e.modulePath
+        );
+        expect(paths).not.toContain('behaviors/PhysicsWorld2DBehavior');
+        expect(paths).not.toContain('core/Physics2DService');
+      });
+
+      it('keeps the solver for a script that only names `physics2d`', () => {
+        const paths = resolveStrippableRuntimeModules(name => name === 'physics2d').map(
+          e => e.modulePath
+        );
+        expect(paths).not.toContain('core/Physics2DService');
+      });
+    });
+
     it('strips nothing when everything is mentioned', () => {
       expect(resolveStrippableRuntimeModules(() => true)).toEqual([]);
     });

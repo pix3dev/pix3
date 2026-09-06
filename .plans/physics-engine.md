@@ -360,22 +360,40 @@ JS / 225 KiB gz, and the Rapier alternative would be ~2 MB wasm before base64.
 - Acceptance: a bouncer-class scene (angled paddles, bumpers, drain sensor) authored with
   zero gameplay-physics script code; 20-body stack stays stable at 1/60 for 30 s.
 
-**Phase 2 — feel and ergonomics.** Done so far: the viewport-wide "Show collision shapes"
-toggle (pulled into phase 1), kinematic `moveAndCollide`/`moveAndSlide`, and the revolute
-joint. Still open: capsule shape, render interpolation, re-author `recipe-bouncer-2d` on
-engine bodies (keep `ball-collision.ts` until parity is demonstrated), route `collision2d`
-queries through the physics broadphase when both exist.
+**Phase 2 — feel and ergonomics: DONE**, except for two items settled by decision rather
+than by code (below). Shipped: the viewport-wide "Show collision shapes" toggle (pulled into
+phase 1), kinematic `moveAndCollide`/`moveAndSlide`, the revolute joint (limits + motor +
+`collideConnected`), render interpolation between fixed steps, and the capsule shape.
 
-Two more defects the phase-2 tests forced out, both of the same family as phase 1's — a sign
-or a role convention that looks right until something asymmetric exercises it:
+**`recipe-bouncer-2d` stays on its own solver** (decided 2026-09-07). The template's bumpers
+use `restitution` 1.05 and 1.3 — they _add_ energy — while the engine clamps restitution to
+[0, 1] as Box2D and Godot do. Porting it means replacing that with an impulse on contact,
+which changes the feel of a shipped template in a way that can only be judged by playing it,
+and the plan's own gate was "delete `ball-collision.ts` only after feel parity is shown".
+Revisit when someone can play both.
+
+**The broadphase stays split** — `collision2d`'s linear scan is not routed through the
+physics grid. The two tiers index different things (hitboxes vs colliders), the scan is
+documented as fine for hundreds of hitboxes, and nothing has measured a problem; unifying
+them would couple two deliberately-separate tiers to buy an optimization no one has asked
+for. The API note stands: if it is ever needed it can be done underneath without touching
+either surface.
+
+Three more defects the phase-2 tests forced out, all of the same family as phase 1's — a sign
+or a convention that looks right until something asymmetric exercises it:
 
 5. **The joint's body roles were the wrong way round.** The component sits on the body that
    swings, so that body has to be the solver's `B` (every angular term is `B relative to A`).
-   With the roles reversed a flipper set to `+600` swings *down*.
+   With the roles reversed a flipper set to `+600` swings _down_.
 6. **The angle-limit bias had the wrong sign** (`-max(0, -C)` instead of `+max(C, 0)`), which
    clamped an arm to ~0 degrees instead of to its authored range. What makes a limit one-sided
    is the accumulated-impulse clamp, not the bias; the bias is speculative and lets the joint
    reach the stop exactly.
+7. **The capsule's stadium was wound clockwise.** Swept the intuitive way (right, under the
+   bottom, left) the loop comes out clockwise in a y-up frame, every SAT normal points inward,
+   and bodies fall straight through. Capsules are now built counter-clockwise _and_ routed
+   through `decomposeConvex`, so the winding guarantee comes from the same place as every
+   other polygon rather than from the stadium builder being trusted to get it right.
 
 And one design point worth recording: hinged bodies overlap at the pivot, so a contact there
 fights the joint for control of the same pair. `collideConnected` defaults to off, matching
