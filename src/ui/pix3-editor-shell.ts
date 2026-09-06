@@ -118,6 +118,7 @@ import { ZoomInCommand } from '@/features/viewport/ZoomInCommand';
 import { ZoomOutCommand } from '@/features/viewport/ZoomOutCommand';
 import { ToggleLightingCommand } from '@/features/viewport/ToggleLightingCommand';
 import { ToggleCollidersCommand } from '@/features/viewport/ToggleCollidersCommand';
+import { ToggleCollisionShapesCommand } from '@/features/viewport/ToggleCollisionShapesCommand';
 import { ToggleDirectionAxesCommand } from '@/features/viewport/ToggleDirectionAxesCommand';
 import { ToggleNavigationModeCommand } from '@/features/viewport/ToggleNavigationModeCommand';
 import { ToggleSnapToGridCommand } from '@/features/viewport/ToggleSnapToGridCommand';
@@ -475,6 +476,7 @@ export class Pix3EditorShell extends ComponentBase {
     const zoomOutCommand = new ZoomOutCommand();
     const toggleLightingCommand = new ToggleLightingCommand();
     const toggleCollidersCommand = new ToggleCollidersCommand();
+    const toggleCollisionShapesCommand = new ToggleCollisionShapesCommand();
     const toggleDirectionAxesCommand = new ToggleDirectionAxesCommand();
     const toggleNavigationModeCommand = new ToggleNavigationModeCommand();
 
@@ -544,6 +546,7 @@ export class Pix3EditorShell extends ComponentBase {
       zoomOutCommand,
       toggleLightingCommand,
       toggleCollidersCommand,
+      toggleCollisionShapesCommand,
       toggleDirectionAxesCommand,
       toggleNavigationModeCommand,
       ...nudgeCommands

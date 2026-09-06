@@ -1961,6 +1961,183 @@ export class SizeEditor extends ComponentBase {
   }
 }
 
+/**
+ * Editor for `editor: 'collision-polygon'` — the vertex list of a `core:Hitbox2D`
+ * (and, later, a physics collider) polygon.
+ *
+ * The vertices themselves are edited in the **viewport**, not here: a numeric
+ * list of 20 coordinate pairs is not something anyone shapes by typing. So this
+ * control is the entry point and the bulk operations — open/close the viewport
+ * tool, trace an outline from the node's own sprite alpha, drop back to a box,
+ * clear — with a count so the property still reads as data.
+ */
+@customElement('pix3-collision-polygon-editor')
+export class CollisionPolygonEditor extends ComponentBase {
+  protected static useShadowDom = true;
+
+  /** Number of authored vertices. */
+  @property({ type: Number })
+  vertexCount = 0;
+
+  /** True while this polygon is the one open in the viewport tool. */
+  @property({ type: Boolean })
+  editing = false;
+
+  /** False when the vertices come from an animation frame and are read-only here. */
+  @property({ type: Boolean })
+  editable = true;
+
+  /** True when the node can produce an outline from its own texture alpha. */
+  @property({ type: Boolean })
+  canTrace = false;
+
+  @property({ type: Boolean })
+  tracing = false;
+
+  @property({ type: Boolean })
+  disabled = false;
+
+  static styles = css`
+    :host {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      width: 100%;
+    }
+
+    .row {
+      display: flex;
+      gap: 0.35rem;
+      align-items: center;
+      flex-wrap: wrap;
+    }
+
+    .count {
+      font-size: 0.72rem;
+      color: var(--fg-2);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .hint {
+      font-size: 0.68rem;
+      color: var(--fg-2);
+      line-height: 1.35;
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      border: 1px solid var(--line-1);
+      background: var(--bg-2);
+      color: var(--fg-1);
+      border-radius: var(--radius-2);
+      padding: 0.2rem 0.55rem;
+      height: 26px;
+      font-size: 0.75rem;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+
+    button:hover:not(:disabled) {
+      background: var(--bg-3);
+      color: var(--fg-0);
+    }
+
+    button.is-active {
+      border-color: var(--accent);
+      color: var(--fg-0);
+      background: var(--accent-soft);
+    }
+
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+
+    button:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    svg {
+      width: 14px;
+      height: 14px;
+      flex: 0 0 auto;
+    }
+  `;
+
+  private emit(name: string): void {
+    this.dispatchEvent(new CustomEvent(name, { bubbles: true, composed: true }));
+  }
+
+  protected render() {
+    if (!this.editable) {
+      return html`<div class="hint">
+        Vertices come from the animation frame. Edit them in the Sprite Editor's polygon overlay.
+      </div>`;
+    }
+
+    return html`
+      <div class="row">
+        <button
+          type="button"
+          class=${this.editing ? 'is-active' : ''}
+          ?disabled=${this.disabled}
+          aria-pressed=${this.editing ? 'true' : 'false'}
+          title=${this.editing
+            ? 'Stop editing vertices in the viewport'
+            : 'Drag vertices in the viewport; click an edge midpoint to add one, Alt-click a vertex to remove it'}
+          @click=${() => this.emit(this.editing ? 'stop-edit' : 'start-edit')}
+        >
+          ${polygonIcon()}
+          <span>${this.editing ? 'Done' : 'Edit points'}</span>
+        </button>
+        <span class="count">${this.vertexCount} pts</span>
+      </div>
+      <div class="row">
+        <button
+          type="button"
+          ?disabled=${this.disabled || !this.canTrace || this.tracing}
+          title="Trace an outline from this node's texture alpha"
+          @click=${() => this.emit('trace')}
+        >
+          <span>${this.tracing ? 'Tracing...' : 'Trace sprite'}</span>
+        </button>
+        <button
+          type="button"
+          ?disabled=${this.disabled}
+          title="Replace the polygon with a box matching the node size"
+          @click=${() => this.emit('reset-box')}
+        >
+          <span>Box</span>
+        </button>
+        <button
+          type="button"
+          ?disabled=${this.disabled || this.vertexCount === 0}
+          title="Remove every vertex"
+          @click=${() => this.emit('clear')}
+        >
+          <span>Clear</span>
+        </button>
+      </div>
+    `;
+  }
+}
+
+/** Local glyph: a polygon with its vertices. Inline for the same reason as the preview icons. */
+function polygonIcon() {
+  return html`<svg viewBox="0 0 20 20" aria-hidden="true" focusable="false" data-icon="polygon">
+    <path
+      d="M4 7l6-4 6 4-2 8H6z"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="1.6"
+      stroke-linejoin="round"
+    />
+  </svg>`;
+}
+
 @customElement('pix3-slider-number-editor')
 export class SliderNumberEditor extends ComponentBase {
   protected static useShadowDom = true;
@@ -2136,6 +2313,7 @@ declare global {
     'pix3-spine-preview-editor': SpinePreviewEditor;
     'pix3-animation-resource-editor': AnimationResourceEditor;
     'pix3-size-editor': SizeEditor;
+    'pix3-collision-polygon-editor': CollisionPolygonEditor;
     'pix3-slider-number-editor': SliderNumberEditor;
   }
 }
