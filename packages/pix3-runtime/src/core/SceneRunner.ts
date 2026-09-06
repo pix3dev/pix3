@@ -677,6 +677,7 @@ export class SceneRunner {
     // a graph that is already gone. `runGraph` stops before it starts, which is
     // what makes a scene change clear them too.
     this.sceneService.clearCommands();
+    this.sceneService.clearPhysics2D();
 
     this.activeCamera2D = null;
     this.overlay2DActive = false;
@@ -1773,6 +1774,10 @@ export class SceneRunner {
       simulatedTime += fixedTimeStep;
       this.ecsService.setFrameMetrics(simulatedTime, this.frameNumber);
       this.ecsService.fixedUpdate(fixedTimeStep);
+      // No-op unless something touched `scene.physics2d`; a project without
+      // physics pays one method call and no import (SceneRunner never names the
+      // service, so it adds no value import for the export to pin).
+      this.sceneService.stepPhysics2D(fixedTimeStep);
       executedSteps += 1;
     }
 

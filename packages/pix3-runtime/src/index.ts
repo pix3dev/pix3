@@ -115,6 +115,8 @@ export * from './behaviors/NetworkedNodeBehavior';
 export * from './behaviors/ReplicatedTransformBehavior';
 export * from './core/Collision2DService';
 export * from './core/collision-shapes-2d';
+export * from './core/Physics2DService';
+export * from './core/physics-2d-narrowphase';
 export * from './core/collision-polygon-config';
 export * from './core/world-transform-2d';
 
