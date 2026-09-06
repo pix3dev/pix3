@@ -643,8 +643,19 @@ this.vy = move.velocityY; // the blocked component has been removed
 `moveAndSlide` substeps so a fast character cannot sample past a thin wall, and
 classifies contacts against a configurable `up` (`floorMaxAngle`, default 45 deg).
 Slopes are handled by the slide itself; a **vertical step blocks** rather than
-auto-climbing — same as Godot, and step-up is game logic. `moveAndCollide` is the
-same move without the sliding, when you want to handle the hit yourself.
+auto-climbing — same as Godot, and step-up is game logic. A kinematic character
+also **does not push dynamic bodies**: a crate in the way stops it, exactly as a
+wall would. To shove something, read the hit and apply an impulse to it yourself.
+`moveAndCollide` is the same move without the sliding, when you want to handle
+the hit yourself.
+
+**Shapes.** `rect`, `circle`, `polygon` (concave allowed) and `capsule` — the
+last is upright along local Y and sized by `height` (TOTAL height, both caps
+included) plus `radius`, matching Godot. A capsule is built as a faceted
+"stadium" rather than a true segment-plus-radius shape: the caps carry under 2%
+radial error, which is sub-pixel at any size a 2D playable draws, and in exchange
+it behaves exactly like every other convex shape. Something that must roll
+perfectly smoothly wants `circle`, which is exact.
 
 **Hinges** (`core:RevoluteJoint2D`). Pins a body to a pivot — a flipper, a
 swinging door, a ragdoll link. Leave `connectedNode` empty to hinge against the
