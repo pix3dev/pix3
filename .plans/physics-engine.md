@@ -360,11 +360,26 @@ JS / 225 KiB gz, and the Rapier alternative would be ~2 MB wasm before base64.
 - Acceptance: a bouncer-class scene (angled paddles, bumpers, drain sensor) authored with
   zero gameplay-physics script code; 20-body stack stays stable at 1/60 for 30 s.
 
-**Phase 2 — feel and ergonomics:** kinematic `moveAndCollide`/`moveAndSlide` (the
-CharacterBody2D role), capsule shape, render interpolation, viewport-wide "Show collision
-shapes" toggle, one joint (revolute — flippers), re-author `recipe-bouncer-2d` on engine
-bodies (keep `ball-collision.ts` until parity is demonstrated), route `collision2d` queries
-through the physics broadphase when both exist.
+**Phase 2 — feel and ergonomics.** Done so far: the viewport-wide "Show collision shapes"
+toggle (pulled into phase 1), kinematic `moveAndCollide`/`moveAndSlide`, and the revolute
+joint. Still open: capsule shape, render interpolation, re-author `recipe-bouncer-2d` on
+engine bodies (keep `ball-collision.ts` until parity is demonstrated), route `collision2d`
+queries through the physics broadphase when both exist.
+
+Two more defects the phase-2 tests forced out, both of the same family as phase 1's — a sign
+or a role convention that looks right until something asymmetric exercises it:
+
+5. **The joint's body roles were the wrong way round.** The component sits on the body that
+   swings, so that body has to be the solver's `B` (every angular term is `B relative to A`).
+   With the roles reversed a flipper set to `+600` swings *down*.
+6. **The angle-limit bias had the wrong sign** (`-max(0, -C)` instead of `+max(C, 0)`), which
+   clamped an arm to ~0 degrees instead of to its authored range. What makes a limit one-sided
+   is the accumulated-impulse clamp, not the bias; the bias is speculative and lets the joint
+   reach the stop exactly.
+
+And one design point worth recording: hinged bodies overlap at the pivot, so a contact there
+fights the joint for control of the same pair. `collideConnected` defaults to off, matching
+Box2D — measured at ~8 px of pivot drift before it existed.
 
 **Phase 3 — 3D wrappers (demand-gated, may never happen):** `core:PhysicsBody3D` /
 `core:Collider3D` over host-injected Rapier + `virtual:runtime-physics3d` vendoring +

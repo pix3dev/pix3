@@ -177,6 +177,7 @@ effect. Registered in
 | `core:PhysicsBody2D`       | Rigid body simulated by `scene.physics2d` (static/kinematic/dynamic) — see §4 "2D physics"                                                  |
 | `core:Collider2D`          | Physics shape (rect/circle/polygon, rotation-aware, may be concave); a sensor with no body is an Area2D                                     |
 | `core:PhysicsWorld2D`      | Sets the 2D world gravity; attach to the scene root                                                                                         |
+| `core:RevoluteJoint2D`     | Hinge with optional angle limits and a motor — flippers, swinging doors, ragdoll links                                                      |
 | `core:NetworkedNode`       | Bind this node to a replicated entity — spawn one for the local player, adopt a peer's — see §4 "Multiplayer replication"                   |
 | `core:ReplicatedTransform` | Replicate position/rotation: owner publishes quantized, peers interpolate on a timed buffer                                                 |
 
@@ -626,6 +627,39 @@ body?.teleport(x, y); // reposition without a contact impulse
 phys.raycast(x1, y1, x2, y2, { group: 'walls' });
 phys.overlapCircle(x, y, r, { group: 'enemy' });
 ```
+
+**Characters** (`bodyType: 'kinematic'` — Godot's CharacterBody2D role). A driven
+body: it pushes nothing, is pushed by nothing, and stops where geometry says.
+
+```ts
+// In onUpdate: gravity while airborne, a small downward bias while grounded so
+// the character stays glued to slopes.
+this.vy = this.grounded ? -60 : this.vy - 1960 * dt;
+const move = this.scene.physics2d.moveAndSlide(this.node, this.vx, this.vy, dt);
+this.grounded = move.isOnFloor; // also isOnWall / isOnCeiling
+this.vy = move.velocityY; // the blocked component has been removed
+```
+
+`moveAndSlide` substeps so a fast character cannot sample past a thin wall, and
+classifies contacts against a configurable `up` (`floorMaxAngle`, default 45 deg).
+Slopes are handled by the slide itself; a **vertical step blocks** rather than
+auto-climbing — same as Godot, and step-up is game logic. `moveAndCollide` is the
+same move without the sliding, when you want to handle the hit yourself.
+
+**Hinges** (`core:RevoluteJoint2D`). Pins a body to a pivot — a flipper, a
+swinging door, a ragdoll link. Leave `connectedNode` empty to hinge against the
+world. Angles on the authored surface are **degrees**, and a positive
+`motorSpeed` spins the node the component sits on counter-clockwise:
+
+```ts
+const hinge = this.node.getComponent(RevoluteJoint2DBehavior);
+hinge.config.motorSpeed = this.input.getButton('flip') ? 900 : -900;
+```
+
+`maxMotorTorque` is a real ceiling — a motor weaker than the arm's own weight
+will not lift it. Hinged bodies do not collide with each other by default
+(`collideConnected`), because they overlap at the pivot and a contact there
+fights the joint.
 
 Stepped in `SceneRunner`'s existing fixed-step slot, so hitstop and slow motion
 dilate the simulation for free and the `fixed`/`manual` time modes make a run
