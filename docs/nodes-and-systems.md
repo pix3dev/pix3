@@ -3,7 +3,7 @@
 **Read this before writing custom game logic.** It is the inventory of what the
 Pix3 engine and editor already do, and how to reach each capability correctly.
 If a capability exists here, **use it instead of hand-rolling it in game code** —
-that is the rule CLAUDE.md's *Engine vs Game feature decision* enforces.
+that is the rule CLAUDE.md's _Engine vs Game feature decision_ enforces.
 
 - Node detail (every property, per node): [node-types-reference.md](node-types-reference.md)
 - Product/architecture source of truth: [pix3-specification.md](pix3-specification.md)
@@ -18,7 +18,7 @@ When asked to implement a game feature:
 
 1. **Search this doc + [node-types-reference.md](node-types-reference.md).** If a
    node, behavior, system, or runtime API already covers it, use that.
-2. Ask: *"Would Godot / Unity ship this as a built-in?"*
+2. Ask: _"Would Godot / Unity ship this as a built-in?"_
    - **Yes → engine-level.** Implement in the runtime + editor (schema,
      `Create*Command`, registry, YAML serialization, inspector), then
      `yalc:publish` and update the consumer. **State the plan and confirm first.**
@@ -56,32 +56,46 @@ YAML, or (from a script) construct + `parent.adoptChild(child)`. Full property
 tables: [node-types-reference.md](node-types-reference.md).
 
 **Structure / base**
+
 - `Node2D`, `Node3D` — transform containers (2D uses anchors/layout; 3D is a
   Three.js `Object3D`). `Group2D` groups 2D content.
 
 **2D content & UI** (orthographic overlay pass; draw order = tree order)
+
 - `Sprite2D`, `AnimatedSprite2D`, `TiledSprite2D`, `ColorRect2D` — images / frames / 9-slice-ish tiling / solid rects.
 - `SpineSkeleton2D` — a Spine skeleton (`.json`/`.skel` + `.atlas`). Skeletal rigs, mesh deformation and animation mixing, i.e. what a flipbook cannot do; see the recipe below.
 - UI controls: `Button2D`, `Label2D`, `Slider2D`, `Joystick2D`, `Checkbox2D`, `Bar2D`, `ScrollContainer2D`, `InventorySlot2D`.
   **Skins:** these controls are colour-driven by default and take sprites through texture slots — `Button2D` `textureNormal/Hover/Pressed/Disabled`, `Checkbox2D` `textureBox` / `textureBoxChecked` / `textureMark`, `Slider2D` `textureTrack` / `textureFill` / `textureThumb`, `Bar2D` `textureTrough` / `textureFill`, plus `ScrollContainer2D`'s thumb/track. A set slot replaces that flat colour; an unset one keeps it. `Button2D`, `Slider2D` (track+fill) and `Bar2D` (trough+fill) also take the four `sliceBorder*` nine-slice insets `TiledSprite2D` uses, so one 64x64 skin fits any size instead of smearing — and a fill that shrinks with `value` is re-cut, not squashed. A sliced skin opts out of the 2D quad batcher.
   `Label2D` is multiline: a fixed `width` word-wraps, `labelAlign`/`labelVAlign` align inside the box, and `typewriterSpeed` + `setText()`/`skipTypewriter()`/`'typewriter-complete'` give a per-character reveal.
 - `Camera2D` — pan/zoom/limits/shake for the 2D pass. `CanvasLayer2D` — fixed HUD layer, unaffected by Camera2D.
-- `AnimatedSprite2D` (and `AnimatedSprite3D`) play a flipbook from a **`.pix3anim`** resource — see the recipe below. A non-looping clip emits **`animation-finished`** (clip name as arg) when it stops on the last frame. For self-freeing one-shot VFX set **`freeOnFinish: true`** on the node (destroys itself when the clip ends — no component); use `core:FreeOnSignal` only when the trigger is some *other* signal.
+- `AnimatedSprite2D` (and `AnimatedSprite3D`) play a flipbook from a **`.pix3anim`** resource — see the recipe below. A non-looping clip emits **`animation-finished`** (clip name as arg) when it stops on the last frame. For self-freeing one-shot VFX set **`freeOnFinish: true`** on the node (destroys itself when the clip ends — no component); use `core:FreeOnSignal` only when the trigger is some _other_ signal.
 
 **Flipbook animation (`.pix3anim`)** — hand-author it; the file is plain JSON and `SceneLoader` auto-loads the resource + every frame texture (also when the node arrives via `scene.instantiate` of a prefab). Every omitted field is defaulted on load (fps 12, loop true, `playbackMode` normal, anchor 0.5/0.5, `durationMultiplier` 1). Save it next to the frames, point the node at it. **Sequence mode** (one image per frame — the common case, e.g. an impact flash):
+
 ```json
-{ "version": "1.0.0", "texturePath": "",
-  "clips": [{ "name": "burst", "fps": 30, "loop": false, "frames": [
-    { "texturePath": "res://.../fireb0001.png" },
-    { "texturePath": "res://.../fireb0002.png" }
-    /* … one entry per frame … */
-  ]}]}
+{
+  "version": "1.0.0",
+  "texturePath": "",
+  "clips": [
+    {
+      "name": "burst",
+      "fps": 30,
+      "loop": false,
+      "frames": [
+        { "texturePath": "res://.../fireb0001.png" },
+        { "texturePath": "res://.../fireb0002.png" }
+        /* … one entry per frame … */
+      ]
+    }
+  ]
+}
 ```
+
 **Spritesheet mode** instead: set top-level `texturePath` and give each frame a UV rect `offset:{x,y}` + `repeat:{x,y}` (these default to 0 → sample nothing, so they're required here). Frames may carry `durationMultiplier` and `events:[{signal,args}]` (fired on play-driven frame entry). Node wiring: `type: AnimatedSprite2D`, properties `animationResourcePath`, `currentClip`, `isPlaying`, `freeOnFinish` (one-shot self-destruct), `width`/`height`, `anchor`, `sizeMode`. First spawn of a runtime-instantiated clip warms its texture cache; if the first play must be pixel-perfect, spawn one invisible warm-up at level start. Authoring GUI: the editor's **Sprite Editor** produces the same file — one shell (canvas + clips rail + frame timeline) that edits both a bare image and a `.pix3anim`; selecting a frame binds the canvas to that frame's texture, and crop / rotate / flip / background-removal / generation write straight back into the frame.
 
 **Frame presentation — `sizeMode`, per-frame `anchor`, `sourceSize`.** Two anchors are in play and they mean different things. The **node** `anchor` is a global pivot in the node's `width × height` box (y up, same as `Sprite2D.anchor`). Each **frame's** `anchor` is that frame's own origin inside its — possibly tightly cropped — raster, normalized with **y measured from the top** (image convention, like `boundingBox`). They compose: the quad is placed so the frame anchor lands on the node's position, then shifted by the node pivot. That is what makes cropping pay off — crop a frame tighter, move its anchor to the old visual centre, and the animation is pixel-identical while the PNG (and the atlas) shrinks. `sizeMode` decides how a frame fills the box: `'stretch'` (default, and what every pre-existing scene assumes) scales every frame to exactly `width × height`; `'native'` renders each frame at its own `sourceSize` scaled by one per-clip factor derived from the clip's FIRST frame, so mixed-size frames keep their relative proportions and resizing the node scales the whole animation uniformly (the editor sets `'native'` on newly created nodes). `sourceSize` is an optional per-frame `{width,height}` the editor stamps whenever a frame is added, imported or sliced, so native layout never waits on a texture load; a frame with no known size falls back to stretch, so legacy files keep working. The math lives in one shared module (`core/animated-sprite-layout.ts`) because the editor viewport draws SEPARATE proxy meshes — both apply the same resolver.
 
-**Named frame points (sockets).** `AnimationFrame.points?: [{name, x, y, angle?}]` — points that live in frame space (normalized, y from the top; `angle` in degrees, 0 = right) and move *and rotate* across frames: a muzzle on a barrel, a hand socket an item follows through a walk cycle. Read them from scripts — `sprite.getFramePoint('muzzle')` returns node-local `{x, y, angle}` usable directly as a child position, `getFramePointWorld('muzzle')` adds the node's world transform and accumulated Z rotation, `getClipPointNames()` lists the active clip's points; all return `null`/`[]` when the current frame doesn't define the point. Frame `events` compose naturally: an emitting frame fires `muzzle-flash`, the handler reads `getFramePoint('muzzle')`. For the "item in hand" case attach **`core:PointAttachment`** to the child (`point`, `applyRotation`, `offsetX`/`offsetY`, optional `spriteNodeId`); it parks the node on the named point every tick and leaves it alone on frames that don't define it. Authoring: the Sprite Editor's **points** canvas tool (drag the dot, drag the direction handle for the angle; the previous frame's points ghost behind as a mini onion-skin).
+**Named frame points (sockets).** `AnimationFrame.points?: [{name, x, y, angle?}]` — points that live in frame space (normalized, y from the top; `angle` in degrees, 0 = right) and move _and rotate_ across frames: a muzzle on a barrel, a hand socket an item follows through a walk cycle. Read them from scripts — `sprite.getFramePoint('muzzle')` returns node-local `{x, y, angle}` usable directly as a child position, `getFramePointWorld('muzzle')` adds the node's world transform and accumulated Z rotation, `getClipPointNames()` lists the active clip's points; all return `null`/`[]` when the current frame doesn't define the point. Frame `events` compose naturally: an emitting frame fires `muzzle-flash`, the handler reads `getFramePoint('muzzle')`. For the "item in hand" case attach **`core:PointAttachment`** to the child (`point`, `applyRotation`, `offsetX`/`offsetY`, optional `spriteNodeId`); it parks the node on the named point every tick and leaves it alone on frames that don't define it. Authoring: the Sprite Editor's **points** canvas tool (drag the dot, drag the direction handle for the angle; the previous frame's points ghost behind as a mini onion-skin).
 
 **Spine skeletal animation (`SpineSkeleton2D`)** — for rigs authored in the Spine
 editor, when a flipbook (`.pix3anim`) is not enough: bone hierarchies, mesh
@@ -114,17 +128,20 @@ cost is per skeleton per frame, so budget dozens, not hundreds. Full property ta
 `docs/node-types-reference.md` → `### SpineSkeleton2D`.
 
 **3D content**
+
 - `GeometryMesh` — primitive/standard-material mesh; supports **shader effects** (§4) and baked/realtime AO.
 - `MeshInstance` — a loaded model (glTF). `InstancedMesh3D` — GPU-instanced copies for crowds.
 - `Sprite3D`, `AnimatedSprite3D` — billboarded sprites in 3D.
 - `Particles3D` — GPU-ish particle system with trails + sub-emitters + world/local sim.
 
 **Cameras & lights**
+
 - `Camera3D` — the single render camera (attach `core:CameraBrain` for blending).
 - `VirtualCamera3D` — non-rendering "virtual camera" rigs selected by priority (§4 Camera system).
 - `DirectionalLightNode`, `PointLightNode`, `SpotLightNode`, `AmbientLightNode`, `HemisphereLightNode`.
 
 **Other**
+
 - `AudioPlayer` — a scene-graph audio source (§4 Audio).
 - `PostProcess` — enables the post-processing pipeline (§4 Post-processing).
 
@@ -137,28 +154,31 @@ designer-facing behaviors — prefer them over writing a script for the same
 effect. Registered in
 [packages/pix3-runtime/src/behaviors/register-behaviors.ts](../packages/pix3-runtime/src/behaviors/register-behaviors.ts).
 
-| Component id | Does |
-|---|---|
-| `core:Rotate` | Continuous rotation of a 3D node |
-| `core:SimpleMove` | Simple test movement |
-| `core:Sine` | Oscillate a node along an axis |
-| `core:Follow` | Smoothly follow a target node's position/rotation |
-| `core:PinToNode` | Pin a 2D UI node to a 3D target (screen projection) |
-| `core:Fade` | Fade a 2D node's opacity in/out (optional auto-destroy) |
-| `core:RadialProgress` | Circular progress mask on a Sprite2D |
-| `core:AnimationPlayer` | Play keyframe clips on this node + descendants (§4) |
-| `core:PointAttachment` | Keep this node on a named frame point of a parent `AnimatedSprite2D` (hand socket, muzzle) every tick, optionally copying the point's angle |
-| `core:PlaySound` | Play a sound when a node signal fires |
-| `core:SfxOnSignal` | Play a **procedural** (asset-free) sound preset when a node signal fires — see §4 "Procedural SFX" |
-| `core:BurstOnSignal` | Spawn a one-shot 2D particle burst at this node when a signal fires (juice) |
-| `core:FreeOnSignal` | `queueFree` this node when a signal fires on it (e.g. `animation-finished`), after an optional delay — one-shot VFX lifecycle |
-| `core:Shake` | Additive positional shake (juice) |
-| `core:PunchScale` | Squash-and-stretch scale punch (juice) |
-| `core:PopIn` | Spawn pop-in scale with overshoot (juice) |
-| `core:CameraBrain` | Blend the render camera between virtual cameras (§4) |
-| `core:Hitbox2D` | Queryable 2D collision shape (rect/circle, group tag) — see §4 "2D collision" |
-| `core:NetworkedNode` | Bind this node to a replicated entity — spawn one for the local player, adopt a peer's — see §4 "Multiplayer replication" |
-| `core:ReplicatedTransform` | Replicate position/rotation: owner publishes quantized, peers interpolate on a timed buffer |
+| Component id               | Does                                                                                                                                        |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core:Rotate`              | Continuous rotation of a 3D node                                                                                                            |
+| `core:SimpleMove`          | Simple test movement                                                                                                                        |
+| `core:Sine`                | Oscillate a node along an axis                                                                                                              |
+| `core:Follow`              | Smoothly follow a target node's position/rotation                                                                                           |
+| `core:PinToNode`           | Pin a 2D UI node to a 3D target (screen projection)                                                                                         |
+| `core:Fade`                | Fade a 2D node's opacity in/out (optional auto-destroy)                                                                                     |
+| `core:RadialProgress`      | Circular progress mask on a Sprite2D                                                                                                        |
+| `core:AnimationPlayer`     | Play keyframe clips on this node + descendants (§4)                                                                                         |
+| `core:PointAttachment`     | Keep this node on a named frame point of a parent `AnimatedSprite2D` (hand socket, muzzle) every tick, optionally copying the point's angle |
+| `core:PlaySound`           | Play a sound when a node signal fires                                                                                                       |
+| `core:SfxOnSignal`         | Play a **procedural** (asset-free) sound preset when a node signal fires — see §4 "Procedural SFX"                                          |
+| `core:BurstOnSignal`       | Spawn a one-shot 2D particle burst at this node when a signal fires (juice)                                                                 |
+| `core:FreeOnSignal`        | `queueFree` this node when a signal fires on it (e.g. `animation-finished`), after an optional delay — one-shot VFX lifecycle               |
+| `core:Shake`               | Additive positional shake (juice)                                                                                                           |
+| `core:PunchScale`          | Squash-and-stretch scale punch (juice)                                                                                                      |
+| `core:PopIn`               | Spawn pop-in scale with overshoot (juice)                                                                                                   |
+| `core:CameraBrain`         | Blend the render camera between virtual cameras (§4)                                                                                        |
+| `core:Hitbox2D`            | Queryable 2D collision shape (rect/circle/polygon, group tag) — see §4 "2D collision"                                                       |
+| `core:PhysicsBody2D`       | Rigid body simulated by `scene.physics2d` (static/kinematic/dynamic) — see §4 "2D physics"                                                  |
+| `core:Collider2D`          | Physics shape (rect/circle/polygon, rotation-aware, may be concave); a sensor with no body is an Area2D                                     |
+| `core:PhysicsWorld2D`      | Sets the 2D world gravity; attach to the scene root                                                                                         |
+| `core:NetworkedNode`       | Bind this node to a replicated entity — spawn one for the local player, adopt a peer's — see §4 "Multiplayer replication"                   |
+| `core:ReplicatedTransform` | Replicate position/rotation: owner publishes quantized, peers interpolate on a timed buffer                                                 |
 
 Most juice behaviors have a `triggerEvent` (a signal name) and/or `playOnStart`,
 so a keyframe **event track** or a script `emit()` can fire them.
@@ -178,6 +198,7 @@ keyframe-animatable. See
 Each entry: **what it is → how to use it → where it lives**.
 
 ### Keyframe animation
+
 Timeline-authored clips (position/rotation/scale/color tracks + audio + event
 tracks) on `core:AnimationPlayer`. **Use:** attach `core:AnimationPlayer`, author
 in the **Animation** timeline panel (keyframes — not the Sprite Editor, which owns
@@ -187,6 +208,7 @@ signals (the "cutscene glue"); `finish()` fast-forwards. Signals:
 See node-types-reference "AnimationPlayer" + [../samples/HelloWorld/demo-03-animation-timeline.pix3scene](../samples/HelloWorld/demo-03-animation-timeline.pix3scene).
 
 ### 3D camera system (Cinemachine-lite)
+
 One `Camera3D` renders; attach `core:CameraBrain` to it. Add `VirtualCamera3D`
 rigs (follow/look-at/damping/priority). The brain blends the render camera to the
 **highest-priority visible** vcam. **Use:** raise a vcam's `priority` (animatable)
@@ -194,6 +216,7 @@ to "cut" to it; scripts can force a one-shot blend with
 `brain.overrideNextBlend(sec, easing?)`. Demo: [../samples/HelloWorld/demo-02-cinematic-camera.pix3scene](../samples/HelloWorld/demo-02-cinematic-camera.pix3scene).
 
 ### Cutscene Director (`scene.cutscene`)
+
 Play an AnimationPlayer clip as a cinematic: letterbox, input-lock, skip gesture,
 CameraBrain blend in/out. **Use:**
 `const {done} = this.scene.cutscene.playCinematic(nodeId, { skippableAfter, blendDuration }); await done;`
@@ -201,27 +224,32 @@ CameraBrain blend in/out. **Use:**
 clip tracks. Spec §6.13; demo: [../samples/HelloWorld/demo-07-cutscene.pix3scene](../samples/HelloWorld/demo-07-cutscene.pix3scene) + [../samples/HelloWorld/scripts/CutsceneTrigger.ts](../samples/HelloWorld/scripts/CutsceneTrigger.ts).
 
 ### 2D camera & layers
+
 `Camera2D` drives the 2D pass (pan/zoom/limits, built-in additive `shake`).
 `CanvasLayer2D` is a fixed HUD unaffected by the camera. Draw order follows the
 scene tree (Godot-like). **Use:** add a `Camera2D`; put HUD under a `CanvasLayer2D`.
 
 ### Juice & time-scale
+
 Fire-and-forget game feel from scripts (or the matching `core:*` presets):
-- `scene.time.hitstop(ms)`, `scene.time.slowMotion(scale, {durationMs, blendMs})`, `setScale` / `reset` / `scale` / `isFrozen`. Scales gameplay `dt`; render + real-time chrome are unscaled. **Hitstop is edge-triggered:** call it when a contact *begins*, never every frame while an overlap lasts — a freeze sets gameplay `dt` to 0, so the contact that drives the call cannot separate on its own (the engine caps one freeze at the longest single request and warns once, so this degrades to a slow game instead of a frozen one).
+
+- `scene.time.hitstop(ms)`, `scene.time.slowMotion(scale, {durationMs, blendMs})`, `setScale` / `reset` / `scale` / `isFrozen`. Scales gameplay `dt`; render + real-time chrome are unscaled. **Hitstop is edge-triggered:** call it when a contact _begins_, never every frame while an overlap lasts — a freeze sets gameplay `dt` to 0, so the contact that drives the call cannot separate on its own (the engine caps one freeze at the longest single request and warns once, so this degrades to a slow game instead of a frozen one).
 - `scene.juice.shake(target, opts)`, `punchScale(target, opts)`, `popIn(target, opts)`, `flash({color,intensity,durationSec})`. `target` is a node, a node query, or `'camera'` / `'camera2d'`.
 - `scene.juice.burst(target, opts)` — one-shot 2D particle burst. `target` is a node, a node query, or a `{x,y}` 2D world point. Options (all defaulted, all clamped): `count` (14, max 512), `speed` (260 px/s), `spread` (radians, default `2π`), `direction` (radians, default up), `lifeSec` (0.5), `color` / `colors` (palette), `sizePx` (10), `gravityY` (-600), `fadeOut` (true), `additive` (true — the neon look), `zIndex`. Preset form: `core:BurstOnSignal`.
 - `scene.juice.floatText(text, opts)` — floating score/text popup (pops in, rises, fades, frees itself; never pickable). Options: `at` (node / query / `{x,y}`), `color`, `fontSizePx` (28), `fontFamily`, `driftPx` (60 up), `durationSec` (0.8), `glow` (`true` = glow in the text colour, or a colour string), `glowStrength` (1.5), `zIndex`.
-Both spawn a runtime-only 2D node into the anchor's 2D root — no authoring, no
-YAML, nothing to clean up — and tick through `node.tick`, so a hitstop freezes
-them like every other juice effect. Call them **together with the mechanic** they
-punctuate; they are one-liners, not a later polish pass.
-Spec §6.12; demo: [../samples/HelloWorld/demo-05-juice.pix3scene](../samples/HelloWorld/demo-05-juice.pix3scene).
+  Both spawn a runtime-only 2D node into the anchor's 2D root — no authoring, no
+  YAML, nothing to clean up — and tick through `node.tick`, so a hitstop freezes
+  them like every other juice effect. Call them **together with the mechanic** they
+  punctuate; they are one-liners, not a later polish pass.
+  Spec §6.12; demo: [../samples/HelloWorld/demo-05-juice.pix3scene](../samples/HelloWorld/demo-05-juice.pix3scene).
 
 ### Audio (buses, snapshots, one-shots)
+
 3-bus mixer (`master`/`music`/`sfx`) with named snapshots + auto-muffle under
 slow-mo. **Use from scripts:** `scene.audio.play('res://sfx/hit.ogg', { bus:'sfx', pitchVariation:0.1, volumeVariation:0.1 })`, `setBusVolume`, `applySnapshot`/`resetSnapshot`, `registerSnapshot`. **In the scene:** `AudioPlayer` node or `core:PlaySound` behavior (both take `bus`/`pitchVariation`/`volumeVariation`). node-types-reference "Buses, snapshots & scene.audio".
 
 ### Procedural SFX (no assets)
+
 `scene.audio.sfx(preset, { volume?, pitch? })` synthesizes a one-shot on the `sfx`
 bus — no audio file to find, import, or ship. Presets: `tap`, `score`, `bounce`,
 `explosion`, `powerup`, `win`, `lose`, `laser`, `tick`. `pitch` is a frequency
@@ -235,6 +263,7 @@ doesn't (prototypes, jam builds, generated recipes).
 Source: [packages/pix3-runtime/src/core/SfxSynth.ts](../packages/pix3-runtime/src/core/SfxSynth.ts).
 
 ### Shader effects (Construct 3-style, per-node)
+
 Registry-backed material effects with an `enabled` toggle (zero GPU cost while
 disabled — attached-but-disabled keeps its params) and typed params
 (number/color/vector2/boolean) exposed as `fx.<key>.<param>` — inspectable,
@@ -250,11 +279,13 @@ serialize with the node and render in the editor viewport too. Custom effects:
 `registerShaderEffect(info)` with GLSL chunks + `targets: ['basic'|'standard']`.
 
 ### Post-processing
+
 Add a `PostProcess` node to enable an EffectComposer pass (bloom / vignette /
 chromatic aberration / AO modes). **Use:** drop one `PostProcess` node; configure
 its properties. Pure-2D scenes can opt 2D in via `affect2D`.
 
 ### 2D UI kit generation (UI Kit Forge)
+
 The single surface for **game-UI art**: one theme in, a coherent set of sprites
 out — as files for a human, or baked straight into the open project and applied
 to nodes without leaving the editor. Two hosts (a standalone page and an editor
@@ -282,33 +313,35 @@ no project open, or `<editor>/#uikit`, or the page directly at
 `/tools/uikit-forge.html`; a cold load of that hash lands straight in the tool and
 it takes over the window rather than docking. Exports: per-component SVG/PNG, a
 bulk SVG dump into a picked folder (`showDirectoryPicker`, sequential downloads as
-the fallback), an HTML contact sheet, a glyph-only sheet, and a packed **atlas PNG
-+ TexturePacker-style JSON hash**. The manifest keeps TexturePacker's own fields,
-so any loader reads it unchanged, and adds per frame what a *slicer* needs — the
-generator knows its own corner geometry, so nothing downstream has to guess:
-`border`/`cap` (the safe nine-slice inset, exactly what
-`TiledSprite2D.sliceBorderLeft/Right/Top/Bottom` takes), `body`/`shadow`/`midY`
-(where the opaque body sits inside the frame, so a caption centres on the body
-rather than on the rect), `anchors` (where each stripped caption belonged) and
-`warnings`. The theme's transparent `pad` is trimmed out of every frame by
-default. **"Kit + style contract"** writes four files in one go — the atlas, its
-manifest, `tokens.json` and `STYLE.md` (colours by role, the shape numbers, the
-per-sprite slicing facts): the pictures are enough for a human, but anyone
-*developing* against the kit — an agent especially — needs the contract. The
-theme round-trips as JSON through the clipboard, and presets live in
-`localStorage`. `window.__UIKIT_FORGE_DEBUG__` (`buildManifest()`,
-`listComponents()`, `faces()`, `patchTheme()`, `pickPreset()`) makes an export
-inspectable in place — a downloaded file is unreadable from the session that
-asked for it.
+the fallback), an HTML contact sheet, a glyph-only sheet, and a packed \*\*atlas PNG
+
+- TexturePacker-style JSON hash**. The manifest keeps TexturePacker's own fields,
+  so any loader reads it unchanged, and adds per frame what a _slicer_ needs — the
+  generator knows its own corner geometry, so nothing downstream has to guess:
+  `border`/`cap` (the safe nine-slice inset, exactly what
+  `TiledSprite2D.sliceBorderLeft/Right/Top/Bottom` takes), `body`/`shadow`/`midY`
+  (where the opaque body sits inside the frame, so a caption centres on the body
+  rather than on the rect), `anchors` (where each stripped caption belonged) and
+  `warnings`. The theme's transparent `pad` is trimmed out of every frame by
+  default. **"Kit + style contract"\** writes four files in one go — the atlas, its
+  manifest, `tokens.json` and `STYLE.md` (colours by role, the shape numbers, the
+  per-sprite slicing facts): the pictures are enough for a human, but anyone
+  *developing\* against the kit — an agent especially — needs the contract. The
+  theme round-trips as JSON through the clipboard, and presets live in
+  `localStorage`. `window.__UIKIT_FORGE_DEBUG__` (`buildManifest()`,
+  `listComponents()`, `faces()`, `patchTheme()`, `pickPreset()`) makes an export
+  inspectable in place — a downloaded file is unreadable from the session that
+  asked for it.
 
 **Use — human, project open (the "UI Kit" editor tab).** Tools → UI Kit Forge
 (`editor.open-uikit-forge`) opens `pix3-uikit-forge-panel`: theme controls +
 preset / randomize / reset on the left, a live per-tab gallery in the middle, and
 four project actions along the bottom.
+
 - **Save kit to project** (`UiKitProjectWriter.writeKit`) rasterizes the engine
   lane and writes `sprites/ui/<kitId>/*.png`, the manifest `design/ui-kit.json`
   and the theme `design/ui-theme.json`. `kitId` is the first 8 hex of an FNV-1a
-  over the *normalized* theme's canonical JSON, so it is stable across machines
+  over the _normalized_ theme's canonical JSON, so it is stable across machines
   and sessions: re-baking an unchanged theme overwrites the same folder instead of
   littering the project, while a re-theme writes a **new** folder and leaves the
   old art in place — which is what keeps Ctrl+Z on the property edit meaningful,
@@ -317,7 +350,7 @@ four project actions along the bottom.
   the four button states at 250×88 and `panel-body` / `header-plate` / `bar-fill`;
   baked once, role-free: `slot`, `checkbox`, `checkbox-mark`, `slider-track`,
   `slider-thumb`, `bar-trough`. Buttons are baked at a real size rather than a
-  small stamp because the gloss band's height is a *percent* of the face while the
+  small stamp because the gloss band's height is a _percent_ of the face while the
   bevel lip is absolute — stretching a tiny source would smear both. The recorded
   insets are **measured back off the rasterized pixels** (`frameMeta`), falling
   back to the generator's own design-unit border scaled up where no canvas exists.
@@ -416,15 +449,16 @@ skinnable node it makes (unless `texturePath` was given), so the agent never has
 remember `skin_ui apply`.
 
 **The engine-vs-tool boundary** (get this wrong and the art fights the runtime):
+
 - **Captions belong to the engine.** Every PNG export is rendered without its
   label text, single component and atlas alike: the baked caption is preview only,
   and a `Button2D` / `UIControl2D` label over the skin is what makes one sprite
-  reusable across states *and* localizations. SVG exports and the HTML sheet keep
+  reusable across states _and_ localizations. SVG exports and the HTML sheet keep
   the text; the engine lane strips it by construction. A baked **glyph** is the
   exception — glyphs are language-independent, which is what the `icon-button`
   skin component is for (a dialog's close button, for instance).
 - **`pad` is forced to 0 for engine skins.** The kit's default 24 px transparent
-  margin lands *inside* the frame and a `Button2D` computes its hit box from
+  margin lands _inside_ the frame and a `Button2D` computes its hit box from
   `width`/`height`, so ~20 % of the button would be dead border.
 - **`feDropShadow` is not used in the engine lane.** Its blur differs by GPU and
   browser, so two collaborators regenerating one theme would get different bytes;
@@ -455,11 +489,12 @@ by the `#uikit` route as a same-origin iframe (`src/ui/tools/`); same-origin is
 load-bearing, since the exports use `showDirectoryPicker()` and anchor downloads.
 The **editor host** is `src/ui/uikit-forge/` (the panel) over
 `src/services/uikit-editor/` (`UiKitThemeService` — the live theme, deliberately
-*not* in `appState` because it is a project document; `UiKitProjectWriter`;
+_not_ in `appState` because it is a project document; `UiKitProjectWriter`;
 `UiKitPrefabBuilder`) plus `src/features/uikit/` (the apply command + operation).
 Route constants: `src/core/tool-routes.ts`. File formats: spec → "UI kit assets".
 
 ### 3D model generation (Model Lab — editor authoring)
+
 Editor-side tool that reconstructs a hard-surface 3D model **procedurally by
 code** from a reference image (NOT neural image-to-mesh): vision assess → sculpt
 spec → locked passes (blockout → structure → form → material → lighting →
@@ -468,7 +503,7 @@ reference into a comparison sheet, vision-scored, and self-corrected. The output
 is a self-contained `.glb` (+ optional `.sculpt.json` / `.factory.ts` siblings
 for re-editing) that becomes a scene node via `MeshInstance`. The generated code
 contract is a pure `createModel(THREE): THREE.Group` factory — Mesh*Standard*/
-*Physical* materials only (no `ShaderMaterial`, it wouldn't survive GLB export).
+_Physical_ materials only (no `ShaderMaterial`, it wouldn't survive GLB export).
 **Use (editor):** Tools → Model Lab; drop a reference image, Generate, Save GLB,
 Add to scene; the Settings tab picks the codegen + vision models and a
 pause-per-pass manual review (Accept / Retry / Stop). **Use (agent):** the
@@ -495,6 +530,7 @@ model lane. Output saves via `writeTextFile` and opens as a normal scene tab
 Scene lane lives in `src/services/model-gen/scene/`.
 
 ### Localization (i18n)
+
 Per-locale JSON tables in the project's `locales/` directory
 (`locales/en.json`, `locales/ru.json`): a `strings` section (translation key →
 text, `{param}` interpolation) and a `sprites` section (sprite key → `res://`
@@ -530,36 +566,102 @@ the tables + localized sprites automatically. Lives in
 `packages/pix3-runtime/src/core/localization/`.
 
 ### Particles
+
 `Particles3D` — emission, trails, sub-emitters, world/local simulation space, and
 `emitBurstAt(...)` for scripted bursts.
 
 ### ECS (fixed-step logic)
+
 `ECSService` runs a deterministic fixed-step update alongside per-frame node
 ticks. Games register systems/components for physics, AI, spawning, etc. **Use
 (consumer):** `sceneService.getECSService()` → register systems; the runner calls
 `fixedUpdate`. For bulk instanced rendering see `InstancedMesh3D` in [node-types-reference.md](node-types-reference.md).
 
-### Physics
-No built-in rigidbody node yet. Rapier is available (lazy-loaded) and the
-fixed-step ECS loop is the integration point; **games implement their own physics
-systems** on top (DeepCore does this). If asked for physics, prefer a game-level
-ECS system unless building a reusable engine node (confirm first).
+### Physics — which tier to use
+
+Three tiers, in increasing order of what they do for you. Pick the cheapest one
+that answers the question you actually have:
+
+| You need                                                                                                  | Use                                                                                                                         |
+| --------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| "Is anything here?" — overlaps, raycasts, line of sight, no response                                      | `scene.collision2d` + `core:Hitbox2D` (§ "2D collision")                                                                    |
+| Movement and collision **response** in 2D — gravity, bouncing, pushing, rotation, sensors with enter/exit | `scene.physics2d` + `core:PhysicsBody2D` / `core:Collider2D` (§ "2D physics")                                               |
+| 3D rigid bodies                                                                                           | Game-level Rapier (lazy-loaded), driven from the fixed-step ECS loop. DeepCore does this; there is no built-in 3D body node |
+
+**3D stays game-level on purpose.** Rapier's wasm is ~2 MB — larger than an
+entire playable export — so it enters a build only when a project script imports
+it. If asked for 3D physics, write a game-level ECS system unless building a
+reusable engine node (confirm first).
+
+### 2D physics (`scene.physics2d`, `core:PhysicsBody2D` + `core:Collider2D`)
+
+A built-in rigid-body solver: circles and polygons (concave allowed), static /
+kinematic / dynamic bodies, gravity, friction, restitution, damping, sensors,
+sleeping, and swept CCD for fast movers. No joints, no capsules. Units are design
+pixels with **y up**, so gravity is a negative y.
+
+**Authoring** (Unity-style, not Godot's shape-as-child-node): put
+`core:PhysicsBody2D` on the sprite and `core:Collider2D` on the same node — or on
+child nodes, which is how you build a compound body. A `core:Collider2D` with
+**no** body on it or any ancestor is static world geometry: one component, no
+script, and that is the whole "wall" case. Gravity is either
+`scene.physics2d.setGravity(x, y)` or a `core:PhysicsWorld2D` on the scene root.
+
+**Signals** (emitted on the component's node, after the step — never mid-solve):
+
+- `body-entered (otherNode)` / `body-exited (otherNode)` — sensors, always.
+- `contact-started (otherNode)` / `contact-ended (otherNode)` — solid bodies,
+  only when the body sets `emitContacts` (off by default; most games never read
+  them).
+
+**From scripts:**
+
+```ts
+const phys = this.scene.physics2d;
+phys.setGravity(0, -1960);
+const body = phys.getBody(this.node); // null when the node has no body
+body?.applyImpulse(0, 900); // jump
+body?.setVelocity(240, body.velocityY); // run
+body?.teleport(x, y); // reposition without a contact impulse
+phys.raycast(x1, y1, x2, y2, { group: 'walls' });
+phys.overlapCircle(x, y, r, { group: 'enemy' });
+```
+
+Stepped in `SceneRunner`'s existing fixed-step slot, so hitstop and slow motion
+dilate the simulation for free and the `fixed`/`manual` time modes make a run
+reproducible. Play mode draws collider wireframes when the editor's collider
+toggle is on (sensors green, sleeping bodies dim); the editor viewport draws the
+authored outlines for the selected node, or for everything under **View → Toggle
+Collision Shapes**.
+
+Lives in [../packages/pix3-runtime/src/core/Physics2DService.ts](../packages/pix3-runtime/src/core/Physics2DService.ts) +
+[../packages/pix3-runtime/src/core/physics-2d-narrowphase.ts](../packages/pix3-runtime/src/core/physics-2d-narrowphase.ts).
 
 ### 2D collision (`scene.collision2d`, `core:Hitbox2D`)
+
 Lightweight query-based 2D hit-testing (Godot Area2D groups × Unity `Physics2D.Overlap*`
 — no solver, no rigidbodies). Attach `core:Hitbox2D` to any 2D node: shape
-(`rect`/`circle`), size, offset, `group` tag, `debugDraw` outline (Godot's
-"Visible Collision Shapes"). Shapes are **axis-aligned** (rotation ignored, scale
-honored). **Use from scripts:**
+(`rect`/`circle`/`polygon`), size, offset, `group` tag, `debugDraw` outline
+(Godot's "Visible Collision Shapes"). Rect and circle are **axis-aligned**
+(rotation ignored, scale honored — the original contract, which existing
+templates depend on); `polygon` is rotation-aware and may be concave. A polygon's
+vertices come either from `points` (drag them in the viewport: **Edit points** on
+the component, then drag a vertex, click an edge midpoint to insert, Alt-click to
+remove) or, with `polygonSource: 'frame'`, from the collision polygon of the
+`AnimatedSprite2D` frame showing right now — the outline the Sprite Editor traces
+from the frame's alpha. **Use from scripts:**
 `scene.collision2d.overlapPoint(x, y, group?)` / `overlapCircle(x, y, r, group?)` /
 `overlapRect(cx, cy, w, h, group?)` → `Hit2D[]`, and
 `raycast(x1, y1, x2, y2, group?)` → closest hit with entry point + distance (the
 sniper-laser / line-of-sight query). Coordinates are 2D world/design px (origin
 center, Y up). Broadphase is a linear scan — fine for hundreds of hitboxes.
 Lives in [../packages/pix3-runtime/src/core/Collision2DService.ts](../packages/pix3-runtime/src/core/Collision2DService.ts) +
-[../packages/pix3-runtime/src/behaviors/Hitbox2DBehavior.ts](../packages/pix3-runtime/src/behaviors/Hitbox2DBehavior.ts).
+[../packages/pix3-runtime/src/behaviors/Hitbox2DBehavior.ts](../packages/pix3-runtime/src/behaviors/Hitbox2DBehavior.ts);
+the shared shape math (winding, convex decomposition, SAT) is in
+[../packages/pix3-runtime/src/core/collision-shapes-2d.ts](../packages/pix3-runtime/src/core/collision-shapes-2d.ts).
 
 ### Input (`this.input`, `InputService`)
+
 Polled + per-frame input, unified across pointer/keyboard: `getAxis(name)`,
 `getButton(name)`, `pointerEvents` / `keyEvents` (this frame), `pointerPosition`,
 `wheelDelta`, `isPointerDown`, `isHoveringUI`. Depth-counted `lock()`/`unlock()`
@@ -574,7 +676,7 @@ on hover). `scene.getPointer2DWorldPosition()` converts the current pointer to
 map: `getActivePointers()` (press order, index 0 is the primary one),
 `getPointer(id)`, `pointerDownCount`, `isPointerOverUI(id)`, and a `pointerId` on
 every entry of `pointerEvents` (`'down' | 'move' | 'up' | 'cancel'` — a `'cancel'`
-is a press *taken away*, e.g. a finger dragged off the screen edge, and must never
+is a press _taken away_, e.g. a finger dragged off the screen edge, and must never
 count as a completed tap). Anything that follows one contact — a stick, a drag, a
 tap resolver — names its finger and reads only that one; UI controls do this for
 you (each control owns at most one pointer). The shared values are summaries:
@@ -590,7 +692,7 @@ one frame is already gone, so fall back to the no-argument call).
 
 **A hidden control takes no input.** `UIControl2D` gates both channels — a real
 finger and a semantic `invokeInteraction` — on `visible` being true on the control
-*and every ancestor* (`NodeBase.isVisibleInTree()`, the Godot
+_and every ancestor_ (`NodeBase.isVisibleInTree()`, the Godot
 `is_visible_in_tree` line: boolean only, a fully transparent control still
 responds). So hiding a panel is enough to take its buttons out of play; you do not
 also have to disable them, and a hidden control no longer registers hover, so
@@ -599,12 +701,14 @@ also have to disable them, and a hidden control no longer registers hover, so
 hidden node (a spawner, a timer, a state machine) keep working.
 
 ### Signals (node events)
+
 `node.connect(name, target, method)` / `disconnect` / `emit(name, ...args)`. The
 decoupled event bus between nodes, scripts, animation event tracks, and juice
 `triggerEvent`s. Always `disconnect` in `onDetach` (the `Script` base auto-drops
 connections where the script is the target).
 
 ### Game commands (`scene.commands`) — named intents
+
 `register(name, handler, meta?)` / `dispatch(name, args?)` / `list()` / `log` /
 `undo()`. The registry of a game's **discrete intents** — "start the game", "open
 the settings", "make a move", "buy an item" — so tooling and tests can drive the
@@ -630,10 +734,12 @@ analog magnitude and the per-frame cadence. Every project template registers its
 flow intents this way (`start-game`, `open-settings`, `restart`, `cta-click`, …).
 
 ### Screen transitions
+
 `scene.fadeToBlack(sec)` / `fadeFromBlack(sec)` / `switchCameraWithFade(id, out, in)`
 / `flash(opts)`. Real-time overlays (survive hitstop).
 
 ### Runtime spawning (`scene.instantiate`, `node.queueFree`)
+
 Godot's `instantiate()` + `add_child()` / `queue_free()` pair for gameplay
 spawning (enemies, projectile prefabs, VFX):
 `const node = await scene.instantiate('res://…/prefab.pix3scene', { parent: 'enemies' })`
@@ -646,6 +752,7 @@ frame, components get a proper `onDetach`); immediate `node.dispose()` is for
 teardown outside the tick.
 
 ### Multiplayer replication (`scene.network`, `scene.netNodes`)
+
 The session is `this.scene.network` — offline-safe, host-owned, and it survives
 `changeScene` (it is installed at the three `SceneRunner` bootstraps, not by the
 scene). `network.connect({url, token, roomId})` joins a pix3-rooms room; then
@@ -653,11 +760,11 @@ scene). `network.connect({url, token, roomId})` joins a pix3-rooms room; then
 `entities` are live.
 
 **Everything networked is spawned** — an authored node has no network identity of
-its own. Attach **`core:NetworkedNode`** to a *prefab* that is also listed in the
+its own. Attach **`core:NetworkedNode`** to a _prefab_ that is also listed in the
 build's `netKindTable` (the exporter emits it from the project's prefabs, sorted;
 `registerNetworkPrefab(path)` is the fallback for a session with no built
 manifest). On start it sends a spawn request and binds the `netId` the fabric
-mints; when a *peer's* entity arrives instead, `scene.netNodes`
+mints; when a _peer's_ entity arrives instead, `scene.netNodes`
 (`NetworkNodeBinder`) instantiates that same prefab with instance id
 `net:<netId>` — which is what makes every client derive identical child ids — and
 the component adopts the binding rather than spawning a duplicate. `isMine`,
@@ -671,7 +778,7 @@ its peers do; remote copies render on a timed snapshot buffer at roughly two roo
 ticks of delay plus measured jitter, and the wire's `Teleport` bit snaps instead of
 sliding. Two interactions worth knowing: it **turns anchored 2D layout off** on its
 node (the per-frame anchor reflow and a replicated position cannot both own the
-transform), and a camera following a *remote* node should use little or no
+transform), and a camera following a _remote_ node should use little or no
 `followDamping` — the interpolation buffer is already the smoothing, and damping on
 top of it is pure added latency.
 
@@ -700,8 +807,9 @@ Play is unaffected.
 tag arena, no binary assets, runs offline as a single-player sandbox).
 
 ### Scene transitions (change the running scene)
+
 `await scene.changeScene('res://scenes/level2.pix3scene', { transition: 'fade', durationSec: 0.3 })`
-— Godot's `change_scene_to_file`. Loads the *saved* target file, tears down the
+— Godot's `change_scene_to_file`. Loads the _saved_ target file, tears down the
 current scene and starts the new one at full black, then fades in. Works
 identically in play-mode and exports (all scenes ship in the build). The old
 scene keeps running until the new one parses, so a missing/invalid target fades
@@ -710,6 +818,7 @@ ignored. Use it to wire menu → game → results flows across separate scene fi
 (each scene runs standalone in the editor). `transition: 'none'` swaps instantly.
 
 ### Playable SDK (store CTA / game end / viewport)
+
 `import { playable } from '@pix3/runtime'` — `playable.openStore(url?)` opens the
 app-store page (delivery order: installed adapter → `dapi.openStoreUrl()`
 (ironSource/Unity, network-configured URL) → `mraid.open` → `window.open`;
@@ -724,6 +833,7 @@ orientation-aware layouts; the `playable-2d/3d` project templates ship a
 `user:CtaButton` script wired to it.
 
 ### Asset Library (reuse before you build)
+
 **Before generating graphics or writing UI/prefabs from scratch, search the Asset
 Library** — it holds reusable prefabs, images, fonts, audio and shaders across three
 scopes (built-in starter pack, your personal library, and the team library). In the
@@ -752,19 +862,19 @@ Inside any `Script` subclass:
 frame, `dt` is scaled game time) → `onDetach()`. Define `static getPropertySchema()`
 to expose inspector-editable params (see §6). `this.config` holds params.
 
-> **Ordering gotcha:** a node's components tick *before* its children. Don't arm
+> **Ordering gotcha:** a node's components tick _before_ its children. Don't arm
 > cross-node state in `onStart` that a child component's `onStart` will reset the
 > same frame (e.g. a child camera's `CameraBrain`). Trigger such calls from a
 > gameplay event or after a frame.
 
-> **Real vs scaled time:** `onUpdate(dt)` and keyframe clips run on *scaled*
+> **Real vs scaled time:** `onUpdate(dt)` and keyframe clips run on _scaled_
 > `dt` (frozen by hitstop). Anything that must ignore hitstop/slow-mo (screen
 > chrome, timers) uses `performance.now()` — mirror how `flash()`/letterbox work.
 
 **Editor preview (draw the node your way without play mode):** implement
 `tickEditorPreview(dt, ctx)` — the editor calls it every non-play frame for each
 enabled component. Use `ctx.setAppearanceOverride({ textureRegion?, tint?,
-visible? })` to change how *this component's node* draws in the editor viewport;
+visible? })` to change how _this component's node_ draws in the editor viewport;
 it is immediate-mode (stop pushing → the proxy reverts) and never mutates or
 serializes the node. `ctx.assetLoader` / `ctx.requestRender()` are also provided;
 call `requestRender()` for continuous animation. For UV cropping specifically,
@@ -785,7 +895,7 @@ play-mode hook, so the editor keeps running.
 - **Property schema:** nodes and `Script`s expose `static getPropertySchema()` returning typed `PropertyDefinition`s (`getValue`/`setValue`); the Inspector renders editors from it and all edits go through `UpdateObjectPropertyOperation`. See [property-schema-reference.md](property-schema-reference.md).
 - **A new node's constructor must end with `installReactiveSchemaProperties(this, TheNode.getPropertySchema)`.** Without it, a schema `setValue` that redraws (clamp, geometry rebuild, canvas repaint, material colour) runs for the Inspector but not for a script: `node.prop = x` changes the field, redraws nothing, and the getter still returns `x` — so even state-based verification reports a success that never reached the screen. `reactive-schema-coverage.spec.ts` fails if a `SceneLoader`-constructible node skips it.
 - **Serialization:** scenes are `.pix3scene` YAML (`root:` tree of nodes with `properties`, `components`, `children`). Copy a known-good demo in `samples/HelloWorld/` as a template.
-- **2D texture filtering (project setting):** Project Settings → *2D Texture Filtering* is `linear` (default, smoothed) or `nearest` (crisp pixel-art). It lives on the `ProjectManifest` and is pushed to the runtime global via `setProjectTextureFiltering`; `configure2DTexture` (runtime) and the editor's sprite-texture setup both read it, so 2D sprite/UI textures pick up the mode in edit mode, play mode, and export. 3D textures are unaffected (they keep mipmapped linear sampling).
+- **2D texture filtering (project setting):** Project Settings → _2D Texture Filtering_ is `linear` (default, smoothed) or `nearest` (crisp pixel-art). It lives on the `ProjectManifest` and is pushed to the runtime global via `setProjectTextureFiltering`; `configure2DTexture` (runtime) and the editor's sprite-texture setup both read it, so 2D sprite/UI textures pick up the mode in edit mode, play mode, and export. 3D textures are unaffected (they keep mipmapped linear sampling).
 - **2D draw-call optimization (play mode):** a pre-launch **texture atlas** + a paint-order **quad batcher** cut a 2D frame from ~one draw call per node to a handful. The editor packer (`TextureAtlasService`) packs eligible sprite textures (Sprite2D / Button2D / AnimatedSprite2D / Bar2D — plus dynamic paths reached via script `res://` directory prefixes) into a few sheets, cached in IndexedDB, and installs a resolver on the play-mode `AssetLoader` so every texture load returns a lightweight **view** onto a shared sheet (`configure2DTexture` keeps sheets mipmap-free). The runtime `Batch2DSystem` then merges maximal contiguous same-source runs (in stamped `renderOrder`) into single draws, preserving paint order by construction (per-node opacity/tint ride vertex colors). Editor viewport rendering is unaffected (it draws its own proxy meshes). Toggles (`'auto'` default; `'off'` = byte-identical): project manifest `rendering2D.textureAtlas` / `.batching`, or `?pix3Atlas2D=off` / `?pix3Batch2D=off`, or `window.__PIX3_RENDER2D__`. `Label2D`/canvas text and `TiledSprite2D` are intentionally not atlased/batched. Exported games consume a shipped `assets/.atlas/atlas-manifest.json` via `installAtlasFromManifest` (emission from `ProjectBuildService` is a pending follow-up).
 - **Debug bridge (dev):** `window.__PIX3_DEBUG__` exposes scene/liveScene/play/setProperty/errors for driving the running editor (see the `debug-running-game` skill). Consumer games can register `registerGameDebug({name, snapshot, inspect, action})` from `@pix3/runtime` for a game-specific surface.
 
