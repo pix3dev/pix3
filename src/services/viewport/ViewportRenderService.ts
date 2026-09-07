@@ -16,6 +16,13 @@ import { Viewport3DContentSync } from '@/services/viewport/Viewport3DContentSync
 import { ViewportNavigation } from '@/services/viewport/ViewportNavigation';
 import { ViewportPicking } from '@/services/viewport/ViewportPicking';
 import { ViewportAdornments } from '@/services/viewport/ViewportAdornments';
+import {
+  ViewportColliderGizmos,
+  type PolygonEditTarget,
+  type PolygonHandleHit,
+} from '@/services/viewport/ViewportColliderGizmos';
+import type { ColliderShape } from '@/features/scene/collider-shapes';
+import type { Point2D } from '@pix3/runtime';
 import { ViewportAxisGizmo } from '@/services/viewport/ViewportAxisGizmo';
 import { ViewportTransformSession } from '@/services/viewport/ViewportTransformSession';
 import {
@@ -329,6 +336,16 @@ export class ViewportRendererService {
     getActiveTargetNodeId: () => this.transformSession.activeTargetNodeId,
     getActiveTargetDragNodeId: () => this.transformSession.activeTargetDragNodeId,
     getTransformControlObject: () => this.transformControls?.object,
+  });
+  // Draws authored 2D collider outlines and the polygon vertex handles. Separate
+  // from `adornments` because those are the 3D-node gizmos; this one lives in the
+  // 2D band and is what makes a collider visible while authoring at all (the
+  // editor never renders a hitbox's own runtime debug mesh).
+  private readonly colliderGizmos = new ViewportColliderGizmos({
+    getScene: () => this.scene,
+    getActiveSceneGraph: () => this.sceneManager.getActiveSceneGraph(),
+    getOrthographicCamera: () => this.orthographicCamera,
+    getViewportSize: () => this.viewportSize,
   });
   // Owns the pure pointer hit-testing math: 2D paint-order raycasting, 3D
   // gizmo/target-sphere/icon raycasting, marquee-rectangle hit testing, and
@@ -2070,6 +2087,9 @@ export class ViewportRendererService {
       if (sceneGraph) {
         this.assign2DVisualRenderOrder(sceneGraph.rootNodes);
       }
+      // After the render-order pass so the gizmo group's own order is not rebased,
+      // and before the draw so a vertex dragged this frame lands on this frame.
+      this.colliderGizmos.update(appState.selection.nodeIds);
 
       const savedBackground = this.scene.background;
       this.scene.background = null;
@@ -4186,6 +4206,76 @@ export class ViewportRendererService {
     return this.transformSession.has2DTransform();
   }
 
+  // --- collision polygon authoring ---------------------------------------
+  //
+  // The viewport tool is driven from `editor-tab`'s pointer handlers, the same
+  // way the 2D transform handles are: the facade owns the camera and the gizmo
+  // group, the host owns the pointer.
+
+  /** Open a collision polygon for vertex editing, or close the open one. */
+  setPolygonEditTarget(target: PolygonEditTarget | null): void {
+    this.colliderGizmos.setEditTarget(target);
+    this.requestRender();
+  }
+
+  getPolygonEditTarget(): PolygonEditTarget | null {
+    return this.colliderGizmos.getEditTarget();
+  }
+
+  /** The vertex/edge handle under the pointer, in CSS pixels. */
+  getPolygonHandleAt(screenX: number, screenY: number): PolygonHandleHit | null {
+    return this.colliderGizmos.getHandleAt(screenX, screenY);
+  }
+
+  /** Update the hovered handle; returns true when a repaint is warranted. */
+  updatePolygonHandleHover(screenX: number, screenY: number): boolean {
+    const changed = this.colliderGizmos.setHoveredHandle(
+      this.colliderGizmos.getHandleAt(screenX, screenY)
+    );
+    if (changed) {
+      this.requestRender();
+    }
+    return changed;
+  }
+
+  clearPolygonHandleHover(): boolean {
+    const changed = this.colliderGizmos.setHoveredHandle(null);
+    if (changed) {
+      this.requestRender();
+    }
+    return changed;
+  }
+
+  /** The collider currently open for editing, resolved on the last painted frame. */
+  getEditedColliderShape(): ColliderShape | null {
+    return this.colliderGizmos.getEditedShape();
+  }
+
+  /**
+   * A viewport pointer position in the edited polygon's **node-local** space.
+   * Inverts the node's world transform, so dragging a vertex on a rotated or
+   * scaled node moves it where the pointer went rather than along the node's
+   * unrotated axes.
+   */
+  screenToPolygonLocal(screenX: number, screenY: number): Point2D | null {
+    const shape = this.colliderGizmos.getEditedShape();
+    const world = this.screenToWorld2D(screenX, screenY);
+    if (!shape || !world) {
+      return null;
+    }
+
+    const { x, y, rotation, scaleX, scaleY } = shape.transform;
+    const dx = world.x - x;
+    const dy = world.y - y;
+    const cos = Math.cos(-rotation);
+    const sin = Math.sin(-rotation);
+    const rx = dx * cos - dy * sin;
+    const ry = dx * sin + dy * cos;
+    const sx = scaleX || 1;
+    const sy = scaleY || 1;
+    return { x: rx / sx - shape.offset.x, y: ry / sy - shape.offset.y };
+  }
+
   /**
    * Update handle hover state for visual feedback.
    * Returns true if hover state changed (requires re-render).
@@ -4629,6 +4719,7 @@ export class ViewportRendererService {
     }
     this.proxyRegistry.uiControl2DVisuals.clear();
     this.adornments.clearNodeIcons();
+    this.colliderGizmos.dispose();
 
     this.clear2DSelectionOverlay();
     this.clear2DHoverPreview();

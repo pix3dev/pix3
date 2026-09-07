@@ -156,6 +156,8 @@ export class SceneRunner {
   private currentFrameProfilerActivities: FrameProfilerActivity[] = [];
   /** Lazily created collider wireframe overlay (only while physics debug is on). */
   private physicsDebugOverlay: PhysicsDebugOverlay | null = null;
+  /** Separate instance: the 2D solver's wireframe uses the orthographic camera. */
+  private physics2DDebugOverlay: PhysicsDebugOverlay | null = null;
   /** Lazily created direction-axis gizmo overlay (only while axes debug is on). */
   private directionAxesOverlay: DirectionAxesOverlay | null = null;
   /** Lazily created post-processing composer (only while a PostProcess node is
@@ -594,6 +596,10 @@ export class SceneRunner {
       this.physicsDebugOverlay.dispose();
       this.physicsDebugOverlay = null;
     }
+    if (this.physics2DDebugOverlay) {
+      this.physics2DDebugOverlay.dispose();
+      this.physics2DDebugOverlay = null;
+    }
     if (this.directionAxesOverlay) {
       this.directionAxesOverlay.dispose();
       this.directionAxesOverlay = null;
@@ -677,6 +683,7 @@ export class SceneRunner {
     // a graph that is already gone. `runGraph` stops before it starts, which is
     // what makes a scene change clear them too.
     this.sceneService.clearCommands();
+    this.sceneService.clearPhysics2D();
 
     this.activeCamera2D = null;
     this.overlay2DActive = false;
@@ -1065,6 +1072,9 @@ export class SceneRunner {
     this.ecsService.setFrameMetrics(this.elapsedTime, this.frameNumber);
     this.ecsService.setInterpolationAlpha(alpha);
     this.ecsService.update(dt, alpha);
+    // Physics steps at a fixed rate; the display may not. Blend the poses with
+    // the same alpha so a 120 Hz screen does not show every pose twice.
+    this.sceneService.interpolatePhysics2D(alpha);
 
     this.renderer.beginStatsFrame();
     this.updateGameLogicSafe(dt);
@@ -1454,6 +1464,32 @@ export class SceneRunner {
     this.renderer.render(this.scene, this.orthographicCamera);
 
     this.scene.background = savedBg;
+
+    this.renderPhysics2DDebug();
+  }
+
+  /**
+   * Godot's "Visible Collision Shapes" for the built-in 2D solver, drawn over the
+   * 2D band with the orthographic camera.
+   *
+   * Distinct from the 3D overlay above it, which draws whatever a *game*
+   * published through `registerPhysicsDebugSource` (typically a Rapier world) and
+   * needs a 3D camera. A 2D collider lives in design pixels and would land
+   * nowhere useful projected through one.
+   */
+  private renderPhysics2DDebug(): void {
+    if (!isPhysicsDebugEnabled()) {
+      return;
+    }
+    const buffers = this.sceneService.buildPhysics2DDebugBuffers();
+    if (!buffers) {
+      return;
+    }
+    if (!this.physics2DDebugOverlay) {
+      this.physics2DDebugOverlay = new PhysicsDebugOverlay();
+    }
+    this.renderer.setAutoClear(false);
+    this.physics2DDebugOverlay.renderBuffers(this.renderer, this.orthographicCamera, buffers);
   }
 
   /** Draw the fixed-HUD overlay band (LAYER_2D_OVERLAY, identity overlay camera)
@@ -1773,6 +1809,10 @@ export class SceneRunner {
       simulatedTime += fixedTimeStep;
       this.ecsService.setFrameMetrics(simulatedTime, this.frameNumber);
       this.ecsService.fixedUpdate(fixedTimeStep);
+      // No-op unless something touched `scene.physics2d`; a project without
+      // physics pays one method call and no import (SceneRunner never names the
+      // service, so it adds no value import for the export to pin).
+      this.sceneService.stepPhysics2D(fixedTimeStep);
       executedSteps += 1;
     }
 

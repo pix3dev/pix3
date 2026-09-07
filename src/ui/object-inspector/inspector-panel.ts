@@ -38,6 +38,11 @@ import type {
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { SpineSkeleton2D } from '@pix3/runtime';
 import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
+import { Polygon2DEditController } from '@/services/viewport/Polygon2DEditController';
+import { boxPolygon, serializePolygonConfig } from '@pix3/runtime';
+import { readAlphaMask } from '@/services/image-gen/image-ops';
+import { traceCollisionPolygon } from '@/ui/sprite-editor/contour-trace';
+import { mapImagePolygonToSpriteLocal } from '@/features/scene/collider-shapes';
 import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
 import { normalizeAnimationAssetPath } from '@/features/scene/animation-asset-utils';
@@ -114,6 +119,9 @@ export class InspectorPanel extends ComponentBase {
 
   @inject(LocalizationEditorService)
   readonly localizationEditorService!: LocalizationEditorService;
+
+  @inject(Polygon2DEditController)
+  private readonly polygonEditor!: Polygon2DEditController;
 
   @inject(LibrarySelectionService)
   private readonly librarySelectionService!: LibrarySelectionService;
@@ -1126,6 +1134,104 @@ export class InspectorPanel extends ComponentBase {
         },
       };
       this.componentPropertyPreviewStartValues.delete(key);
+    }
+  }
+
+  // --- collision polygon (`editor: 'collision-polygon'`) -------------------
+
+  /** True while this component's polygon is the one open in the viewport tool. */
+  isPolygonEditing(componentId: string): boolean {
+    const target = appState.ui.polygonEditing;
+    return (
+      target?.componentId === componentId && target?.nodeId === (this.primaryNode?.nodeId ?? '')
+    );
+  }
+
+  /** Node ids whose polygon trace is running, so the button can say so. */
+  @state()
+  tracingPolygonComponentIds: string[] = [];
+
+  onPolygonEditToggle(componentId: string, editing: boolean): void {
+    const nodeId = this.primaryNode?.nodeId;
+    if (!nodeId) {
+      return;
+    }
+    this.polygonEditor.setTarget(editing ? { nodeId, componentId } : null);
+    this.requestUpdate();
+  }
+
+  /** Replace the polygon with a box matching the node's own size. */
+  async onPolygonResetBox(componentId: string, prop: PropertyDefinition): Promise<void> {
+    const node = this.primaryNode;
+    if (!node) {
+      return;
+    }
+    const width = Number((node as unknown as { width?: number }).width) || 64;
+    const height = Number((node as unknown as { height?: number }).height) || 64;
+    await this.applyComponentPropertyChange(
+      componentId,
+      prop,
+      serializePolygonConfig(boxPolygon(width / 2, height / 2))
+    );
+  }
+
+  async onPolygonClear(componentId: string, prop: PropertyDefinition): Promise<void> {
+    await this.applyComponentPropertyChange(componentId, prop, []);
+  }
+
+  /** The texture a polygon trace would read, or null when this node has none. */
+  getPolygonTraceTexturePath(): string | null {
+    const texture = (this.primaryNode as unknown as { texture?: { url?: unknown } } | null)
+      ?.texture;
+    const url = typeof texture?.url === 'string' ? texture.url.trim() : '';
+    return url.length > 0 ? url : null;
+  }
+
+  /**
+   * Trace an outline from the node's own texture alpha and write it into the
+   * polygon — the same marching-squares + Ramer-Douglas-Peucker pipeline the
+   * Sprite Editor uses on animation frames, reused here for a static sprite.
+   */
+  async onPolygonTrace(componentId: string, prop: PropertyDefinition): Promise<void> {
+    const node = this.primaryNode;
+    const texturePath = this.getPolygonTraceTexturePath();
+    if (!node || !texturePath || this.tracingPolygonComponentIds.includes(componentId)) {
+      return;
+    }
+
+    this.tracingPolygonComponentIds = [...this.tracingPolygonComponentIds, componentId];
+    try {
+      const blob = await this.projectStorage.readBlob(
+        texturePath.startsWith('res://') ? texturePath.substring(6) : texturePath
+      );
+      const mask = await readAlphaMask(blob);
+      if (!mask) {
+        return;
+      }
+      const traced = traceCollisionPolygon(mask);
+      if (traced.length < 3) {
+        return;
+      }
+
+      const anchor = (node as unknown as { anchor?: { x?: number; y?: number } }).anchor;
+      const local = mapImagePolygonToSpriteLocal(
+        traced,
+        { width: mask.width, height: mask.height },
+        {
+          width: Number((node as unknown as { width?: number }).width) || mask.width,
+          height: Number((node as unknown as { height?: number }).height) || mask.height,
+          anchorX: Number(anchor?.x ?? 0.5),
+          anchorY: Number(anchor?.y ?? 0.5),
+        }
+      );
+      if (local.length < 3) {
+        return;
+      }
+      await this.applyComponentPropertyChange(componentId, prop, serializePolygonConfig(local));
+    } finally {
+      this.tracingPolygonComponentIds = this.tracingPolygonComponentIds.filter(
+        id => id !== componentId
+      );
     }
   }
 

@@ -12,6 +12,7 @@ export interface ViewportToolbarState {
   readonly showAxisGizmo: boolean;
   readonly snapToGrid: boolean;
   readonly showLighting: boolean;
+  readonly showCollisionShapes: boolean;
   readonly navigationMode: NavigationMode | null;
   readonly showLayer3D: boolean;
   readonly showLayer2D: boolean;
@@ -44,6 +45,7 @@ export interface ViewportToolbarHandlers {
   readonly onToggleAxisGizmo: () => void;
   readonly onToggleSnapToGrid: () => void;
   readonly onToggleLighting: () => void;
+  readonly onToggleCollisionShapes: () => void;
   readonly onToggleLayer3D: () => void;
   readonly onToggleLayer2D: () => void;
   readonly onSetEditorCameraProjection: (projection: EditorCameraProjection) => void;
@@ -329,9 +331,11 @@ export function renderViewportToolbar(
           .showGrid=${state.showGrid}
           .showAxisGizmo=${state.showAxisGizmo}
           .showLighting=${state.showLighting}
+          .showCollisionShapes=${state.showCollisionShapes}
           @toggle-grid=${() => handlers.onToggleGrid()}
           @toggle-axis-gizmo=${() => handlers.onToggleAxisGizmo()}
           @toggle-lighting=${() => handlers.onToggleLighting()}
+          @toggle-collision-shapes=${() => handlers.onToggleCollisionShapes()}
         ></pix3-viewport-visibility-popover>
       </div>
     </div>

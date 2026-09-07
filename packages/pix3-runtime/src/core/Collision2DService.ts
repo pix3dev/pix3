@@ -1,5 +1,16 @@
 import { Vector3 } from 'three';
 import type { NodeBase } from '../nodes/NodeBase';
+import {
+  circleIntersectsPolygon,
+  pointInPolygon,
+  polygonCentroid,
+  rectIntersectsPolygon,
+  segmentPolygonT,
+  transformPolygon,
+  type Point2D,
+  type ShapeTransform2D,
+} from './collision-shapes-2d';
+import { readWorldTransform2D } from './world-transform-2d';
 
 /**
  * Collision2DService — lightweight 2D overlap/raycast queries for gameplay.
@@ -11,16 +22,22 @@ import type { NodeBase } from '../nodes/NodeBase';
  * nobody asks. Filtering uses Godot-style string groups (`group` on the
  * hitbox, optional `group` argument on every query).
  *
- * v1 scope (documented, intentional):
- * - Shapes: axis-aligned rect + circle. Node/world **rotation is ignored**;
- *   scale is honored. Matches the Flash original's hitTest behavior.
+ * Scope (documented, intentional):
+ * - Shapes: axis-aligned rect + circle + **polygon**. Rect and circle ignore
+ *   node/world rotation and honor scale — the original v1 contract, kept because
+ *   the tapper/arena templates and the Flash-era `hitTest` semantics depend on
+ *   it. `polygon` is fully rotation-aware: an authored outline that ignored the
+ *   node's rotation would be wrong the moment the sprite turned, and unlike a
+ *   rect there is no cheap axis-aligned reading of it to preserve.
+ * - Polygons may be concave (a traced sprite outline usually is). Every test
+ *   here is concave-safe; only the physics solver needs convex pieces.
  * - Broadphase: linear scan. Fine for hundreds of hitboxes; swap for a
  *   spatial hash behind the same API when profiling demands it.
  *
  * Scripts reach it via `this.scene.collision2d`.
  */
 
-export type Hitbox2DShape = 'rect' | 'circle';
+export type Hitbox2DShape = 'rect' | 'circle' | 'polygon';
 
 /**
  * The contract a hitbox provider implements (see `Hitbox2DBehavior`).
@@ -34,6 +51,14 @@ export interface Hitbox2DSource {
   getHitboxSize(): { width: number; height: number; radius: number };
   getHitboxOffset(): { x: number; y: number };
   getHitboxGroup(): string;
+  /**
+   * Node-local vertices (y up, before the node's own scale and rotation) for a
+   * `polygon` hitbox. Optional so implementations that predate polygons — and
+   * external ones in consumer projects — keep satisfying the interface; a source
+   * that reports `polygon` without it is skipped rather than treated as a rect,
+   * because a silent fallback to the wrong shape is worse than no hit at all.
+   */
+  getHitboxPolygon?(): readonly Point2D[];
 }
 
 /** A single query hit. */
@@ -53,7 +78,7 @@ interface ResolvedShape {
   node: NodeBase;
   group: string;
   shape: Hitbox2DShape;
-  /** World center (node world position + scaled offset). */
+  /** World center: rect/circle centre, or the polygon's area centroid. */
   cx: number;
   cy: number;
   /** Rect world half-extents. */
@@ -61,10 +86,13 @@ interface ResolvedShape {
   hh: number;
   /** Circle world radius. */
   r: number;
+  /** World-space vertices, `polygon` only. */
+  polygon: readonly Point2D[] | null;
 }
 
 const scratchPos = new Vector3();
 const scratchScale = new Vector3();
+const scratchTransform: ShapeTransform2D = { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1 };
 
 export class Collision2DService {
   private readonly sources = new Set<Hitbox2DSource>();
@@ -86,8 +114,9 @@ export class Collision2DService {
   overlapPoint(x: number, y: number, group?: string): Hit2D[] {
     const hits: Hit2D[] = [];
     for (const resolved of this.resolve(group)) {
-      const inside =
-        resolved.shape === 'circle'
+      const inside = resolved.polygon
+        ? pointInPolygon(x, y, resolved.polygon)
+        : resolved.shape === 'circle'
           ? distSq(x, y, resolved.cx, resolved.cy) <= resolved.r * resolved.r
           : Math.abs(x - resolved.cx) <= resolved.hw && Math.abs(y - resolved.cy) <= resolved.hh;
       if (inside) {
@@ -102,7 +131,9 @@ export class Collision2DService {
     const hits: Hit2D[] = [];
     for (const resolved of this.resolve(group)) {
       let intersects: boolean;
-      if (resolved.shape === 'circle') {
+      if (resolved.polygon) {
+        intersects = circleIntersectsPolygon(x, y, radius, resolved.polygon);
+      } else if (resolved.shape === 'circle') {
         const rr = resolved.r + radius;
         intersects = distSq(x, y, resolved.cx, resolved.cy) <= rr * rr;
       } else {
@@ -125,7 +156,9 @@ export class Collision2DService {
     const hits: Hit2D[] = [];
     for (const resolved of this.resolve(group)) {
       let intersects: boolean;
-      if (resolved.shape === 'circle') {
+      if (resolved.polygon) {
+        intersects = rectIntersectsPolygon(cx, cy, hw, hh, resolved.polygon);
+      } else if (resolved.shape === 'circle') {
         const nx = clamp(resolved.cx, cx - hw, cx + hw);
         const ny = clamp(resolved.cy, cy - hh, cy + hh);
         intersects = distSq(resolved.cx, resolved.cy, nx, ny) <= resolved.r * resolved.r;
@@ -158,8 +191,9 @@ export class Collision2DService {
     let best: Hit2D | null = null;
     let bestT = Infinity;
     for (const resolved of this.resolve(group)) {
-      const t =
-        resolved.shape === 'circle'
+      const t = resolved.polygon
+        ? segmentPolygonT(x1, y1, dx, dy, resolved.polygon)
+        : resolved.shape === 'circle'
           ? segmentCircleT(x1, y1, dx, dy, resolved.cx, resolved.cy, resolved.r)
           : segmentAabbT(
               x1,
@@ -197,13 +231,40 @@ export class Collision2DService {
       if (group !== undefined && sourceGroup !== group) {
         continue;
       }
+      const offset = source.getHitboxOffset();
+      const size = source.getHitboxSize();
+      const shape = source.getHitboxShape();
+
+      if (shape === 'polygon') {
+        const local = source.getHitboxPolygon?.();
+        if (!local || local.length < 3) {
+          continue;
+        }
+        readWorldTransform2D(node, scratchTransform);
+        const world = transformPolygon(
+          local.map(p => ({ x: p.x + offset.x, y: p.y + offset.y })),
+          scratchTransform
+        );
+        const centroid = polygonCentroid(world);
+        yield {
+          source,
+          node,
+          group: sourceGroup,
+          shape,
+          cx: centroid.x,
+          cy: centroid.y,
+          hw: 0,
+          hh: 0,
+          r: 0,
+          polygon: world,
+        };
+        continue;
+      }
+
       node.getWorldPosition(scratchPos);
       node.getWorldScale(scratchScale);
       const sx = Math.abs(scratchScale.x) || 1;
       const sy = Math.abs(scratchScale.y) || 1;
-      const offset = source.getHitboxOffset();
-      const size = source.getHitboxSize();
-      const shape = source.getHitboxShape();
       yield {
         source,
         node,
@@ -214,6 +275,7 @@ export class Collision2DService {
         hw: (Math.abs(size.width) / 2) * sx,
         hh: (Math.abs(size.height) / 2) * sy,
         r: Math.abs(size.radius) * Math.max(sx, sy),
+        polygon: null,
       };
     }
   }

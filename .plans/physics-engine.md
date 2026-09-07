@@ -1,9 +1,65 @@
 # Physics engine for Pix3 — design
 
-Status: **approved in principle, implementation deferred** (2026-08-30). The shape of the
-system is settled and Q1 below is decided — the hand-written solver. Nothing here is built
-yet; pick this up as a fresh phase-1 branch when the work is scheduled.
-Related: `.plans/done/playable-export-size.md`, `docs/nodes-and-systems.md` §4 "Physics" / "2D collision".
+Status: **phases 0-2 built** (2026-09-06/07, branch `feat/collision-polygons-2d-physics`).
+Phase 0 was added ahead of phase 1: collision polygons across the runtime and the editor, since
+a solver that only knows boxes and circles cannot use the outlines the Sprite Editor already
+traces. Phase 2 shipped everything except two items settled by decision rather than by code (the
+`recipe-bouncer-2d` port and the split broadphase — see §7). Phase 3 (3D wrappers) stays
+demand-gated and may never happen.
+Related: `.plans/done/playable-export-size.md`, `docs/nodes-and-systems.md` §4 "Physics — which
+tier to use" / "2D physics" / "2D collision".
+
+## What shipped (phases 0-2)
+
+**Phase 0 — collision polygons.** `core/collision-shapes-2d.ts` (winding, area/centroid,
+convexity, cleaning, convex hull, world transform, point/circle/rect/segment tests, SAT, and a
+reflex-diagonal convex decomposition with a hull fallback), `core/world-transform-2d.ts`,
+`core/collision-polygon-config.ts`. `Collision2DService` and `core:Hitbox2D` gained a
+rotation-aware, concave-capable `polygon` shape whose vertices come either from `points` or —
+`polygonSource: 'frame'` — from the current `AnimatedSprite2D` frame's `collisionPolygon`,
+which the Sprite Editor has been authoring since §9.12.2 and **nothing consumed until now**.
+Editor: `ViewportColliderGizmos` (outlines for the selection, or the whole scene behind
+`view.toggle-collision-shapes`), `Polygon2DEditController` (drag / insert on an edge midpoint /
+Alt-click to remove, committed through `UpdateComponentPropertyCommand`'s preview+commit modes
+so a drag is one undo entry), and a `collision-polygon` inspector widget that also traces an
+outline from a `Sprite2D`'s own alpha.
+
+**Phase 1 — the solver.** `core/physics-2d-narrowphase.ts` + `core/Physics2DService.ts` +
+`core:PhysicsBody2D` / `core:Collider2D` / `core:PhysicsWorld2D`, `SceneService.physics2d`
+stepped from `SceneRunner.runFixedUpdates`, signals, export stripping (including
+`Collision2DService`, which used to ship unconditionally), and collider wireframes in play mode
+drawn through the orthographic camera.
+
+**Acceptance:** a 20-box stack stands with zero lateral drift for 30 s at 1/60. 115 tests
+across the three new modules.
+
+**Phase 2 — feel and ergonomics.** Kinematic `moveAndCollide` / `moveAndSlide` (the
+CharacterBody2D role, without a CharacterBody2D node), the revolute joint (angle limits, motor,
+`collideConnected`), render interpolation between fixed steps, the capsule shape, and the
+viewport-wide "Show collision shapes" toggle (pulled forward into phase 1). Two of its planned
+items were closed by decision instead of code — §7 records which and why.
+
+### Four defects worth remembering
+
+Each cost real debugging time and each is now pinned by a test and explained at its site:
+
+1. **Circle-inside-polygon returned the outward face normal.** The A-to-B convention makes that
+   backwards, so a body deep enough to have its centre inside was driven _further_ in. A ball
+   dropped fast enough to reach the floor's interior in one step sank through it.
+2. **Bodies slept individually.** An awake box resting on a sleeping one pushed impulses into a
+   body that was frozen in place; the velocity accumulated invisibly and the stack fired apart
+   the moment it woke. Sleep is now per contact **island** (union-find over the step's contacts).
+3. **The position solver reused the manifold's penetration across its iterations.** Correcting
+   the box-on-box contact moves the lower box down, so the floor contact in the same iteration
+   was already measuring the wrong overlap. A four-box stack pumped itself apart in under a
+   second. Separation is now re-derived per iteration.
+4. **Two-point manifolds solved point-by-point lean.** The leftover torque is always signed the
+   same way, so the bias accumulates up a stack. An eight-box stack needed ~30 iterations to
+   stand; with a block solver, eight hold twenty boxes.
+
+A fifth, subtler one: contacts blinked in and out at rest, which reset warm starting _and_ fired
+a `contact-started`/`ended` pair per blink. Fixed with speculative contacts (a 0.5 px margin,
+negative penetration, and a velocity target that permits closing exactly that gap).
 
 ## 0. Recommendation (read this first)
 
@@ -14,7 +70,7 @@ of `SceneRunner`, and stripped from exports by the existing mentions mechanism s
 without physics ships **zero** extra bytes. **3D physics stays game-level** (the current
 Rapier-in-user-scripts arrangement, which DeepCore already uses productively) and is only
 wrapped into engine components in a later, demand-gated phase using the Spine-style
-host-injected-module pattern. This is *not* "don't build it": Godot and Unity ship physics
+host-injected-module pattern. This is _not_ "don't build it": Godot and Unity ship physics
 as a built-in, the engine-vs-game rule (`docs/nodes-and-systems.md:15-28`) says a rigidbody
 node passes that test, and the evidence that games need it is in this repo — the bouncer
 template hand-writes a swept solver (`src/templates/projects/recipe-bouncer-2d/files/scripts/BallBody.ts:4-20`)
@@ -61,7 +117,7 @@ Collision Shapes" debug toggle; **fully separate 2D and 3D physics servers**.
 bodies via child colliders), `bodyType` static/kinematic/dynamic, `gravityScale`,
 `PhysicsMaterial2D` assets, `OnCollisionEnter2D`/`OnTriggerEnter2D` callbacks, a
 layer-collision matrix. **Construct 3** (the closest product analogue — a browser 2D
-playable engine) ships physics as a *behavior* attached to an object, which is exactly
+playable engine) ships physics as a _behavior_ attached to an object, which is exactly
 Pix3's component model.
 
 Borrow:
@@ -72,7 +128,7 @@ Borrow:
 - Godot's **separate 2D vs 3D physics** decision.
 - Godot's **Visible Collision Shapes** editor/play toggle (we already half-have it:
   `debugDraw` on Hitbox2D, `Hitbox2DBehavior.ts:142-202`).
-- Unity/Construct's **component attachment** model: the sprite *is* the body; shape +
+- Unity/Construct's **component attachment** model: the sprite _is_ the body; shape +
   material live on the same node.
 - Unity's `gravityScale`, `fixedRotation`, `bodyType` property surface.
 
@@ -106,13 +162,13 @@ Why not the alternatives:
   wasm (~1.5x the whole current export) plus base64 inflation in single-file HTML, to
   simulate circles and boxes. Also couples the 2D design-px coordinate space (origin
   center, Y up) to a metric 3D solver, inviting unit bugs.
-- **Ship rapier2d for 2D**: a *second* wasm artifact (~1.3 MB) and package to vendor,
+- **Ship rapier2d for 2D**: a _second_ wasm artifact (~1.3 MB) and package to vendor,
   version and lazy-load — still two orders of magnitude over the budget for the common case.
 - **Hand-write 3D too**: 3D physics (stacking, manifolds, friction cones, broadphase) is
   where hand-rolling actually fails; that is what Rapier is for, and the one real 3D
   consumer (DeepCore) already has it working game-side.
 - **Do nothing / keep Rapier-in-scripts for 2D too**: this is the current answer and it
-  demonstrably fails the product: `BallBody.ts` had to ship a bespoke solver in a *template*
+  demonstrably fails the product: `BallBody.ts` had to ship a bespoke solver in a _template_
   ("Never import rapier: it is a ~2 MB lazy wasm payload this does not need",
   `BallBody.ts:20`), and Godot/Unity/Construct all ship 2D physics built in. The
   engine-vs-game rule says: engine.
@@ -139,19 +195,19 @@ planck.js behind the same component API.
     - id: 'c1'
       type: 'core:PhysicsBody2D'
       config:
-        bodyType: dynamic        # static | kinematic | dynamic
+        bodyType: dynamic # static | kinematic | dynamic
         gravityScale: 1
-        mass: 1                  # 0 -> derive from shape area x density 1
+        mass: 1 # 0 -> derive from shape area x density 1
         linearDamping: 0.01
         angularDamping: 0.05
         fixedRotation: false
-        bullet: false            # swept CCD
+        bullet: false # swept CCD
         canSleep: true
-        emitContacts: false      # gate contact signals (perf)
+        emitContacts: false # gate contact signals (perf)
     - id: 'c2'
       type: 'core:Collider2D'
       config:
-        shape: rect              # rect | circle
+        shape: rect # rect | circle
         width: 64
         height: 64
         radius: 32
@@ -160,7 +216,7 @@ planck.js behind the same component API.
         friction: 0.4
         restitution: 0.2
         sensor: false
-        group: 'crates'          # Godot-style string group, same as Hitbox2D
+        group: 'crates' # Godot-style string group, same as Hitbox2D
         debugDraw: false
 ```
 
@@ -187,13 +243,16 @@ Inspector, prefab diffing and the animation timeline work with no editor code.
 
 ```ts
 const phys = this.scene.physics2d;
-phys.setGravity(0, -1960);                       // design px/s^2, Y up
-const body = phys.getBody(this.node);            // null if none
-body.velocity; body.setVelocity(vx, vy);
-body.applyImpulse(ix, iy); body.applyForce(fx, fy);
-body.angularVelocity; body.teleport(x, y, rot);  // safe mid-sim reposition
-const hit = phys.raycast(x1, y1, x2, y2, { group: 'walls' });   // rotation-aware
-phys.overlapCircle(x, y, r, { group: 'enemy' });                // rotation-aware
+phys.setGravity(0, -1960); // design px/s^2, Y up
+const body = phys.getBody(this.node); // null if none
+body.velocity;
+body.setVelocity(vx, vy);
+body.applyImpulse(ix, iy);
+body.applyForce(fx, fy);
+body.angularVelocity;
+body.teleport(x, y, rot); // safe mid-sim reposition
+const hit = phys.raycast(x1, y1, x2, y2, { group: 'walls' }); // rotation-aware
+phys.overlapCircle(x, y, r, { group: 'enemy' }); // rotation-aware
 ```
 
 Same lazy-getter pattern as `collision2d`/`network` on `SceneService`
@@ -229,7 +288,7 @@ editor viewport today. Plan:
   right next to `ecsService.fixedUpdate` (`SceneRunner.ts:1747-1756`). No-op when the
   service was never constructed. Step = integrate -> broadphase (spatial hash; the linear
   scan is fine to start, same judgement as `Collision2DService.ts:17-18`) -> narrowphase ->
-  impulse iterations -> write back node transforms -> emit queued signals *after* the step
+  impulse iterations -> write back node transforms -> emit queued signals _after_ the step
   (never mid-iteration).
 - **Determinism**: the step inherits everything the runner already guarantees — fixed
   1/60 dt, `maxFixedStepsPerFrame` clamp, GameTime-scaled accumulator (hitstop freezes
@@ -245,7 +304,7 @@ editor viewport today. Plan:
   that clone imperatively outside the Command/Operation gateway (that is the documented
   play-mode contract — `BallBody.writeBackPosition` does it today). Physics writes
   positions/rotations on the clone only. The authored graph, undo/redo and collab never see
-  a physics write. Editing a *stopped* scene edits the authored initial pose like any other
+  a physics write. Editing a _stopped_ scene edits the authored initial pose like any other
   property.
 - **Live edits during play**: inspector edits reach the clone via the existing live property
   sink (`registerRuntimeLivePropertySink`, `SceneRunner.ts:426-428`). Rule: a transform write
@@ -272,10 +331,10 @@ Mechanism (all existing, no new machinery):
 3. **Serialization cannot pin it**: components load through `register-behaviors` and save
    through `SceneSaver`, both `NEUTRALISED_IMPORTERS`
    (`strippable-runtime-modules.ts:56-61`); a player never constructs `SceneSaver`. A scene
-   that *does* contain `core:PhysicsBody2D` mentions the name — and then it genuinely needs
+   that _does_ contain `core:PhysicsBody2D` mentions the name — and then it genuinely needs
    the solver, which is the correct outcome.
 4. **The wasm question is moot for 2D**: the 2D path never imports Rapier anywhere. Rapier
-   enters an export only when a *project script* imports `@dimforge/rapier3d-compat` (alias
+   enters an export only when a _project script_ imports `@dimforge/rapier3d-compat` (alias
    resolved on import, `PlayableHtmlBuildService.ts:399-403` -> vendored source + base64
    wasm at `:918-937`) — unchanged from today.
 5. **Phase-3 3D wrappers** (if ever built) must keep Rapier a type-only dependency of the
@@ -286,12 +345,12 @@ Mechanism (all existing, no new machinery):
 
 Budget estimate (estimates, not measurements): solver + service ~15–25 KiB minified
 (~5–8 KiB gz), the two behaviors ~4–8 KiB. Non-physics exports: **+0 bytes** beyond
-few-hundred-byte stubs. For calibration, the *entire* 2D pinball export is 885 KiB of raw
+few-hundred-byte stubs. For calibration, the _entire_ 2D pinball export is 885 KiB of raw
 JS / 225 KiB gz, and the Rapier alternative would be ~2 MB wasm before base64.
 
 ## 7. Phasing
 
-**Phase 1 — the shippable core (2D bodies + colliders):**
+**Phase 1 — the shippable core (2D bodies + colliders): DONE.**
 
 - `core/Physics2DService` (+spec): world, gravity, circle/OBB shapes, static/dynamic,
   sensors, impulse solver, swept-circle CCD, sleeping, rotation-aware
@@ -309,11 +368,44 @@ JS / 225 KiB gz, and the Rapier alternative would be ~2 MB wasm before base64.
 - Acceptance: a bouncer-class scene (angled paddles, bumpers, drain sensor) authored with
   zero gameplay-physics script code; 20-body stack stays stable at 1/60 for 30 s.
 
-**Phase 2 — feel and ergonomics:** kinematic `moveAndCollide`/`moveAndSlide` (the
-CharacterBody2D role), capsule shape, render interpolation, viewport-wide "Show collision
-shapes" toggle, one joint (revolute — flippers), re-author `recipe-bouncer-2d` on engine
-bodies (keep `ball-collision.ts` until parity is demonstrated), route `collision2d` queries
-through the physics broadphase when both exist.
+**Phase 2 — feel and ergonomics: DONE**, except for two items settled by decision rather
+than by code (below). Shipped: the viewport-wide "Show collision shapes" toggle (pulled into
+phase 1), kinematic `moveAndCollide`/`moveAndSlide`, the revolute joint (limits + motor +
+`collideConnected`), render interpolation between fixed steps, and the capsule shape.
+
+**`recipe-bouncer-2d` stays on its own solver** (decided 2026-09-07). The template's bumpers
+use `restitution` 1.05 and 1.3 — they _add_ energy — while the engine clamps restitution to
+[0, 1] as Box2D and Godot do. Porting it means replacing that with an impulse on contact,
+which changes the feel of a shipped template in a way that can only be judged by playing it,
+and the plan's own gate was "delete `ball-collision.ts` only after feel parity is shown".
+Revisit when someone can play both.
+
+**The broadphase stays split** — `collision2d`'s linear scan is not routed through the
+physics grid. The two tiers index different things (hitboxes vs colliders), the scan is
+documented as fine for hundreds of hitboxes, and nothing has measured a problem; unifying
+them would couple two deliberately-separate tiers to buy an optimization no one has asked
+for. The API note stands: if it is ever needed it can be done underneath without touching
+either surface.
+
+Three more defects the phase-2 tests forced out, all of the same family as phase 1's — a sign
+or a convention that looks right until something asymmetric exercises it:
+
+5. **The joint's body roles were the wrong way round.** The component sits on the body that
+   swings, so that body has to be the solver's `B` (every angular term is `B relative to A`).
+   With the roles reversed a flipper set to `+600` swings _down_.
+6. **The angle-limit bias had the wrong sign** (`-max(0, -C)` instead of `+max(C, 0)`), which
+   clamped an arm to ~0 degrees instead of to its authored range. What makes a limit one-sided
+   is the accumulated-impulse clamp, not the bias; the bias is speculative and lets the joint
+   reach the stop exactly.
+7. **The capsule's stadium was wound clockwise.** Swept the intuitive way (right, under the
+   bottom, left) the loop comes out clockwise in a y-up frame, every SAT normal points inward,
+   and bodies fall straight through. Capsules are now built counter-clockwise _and_ routed
+   through `decomposeConvex`, so the winding guarantee comes from the same place as every
+   other polygon rather than from the stadium builder being trusted to get it right.
+
+And one design point worth recording: hinged bodies overlap at the pivot, so a contact there
+fights the joint for control of the same pair. `collideConnected` defaults to off, matching
+Box2D — measured at ~8 px of pivot drift before it existed.
 
 **Phase 3 — 3D wrappers (demand-gated, may never happen):** `core:PhysicsBody3D` /
 `core:Collider3D` over host-injected Rapier + `virtual:runtime-physics3d` vendoring +
@@ -322,20 +414,20 @@ actually asks; DeepCore is served by the status quo.
 
 ## 8. Cost of each phase
 
-| | Phase 1 | Phase 2 | Phase 3 |
-|---|---|---|---|
-| Bundle (physics used) | ~+20–33 KiB min (guess), ~6–10 KiB gz | +5–10 KiB | +~2 MB wasm base64 (only when mentioned) |
-| Bundle (physics unused) | +0 (stubs) | +0 | +0 |
-| Runtime files | ~7 new/touched (`Physics2DService` + 2 behaviors + register-behaviors + SceneService + SceneRunner + index) + specs | ~4 | ~6 + export service |
-| Editor files | ~4 (strippable table + spec, viewport gizmos, ViewportRenderService hook) + docs | ~3 | ~4 (vendor loaders, virtual module) |
-| Risk | solver stability (see §9 Q1) | joint math | consumer API churn |
+|                         | Phase 1                                                                                                             | Phase 2    | Phase 3                                  |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------- | ---------- | ---------------------------------------- |
+| Bundle (physics used)   | ~+20–33 KiB min (guess), ~6–10 KiB gz                                                                               | +5–10 KiB  | +~2 MB wasm base64 (only when mentioned) |
+| Bundle (physics unused) | +0 (stubs)                                                                                                          | +0         | +0                                       |
+| Runtime files           | ~7 new/touched (`Physics2DService` + 2 behaviors + register-behaviors + SceneService + SceneRunner + index) + specs | ~4         | ~6 + export service                      |
+| Editor files            | ~4 (strippable table + spec, viewport gizmos, ViewportRenderService hook) + docs                                    | ~3         | ~4 (vendor loaders, virtual module)      |
+| Risk                    | solver stability (see §9 Q1)                                                                                        | joint math | consumer API churn                       |
 
 **Migration:**
 
 - `Collision2DService` / `core:Hitbox2D` — **stays, undeprecated.** It is the query-only
   tier (Godot Area2D-groups x `Physics2D.Overlap*`), costs ~3 KiB, and the tapper/arena
-  templates depend on its groups. Decision rule for docs: *queries only -> Hitbox2D;
-  movement, response, rotation, sensors with enter/exit -> physics2d.* Phase 2 may unify the
+  templates depend on its groups. Decision rule for docs: _queries only -> Hitbox2D;
+  movement, response, rotation, sensors with enter/exit -> physics2d._ Phase 2 may unify the
   broadphase underneath without touching either API.
 - `recipe-bouncer-2d` — untouched in phase 1 (its solver doubles as prior art and its spec
   as a reference test); phase 2 re-authors it on `core:PhysicsBody2D` and deletes
@@ -357,13 +449,22 @@ actually asks; DeepCore is served by the status quo.
    internals for vendored planck.js (~tens of KiB, still wasm-free) without touching the
    components, the signals or `scene.physics2d`. Treat that swap as a normal outcome, not a
    failure: the API is the commitment, the solver is an implementation detail.
-2. **Filtering model**: keep Godot-style string groups (continuity with `Hitbox2D.group`) or
-   introduce layer/mask bitfields now? Proposal: groups in v1, bitfields only if a real game
-   hits the wall.
-3. **Gravity authoring**: `scene.physics2d.setGravity()` only, or also a designer-facing
-   `core:PhysicsWorld2D` component on the scene root? Proposal: both, component in phase 1
-   (it is ~40 lines and strippable).
-4. **Multiple colliders per node** (several `core:Collider2D` components on one node) vs
-   child-node composition only — does the component UI handle duplicates acceptably?
+2. ~~**Filtering model**~~ **DECIDED: string groups**, as proposed. `Collider2D.group` filters
+   queries exactly like `Hitbox2D.group`. Bitfields only if a real game hits the wall — note
+   that groups currently filter _queries_ but do not gate _collision_ (everything collides with
+   everything); a layer/mask matrix is the natural home for that and is deliberately not in v1.
+3. ~~**Gravity authoring**~~ **DECIDED: both**, as proposed. `core:PhysicsWorld2D` exists and is
+   strippable.
+4. ~~**Multiple colliders per node**~~ **DECIDED: supported.** Colliders bind to the nearest
+   ancestor body, several on one node included; the inspector already lists duplicate component
+   types acceptably. It is how a compound body is built without new node types.
 5. **Phase 3 at all?** If DeepCore remains the only 3D physics consumer, the wrapper may
    never pay for its API-stability burden. Default: defer indefinitely.
+6. **New — internal edges on decomposed concave colliders.** A concave shape is several convex
+   parts, and the seams between them are not real surfaces. Contacts generated against a seam
+   are filtered out (a contact point strictly inside another part of the same collider cannot be
+   on its boundary), which handles the common cases; a body sliding fast across a seam may still
+   catch. The proper fix is ghost vertices / edge shapes, which is phase 2 territory.
+7. **New — CCD is circle-vs-static only.** That is the pinball/projectile case `bullet` exists
+   for. A fast _polygon_ body can still tunnel; a general swept solve for every pair is a much
+   larger piece of engineering and was deliberately left out.

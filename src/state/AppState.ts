@@ -362,6 +362,19 @@ export interface UIState {
   showLighting: boolean;
   /** Toggle for the physics collider wireframe overlay in the running game preview */
   showPhysicsColliders: boolean;
+  /**
+   * Toggle for drawing every node's authored 2D collider outline in the EDITOR
+   * viewport (Godot's "Visible Collision Shapes"). Selected nodes always show
+   * theirs; this extends it to the whole scene. Distinct from
+   * {@link showPhysicsColliders}, which is the running game's overlay.
+   */
+  showCollisionShapes: boolean;
+  /**
+   * The collision polygon currently open for vertex editing in the viewport, or
+   * null. Lives in UI state rather than in a service because the inspector opens
+   * it, the viewport tool consumes it, and both re-render off the same subscribe.
+   */
+  polygonEditing: { nodeId: string; componentId: string } | null;
   /** Toggle for per-node direction-axis gizmos in the running game preview */
   showDirectionAxes: boolean;
   /** Warn before leaving the page with unsaved changes */
@@ -628,6 +641,8 @@ export const createInitialAppState = (): AppState => ({
     grid2DSize: 16,
     showLighting: true,
     showPhysicsColliders: false,
+    showCollisionShapes: false,
+    polygonEditing: null,
     showDirectionAxes: false,
     warnOnUnsavedUnload: true,
     pauseRenderingOnUnfocus: true,

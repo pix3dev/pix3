@@ -2,7 +2,14 @@ import { html } from '@/fw';
 import { ifDefined } from 'lit/directives/if-defined.js';
 import type { PropertyDefinition } from '@/fw';
 import { appState } from '@/state';
-import { Group2D, Node2D, Sprite2D, UIControl2D, getPropertiesByGroup } from '@pix3/runtime';
+import {
+  Group2D,
+  Node2D,
+  Sprite2D,
+  UIControl2D,
+  getPropertiesByGroup,
+  normalizePolygonConfig,
+} from '@pix3/runtime';
 import type { NodeBase, ScriptComponent } from '@pix3/runtime';
 import { ResizeGroup2DCommand } from '@/features/properties/ResizeGroup2DCommand';
 import { FitGroup2DToContentsCommand } from '@/features/scene/FitGroup2DToContentsCommand';
@@ -550,6 +557,38 @@ export class InspectorPropertyRenderers {
     const readOnly =
       this.isPropertyReadOnly(prop.ui?.readOnly, component) ||
       (this.host.primaryNode ? isPrefabNode(this.host.primaryNode) : false);
+
+    if (prop.type === 'object' && prop.ui?.editor === 'collision-polygon') {
+      const config = (component.config ?? {}) as Record<string, unknown>;
+      // Read the vertices off the config rather than the display string: this
+      // property is an array, and `getPropertyDisplayValue` flattens it.
+      const points = normalizePolygonConfig(config.points);
+      const fromFrame = config.polygonSource === 'frame';
+      // The tool only makes sense for the shape it edits; a rect/circle hitbox
+      // shows the control disabled rather than hiding it, so the vertex count
+      // stays visible when switching `shape` back and forth.
+      const isPolygon = config.shape === 'polygon';
+      const editing = this.host.isPolygonEditing(component.id);
+
+      return html`
+        <div class="property-group component-property-group">
+          <span class="property-label">${label}</span>
+          <pix3-collision-polygon-editor
+            .vertexCount=${points.length}
+            .editing=${editing}
+            .editable=${!fromFrame}
+            .canTrace=${this.host.getPolygonTraceTexturePath() !== null}
+            .tracing=${this.host.tracingPolygonComponentIds.includes(component.id)}
+            ?disabled=${readOnly || !isPolygon}
+            @start-edit=${() => this.host.onPolygonEditToggle(component.id, true)}
+            @stop-edit=${() => this.host.onPolygonEditToggle(component.id, false)}
+            @trace=${() => void this.host.onPolygonTrace(component.id, prop)}
+            @reset-box=${() => void this.host.onPolygonResetBox(component.id, prop)}
+            @clear=${() => void this.host.onPolygonClear(component.id, prop)}
+          ></pix3-collision-polygon-editor>
+        </div>
+      `;
+    }
 
     if (prop.type === 'string' && prop.ui?.editor === 'audio-resource') {
       const audioPreview = this.host.resourcePreview.getAudioPreview(state.value);

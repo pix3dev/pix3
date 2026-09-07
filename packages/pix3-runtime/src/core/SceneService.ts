@@ -4,6 +4,7 @@ import type { Camera2D } from '../nodes/2D/Camera2D';
 import { NodeBase } from '../nodes/NodeBase';
 import { LAYER_3D } from '../constants';
 import { Collision2DService } from './Collision2DService';
+import { Physics2DService } from './Physics2DService';
 import { NetworkService } from '../net/NetworkService';
 import { NetworkNodeBinder } from './NetworkNodeBinder';
 import { GameTime } from './GameTime';
@@ -145,6 +146,7 @@ export class SceneService {
   private inertLocalization: LocalizationService | null = null;
   private cutsceneApi: CutsceneApi | null = null;
   private collision2dService: Collision2DService | null = null;
+  private physics2dService: Physics2DService | null = null;
   /** Scene-scoped named intents; see {@link commands}. Cleared by the runner on stop. */
   private commandRegistry: GameCommandRegistry | null = null;
   /**
@@ -342,6 +344,61 @@ export class SceneService {
       this.collision2dService = new Collision2DService();
     }
     return this.collision2dService;
+  }
+
+  /**
+   * The built-in 2D rigid-body world — `this.scene.physics2d`.
+   *
+   * Scene state, like {@link collision2d}: constructed on first touch and cleared
+   * when the runner stops. A project that never says the word never constructs
+   * one, which is also what keeps the solver out of its export (see
+   * `strippable-runtime-modules.ts`).
+   *
+   * Related but different from {@link collision2d}: that one answers *queries*
+   * against axis-aligned hitboxes and runs no step; this one simulates. The rule
+   * for docs and for choosing: queries only -> Hitbox2D; movement, response,
+   * rotation, sensors with enter/exit -> physics2d.
+   */
+  get physics2d(): Physics2DService {
+    if (!this.physics2dService) {
+      this.physics2dService = new Physics2DService();
+    }
+    return this.physics2dService;
+  }
+
+  /**
+   * Advance the physics world, if one was ever constructed. Called by
+   * `SceneRunner.runFixedUpdates` next to `ecsService.fixedUpdate`, so physics
+   * inherits the fixed step, the per-frame step clamp, and GameTime scaling —
+   * hitstop and slow motion dilate the simulation for free.
+   */
+  stepPhysics2D(dt: number): void {
+    this.physics2dService?.step(dt);
+  }
+
+  /**
+   * Collider wireframes for the debug overlay, or `null` when this scene never
+   * touched physics. Read by `SceneRunner` each frame while the editor's
+   * collider toggle is on — routed through here so the runner never names
+   * `Physics2DService` and the export can still strip it.
+   */
+  buildPhysics2DDebugBuffers(): { vertices: Float32Array; colors: Float32Array } | null {
+    return this.physics2dService ? this.physics2dService.buildDebugBuffers() : null;
+  }
+
+  /**
+   * Blend physics poses between fixed steps for rendering. No-op when the scene
+   * never touched physics. Called once per frame by `SceneRunner`, after the
+   * fixed updates and with the same alpha the ECS gets.
+   */
+  interpolatePhysics2D(alpha: number): void {
+    this.physics2dService?.interpolate(alpha);
+  }
+
+  /** Drop every body and collider. Called by `SceneRunner.stop()`. */
+  clearPhysics2D(): void {
+    this.physics2dService?.clear();
+    this.physics2dService = null;
   }
 
   /**

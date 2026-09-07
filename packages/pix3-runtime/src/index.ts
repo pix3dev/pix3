@@ -111,9 +111,18 @@ export * from './behaviors/PunchScaleBehavior';
 export * from './behaviors/PopInBehavior';
 export * from './behaviors/CameraBrainBehavior';
 export * from './behaviors/Hitbox2DBehavior';
+export * from './behaviors/PhysicsBody2DBehavior';
+export * from './behaviors/Collider2DBehavior';
+export * from './behaviors/PhysicsWorld2DBehavior';
+export * from './behaviors/RevoluteJoint2DBehavior';
 export * from './behaviors/NetworkedNodeBehavior';
 export * from './behaviors/ReplicatedTransformBehavior';
 export * from './core/Collision2DService';
+export * from './core/collision-shapes-2d';
+export * from './core/Physics2DService';
+export * from './core/physics-2d-narrowphase';
+export * from './core/collision-polygon-config';
+export * from './core/world-transform-2d';
 
 // Multiplayer session. The wire codec under `net/protocol` stays internal on purpose — the format
 // may change without a breaking-change semver event — but the session and its transport are the

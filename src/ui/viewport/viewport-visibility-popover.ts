@@ -17,6 +17,9 @@ export class ViewportVisibilityPopover extends ComponentBase {
   @property({ type: Boolean })
   showAxisGizmo = false;
 
+  @property({ type: Boolean })
+  showCollisionShapes = false;
+
   @state()
   private isOpen = false;
 
@@ -129,6 +132,12 @@ export class ViewportVisibilityPopover extends ComponentBase {
             this.showLighting,
             'toggle-lighting',
             'Light the scene only when it has no explicit light sources'
+          )}
+          ${this.renderToggleRow(
+            'Collision Shapes',
+            this.showCollisionShapes,
+            'toggle-collision-shapes',
+            'Outline every node’s 2D colliders, not just the selected one'
           )}
         </div>
       </div>

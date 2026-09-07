@@ -22,6 +22,10 @@ import { PunchScaleBehavior } from './PunchScaleBehavior';
 import { PopInBehavior } from './PopInBehavior';
 import { CameraBrainBehavior } from './CameraBrainBehavior';
 import { Hitbox2DBehavior } from './Hitbox2DBehavior';
+import { PhysicsBody2DBehavior } from './PhysicsBody2DBehavior';
+import { Collider2DBehavior } from './Collider2DBehavior';
+import { PhysicsWorld2DBehavior } from './PhysicsWorld2DBehavior';
+import { RevoluteJoint2DBehavior } from './RevoluteJoint2DBehavior';
 import { PointAttachmentBehavior } from './PointAttachmentBehavior';
 import { NetworkedNodeBehavior } from './NetworkedNodeBehavior';
 import { ReplicatedTransformBehavior } from './ReplicatedTransformBehavior';
@@ -195,6 +199,49 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Physics',
     componentClass: Hitbox2DBehavior,
     keywords: ['hitbox', 'collision', 'collider', 'area', '2d', 'overlap', 'raycast', 'hit'],
+  });
+
+  registry.registerComponent({
+    id: 'core:PhysicsBody2D',
+    displayName: 'Physics Body 2D',
+    description:
+      'Rigid body simulated by scene.physics2d — static, kinematic or dynamic. Shape comes from ' +
+      'sibling or descendant Collider 2D components.',
+    category: 'Physics',
+    componentClass: PhysicsBody2DBehavior,
+    keywords: ['physics', 'rigidbody', 'body', 'dynamic', 'gravity', 'mass', '2d', 'simulate'],
+  });
+
+  registry.registerComponent({
+    id: 'core:Collider2D',
+    displayName: 'Collider 2D',
+    description:
+      'Physics shape (rect/circle/polygon, rotation-aware, may be concave). With no Physics Body ' +
+      'above it this is static world geometry; as a sensor it reports body-entered / body-exited.',
+    category: 'Physics',
+    componentClass: Collider2DBehavior,
+    keywords: ['collider', 'physics', 'shape', 'polygon', 'sensor', 'area', '2d', 'collision'],
+  });
+
+  registry.registerComponent({
+    id: 'core:RevoluteJoint2D',
+    displayName: 'Revolute Joint 2D',
+    description:
+      'Hinge: pins this body to a pivot so it can only rotate about it. With no connected node ' +
+      'the hinge is fixed to the world — the pinball flipper / swinging door case. Optional ' +
+      'angle limits and a motor.',
+    category: 'Physics',
+    componentClass: RevoluteJoint2DBehavior,
+    keywords: ['joint', 'hinge', 'revolute', 'pivot', 'flipper', 'door', 'motor', 'physics', '2d'],
+  });
+
+  registry.registerComponent({
+    id: 'core:PhysicsWorld2D',
+    displayName: 'Physics World 2D',
+    description: 'Sets the 2D world gravity. Attach to the scene root.',
+    category: 'Physics',
+    componentClass: PhysicsWorld2DBehavior,
+    keywords: ['physics', 'gravity', 'world', '2d'],
   });
 
   registry.registerComponent({

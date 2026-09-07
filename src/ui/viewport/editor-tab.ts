@@ -11,6 +11,7 @@ import {
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { IconService } from '@/services/editor/IconService';
 import { Navigation2DController } from '@/services/viewport/Navigation2DController';
+import { Polygon2DEditController } from '@/services/viewport/Polygon2DEditController';
 import { SceneManager, Camera3D, Node2D, NodeBase } from '@pix3/runtime';
 import { Vector2, Vector3 } from 'three';
 import {
@@ -84,6 +85,9 @@ export class EditorTabComponent extends ComponentBase {
   @inject(Navigation2DController)
   private readonly navigation2D!: Navigation2DController;
 
+  @inject(Polygon2DEditController)
+  private readonly polygonEditor!: Polygon2DEditController;
+
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
 
@@ -135,6 +139,9 @@ export class EditorTabComponent extends ComponentBase {
 
   @state()
   private showLighting = false;
+
+  @state()
+  private showCollisionShapes = false;
 
   @state()
   private navigationMode: NavigationMode = '3d';
@@ -242,6 +249,7 @@ export class EditorTabComponent extends ComponentBase {
     this.showLayer2D = appState.ui.showLayer2D;
     this.showLayer3D = appState.ui.showLayer3D;
     this.showLighting = appState.ui.showLighting;
+    this.showCollisionShapes = appState.ui.showCollisionShapes;
     this.navigationMode = appState.ui.navigationMode;
     this.editorCameraProjection = appState.ui.editorCameraProjection;
     this.syncAlignmentToolbarState();
@@ -274,6 +282,7 @@ export class EditorTabComponent extends ComponentBase {
       this.showLayer2D = appState.ui.showLayer2D;
       this.showLayer3D = appState.ui.showLayer3D;
       this.showLighting = appState.ui.showLighting;
+      this.showCollisionShapes = appState.ui.showCollisionShapes;
       this.navigationMode = appState.ui.navigationMode;
       this.editorCameraProjection = appState.ui.editorCameraProjection;
       this.requestUpdate();
@@ -291,6 +300,9 @@ export class EditorTabComponent extends ComponentBase {
 
     this.disposeSelectionSubscription = subscribe(appState.selection, () => {
       this.syncAlignmentToolbarState();
+      // Handles floating over a node that is no longer selected are unowned
+      // affordances; close the polygon tool with the selection that opened it.
+      this.polygonEditor.syncWithSelection();
       this.requestUpdate();
     });
 
@@ -457,6 +469,7 @@ export class EditorTabComponent extends ComponentBase {
             showAxisGizmo: this.showAxisGizmo,
             snapToGrid: this.snapToGrid,
             showLighting: this.showLighting,
+            showCollisionShapes: this.showCollisionShapes,
             navigationMode: this.navigationMode,
             showLayer3D: this.showLayer3D,
             showLayer2D: this.showLayer2D,
@@ -482,6 +495,7 @@ export class EditorTabComponent extends ComponentBase {
             onToggleAxisGizmo: () => this.toggleAxisGizmo(),
             onToggleSnapToGrid: () => this.toggleSnapToGrid(),
             onToggleLighting: () => this.toggleLighting(),
+            onToggleCollisionShapes: () => this.toggleCollisionShapes(),
             onToggleLayer3D: () => this.toggleLayer3D(),
             onToggleLayer2D: () => this.toggleLayer2D(),
             onSetEditorCameraProjection: projection => this.setEditorCameraProjection(projection),
@@ -875,6 +889,10 @@ export class EditorTabComponent extends ComponentBase {
     void this.commandDispatcher.executeById('view.toggle-lighting');
   }
 
+  private toggleCollisionShapes(): void {
+    void this.commandDispatcher.executeById('view.toggle-collision-shapes');
+  }
+
   private toggleNavigationMode(): void {
     const command = toggleNavigationMode();
     void this.commandDispatcher.execute(command);
@@ -1026,6 +1044,17 @@ export class EditorTabComponent extends ComponentBase {
     const rect = canvas?.getBoundingClientRect() ?? this.getBoundingClientRect();
     const screenX = event.clientX - rect.left;
     const screenY = event.clientY - rect.top;
+
+    // The collision-polygon tool gets first refusal: its vertex handles sit on
+    // top of the selection frame, so a press it does not claim must fall through
+    // to normal picking (which is how the user leaves the tool by clicking away).
+    if (this.polygonEditor.handlePointerDown(event, screenX, screenY)) {
+      this.capturePointerSafely(event.pointerId);
+      this.clearPointerInteraction();
+      this.isDragging = true;
+      return;
+    }
+
     const handleType = this.viewportRenderer.get2DHandleAt?.(screenX, screenY) ?? 'idle';
     const isSelectionModifier = event.ctrlKey || event.metaKey;
     this.clearMarqueeSelection();
@@ -1127,6 +1156,16 @@ export class EditorTabComponent extends ComponentBase {
     const rect = canvas?.getBoundingClientRect() ?? this.getBoundingClientRect();
     const screenX = event.clientX - rect.left;
     const screenY = event.clientY - rect.top;
+
+    // A polygon vertex drag owns the pointer until it is released.
+    if (this.polygonEditor.handlePointerMove(screenX, screenY)) {
+      this.isDragging = true;
+      this.viewportRenderer.requestRender();
+      return;
+    }
+    if (this.polygonEditor.isActive) {
+      this.viewportRenderer.updatePolygonHandleHover(screenX, screenY);
+    }
 
     // Space+drag pan (grab tool): an active pan follows the pointer; space held
     // without a pressed button (and no other drag in progress) just keeps the
@@ -1270,6 +1309,12 @@ export class EditorTabComponent extends ComponentBase {
 
   private handleCanvasPointerUp = (event: PointerEvent): void => {
     if (!this.isActiveTab) return;
+
+    if (this.polygonEditor.handlePointerUp()) {
+      this.releasePointerSafely(event.pointerId);
+      this.clearPointerInteraction();
+      return;
+    }
 
     if (event.pointerType === 'touch') {
       this.releasePointerSafely(event.pointerId);

@@ -2,6 +2,8 @@ import { BufferGeometry, Float32BufferAttribute, LineBasicMaterial, LineLoop } f
 import { Script } from '../core/ScriptComponent';
 import type { PropertySchema } from '../fw/property-schema';
 import type { Hitbox2DShape, Hitbox2DSource } from '../core/Collision2DService';
+import type { Point2D } from '../core/collision-shapes-2d';
+import { normalizePolygonConfig } from '../core/collision-polygon-config';
 import { OVERLAY_2D_FLAG } from '../core/render-order-2d';
 
 /**
@@ -10,13 +12,22 @@ import { OVERLAY_2D_FLAG } from '../core/render-order-2d';
  * Godot-style string groups). Registers with `scene.collision2d`; gameplay
  * scripts hit-test via `scene.collision2d.overlapCircle(...)` / `raycast(...)`.
  *
- * Shapes are axis-aligned (rotation ignored, scale honored) — see
- * Collision2DService for the contract. `debugDraw` renders the shape outline
- * in play mode (Godot's "Visible Collision Shapes").
+ * Shapes: `rect` and `circle` are axis-aligned (rotation ignored, scale honored)
+ * — see Collision2DService for that contract. `polygon` is rotation-aware and may
+ * be concave, and takes its vertices either from `points` (authored in the
+ * viewport's polygon tool) or, with `polygonSource: 'frame'`, from the animation
+ * frame currently showing on an `AnimatedSprite2D` — the outline the Sprite
+ * Editor traces from the frame's alpha.
+ *
+ * `debugDraw` renders the shape outline in play mode (Godot's "Visible Collision
+ * Shapes").
  */
 export class Hitbox2DBehavior extends Script implements Hitbox2DSource {
   private debugLine: LineLoop | null = null;
   private debugKey = '';
+  /** Last `points` array seen, with its normalized form — avoids re-parsing per query. */
+  private polygonCacheInput: unknown = undefined;
+  private polygonCache: Point2D[] = [];
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -27,6 +38,8 @@ export class Hitbox2DBehavior extends Script implements Hitbox2DSource {
       radius: 32,
       offsetX: 0,
       offsetY: 0,
+      points: [],
+      polygonSource: 'manual',
       group: 'default',
       debugDraw: false,
     };
@@ -50,13 +63,15 @@ export class Hitbox2DBehavior extends Script implements Hitbox2DSource {
           type: 'select',
           ui: {
             label: 'Shape',
-            description: 'Axis-aligned rect or circle (rotation is ignored, scale honored)',
+            description:
+              'Rect and circle are axis-aligned (rotation ignored, scale honored); polygon is rotation-aware and may be concave',
             group: 'Shape',
-            options: ['rect', 'circle'],
+            options: ['rect', 'circle', 'polygon'],
           },
           getValue: (c: unknown) => (c as Hitbox2DBehavior).config.shape,
           setValue: (c: unknown, v: unknown) => {
-            (c as Hitbox2DBehavior).config.shape = v === 'circle' ? 'circle' : 'rect';
+            (c as Hitbox2DBehavior).config.shape =
+              v === 'circle' ? 'circle' : v === 'polygon' ? 'polygon' : 'rect';
           },
         },
         numberProp('width', 'Width', 'Shape'),
@@ -64,6 +79,35 @@ export class Hitbox2DBehavior extends Script implements Hitbox2DSource {
         numberProp('radius', 'Radius', 'Shape'),
         numberProp('offsetX', 'Offset X', 'Shape'),
         numberProp('offsetY', 'Offset Y', 'Shape'),
+        {
+          name: 'polygonSource',
+          type: 'select',
+          ui: {
+            label: 'Polygon Source',
+            description:
+              'manual: the vertices below. frame: the collision polygon of the animation frame currently showing on this AnimatedSprite2D.',
+            group: 'Shape',
+            options: ['manual', 'frame'],
+          },
+          getValue: (c: unknown) => (c as Hitbox2DBehavior).config.polygonSource ?? 'manual',
+          setValue: (c: unknown, v: unknown) => {
+            (c as Hitbox2DBehavior).config.polygonSource = v === 'frame' ? 'frame' : 'manual';
+          },
+        },
+        {
+          name: 'points',
+          type: 'object',
+          ui: {
+            label: 'Polygon',
+            description: 'Vertices in node-local pixels (y up). Edit them in the viewport.',
+            group: 'Shape',
+            editor: 'collision-polygon',
+          },
+          getValue: (c: unknown) => (c as Hitbox2DBehavior).config.points ?? [],
+          setValue: (c: unknown, v: unknown) => {
+            (c as Hitbox2DBehavior).config.points = normalizePolygonConfig(v);
+          },
+        },
         {
           name: 'group',
           type: 'string',
@@ -102,7 +146,8 @@ export class Hitbox2DBehavior extends Script implements Hitbox2DSource {
   // --- Hitbox2DSource ---
 
   getHitboxShape(): Hitbox2DShape {
-    return this.config.shape === 'circle' ? 'circle' : 'rect';
+    const shape = this.config.shape;
+    return shape === 'circle' ? 'circle' : shape === 'polygon' ? 'polygon' : 'rect';
   }
 
   getHitboxSize(): { width: number; height: number; radius: number } {
@@ -119,6 +164,31 @@ export class Hitbox2DBehavior extends Script implements Hitbox2DSource {
 
   getHitboxGroup(): string {
     return String(this.config.group ?? 'default');
+  }
+
+  /**
+   * Node-local vertices. With `polygonSource: 'frame'` this changes every time
+   * the sprite advances a frame — deliberately re-read per query rather than
+   * cached, because the whole point is that the collider tracks the animation.
+   */
+  getHitboxPolygon(): readonly Point2D[] {
+    if (this.config.polygonSource === 'frame') {
+      // Duck-typed on purpose: an `instanceof AnimatedSprite2D` here would make
+      // every project that says `Hitbox2D` ship the AnimatedSprite2D module,
+      // which the export's strippable table exists to avoid. Same reasoning as
+      // the host-injected Spine module.
+      const provider = this.node as { getFrameCollisionPolygon?: () => Point2D[] } | null;
+      return typeof provider?.getFrameCollisionPolygon === 'function'
+        ? provider.getFrameCollisionPolygon()
+        : [];
+    }
+
+    const raw = this.config.points;
+    if (raw !== this.polygonCacheInput) {
+      this.polygonCacheInput = raw;
+      this.polygonCache = normalizePolygonConfig(raw);
+    }
+    return this.polygonCache;
   }
 
   // --- lifecycle ---
@@ -152,7 +222,11 @@ export class Hitbox2DBehavior extends Script implements Hitbox2DSource {
     const size = this.getHitboxSize();
     const offset = this.getHitboxOffset();
     const shape = this.getHitboxShape();
-    const key = `${shape}|${size.width}|${size.height}|${size.radius}|${offset.x}|${offset.y}`;
+    const polygon = shape === 'polygon' ? this.getHitboxPolygon() : null;
+    const key =
+      shape === 'polygon'
+        ? `polygon|${offset.x}|${offset.y}|${polygon?.map(p => `${p.x},${p.y}`).join(' ')}`
+        : `${shape}|${size.width}|${size.height}|${size.radius}|${offset.x}|${offset.y}`;
     if (this.debugLine && key === this.debugKey) {
       return;
     }
@@ -161,7 +235,14 @@ export class Hitbox2DBehavior extends Script implements Hitbox2DSource {
     this.debugKey = key;
 
     const points: number[] = [];
-    if (shape === 'circle') {
+    if (shape === 'polygon') {
+      if (!polygon || polygon.length < 3) {
+        return;
+      }
+      for (const p of polygon) {
+        points.push(offset.x + p.x, offset.y + p.y, 0);
+      }
+    } else if (shape === 'circle') {
       const segments = 32;
       for (let i = 0; i < segments; i++) {
         const a = (i / segments) * Math.PI * 2;
