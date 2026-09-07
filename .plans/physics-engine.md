@@ -1,13 +1,15 @@
 # Physics engine for Pix3 — design
 
-Status: **phase 1 built** (2026-09-06, branch `feat/collision-polygons-2d-physics`), with a
-**phase 0 added ahead of it**: collision polygons across the runtime and the editor, since a
-solver that only knows boxes and circles cannot use the outlines the Sprite Editor already
-traces. Phase 2 and 3 are still open.
+Status: **phases 0-2 built** (2026-09-06/07, branch `feat/collision-polygons-2d-physics`).
+Phase 0 was added ahead of phase 1: collision polygons across the runtime and the editor, since
+a solver that only knows boxes and circles cannot use the outlines the Sprite Editor already
+traces. Phase 2 shipped everything except two items settled by decision rather than by code (the
+`recipe-bouncer-2d` port and the split broadphase — see §7). Phase 3 (3D wrappers) stays
+demand-gated and may never happen.
 Related: `.plans/done/playable-export-size.md`, `docs/nodes-and-systems.md` §4 "Physics — which
 tier to use" / "2D physics" / "2D collision".
 
-## What shipped (phase 0 + phase 1)
+## What shipped (phases 0-2)
 
 **Phase 0 — collision polygons.** `core/collision-shapes-2d.ts` (winding, area/centroid,
 convexity, cleaning, convex hull, world transform, point/circle/rect/segment tests, SAT, and a
@@ -30,6 +32,12 @@ drawn through the orthographic camera.
 
 **Acceptance:** a 20-box stack stands with zero lateral drift for 30 s at 1/60. 115 tests
 across the three new modules.
+
+**Phase 2 — feel and ergonomics.** Kinematic `moveAndCollide` / `moveAndSlide` (the
+CharacterBody2D role, without a CharacterBody2D node), the revolute joint (angle limits, motor,
+`collideConnected`), render interpolation between fixed steps, the capsule shape, and the
+viewport-wide "Show collision shapes" toggle (pulled forward into phase 1). Two of its planned
+items were closed by decision instead of code — §7 records which and why.
 
 ### Four defects worth remembering
 
