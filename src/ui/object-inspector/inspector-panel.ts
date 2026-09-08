@@ -57,6 +57,7 @@ import {
 import '../shared/pix3-panel';
 import '../asset-library/library-inspector';
 import './inspector-panel.ts.css';
+import './inspector-controls.ts.css';
 import './model-asset-preview';
 import './property-editors';
 

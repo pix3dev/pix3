@@ -461,7 +461,7 @@ describe('InspectorPanel compact object layout', () => {
     expect(lastCommand.params?.value).toBe('left');
   });
 
-  it('renders components as a flat section with text enable actions and no foldout button', async () => {
+  it('renders components as a flat section with an enabled switch and no foldout button', async () => {
     const node = new AudioPlayer({
       id: 'audio-player',
       name: 'Audio Player',
@@ -470,21 +470,72 @@ describe('InspectorPanel compact object layout', () => {
     component.enabled = false;
     node.addComponent(component);
 
-    const { panel } = await setupInspectorForNode(node);
+    const { panel, execute } = await setupInspectorForNode(node);
 
     const sectionTitle = Array.from(panel.querySelectorAll('.group-title')).find(
       title => title.textContent?.trim() === 'Components'
     );
     const foldout = panel.querySelector('.script-foldout-btn');
-    const enableAction = Array.from(panel.querySelectorAll('.component-action-link')).find(
-      action => action.textContent?.trim() === 'Enable'
+    // Enable/disable is the permanent state of an entity, so it is a switch —
+    // not a button labelled with its own current state.
+    const enableSwitch = panel.querySelector<HTMLButtonElement>('.script-actions [role="switch"]');
+    const removeButton = panel.querySelector<HTMLButtonElement>(
+      '.script-actions .inspector-btn--danger'
     );
     const disabledName = panel.querySelector('.component-block--disabled .script-name');
 
     expect(sectionTitle).not.toBeUndefined();
     expect(foldout).toBeNull();
-    expect(enableAction).not.toBeUndefined();
+    expect(enableSwitch).not.toBeNull();
+    expect(enableSwitch?.getAttribute('aria-checked')).toBe('false');
+    expect(enableSwitch?.getAttribute('aria-label')).toBe('Enable core:PlaySound');
+    expect(removeButton?.getAttribute('aria-label')).toBe('Remove core:PlaySound');
     expect(disabledName?.textContent).toContain('core:PlaySound');
+
+    enableSwitch?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    await vi.waitFor(() => {
+      const lastCommand = execute.mock.calls.at(-1)?.[0] as {
+        params?: { componentId?: string; enabled?: boolean };
+      };
+      expect(lastCommand.params?.componentId).toBe('behavior-1');
+      expect(lastCommand.params?.enabled).toBe(true);
+    });
+  });
+
+  it('gives every icon-only inspector control a non-empty aria-label and title', async () => {
+    const node = new AudioPlayer({
+      id: 'audio-player',
+      name: 'Audio Player',
+    });
+    node.addComponent(new PlaySoundBehavior('behavior-1', 'core:PlaySound'));
+
+    const { panel } = await setupInspectorForNode(node);
+
+    const iconOnly = Array.from(
+      panel.querySelectorAll<HTMLElement>('.inspector-btn--icon, .inspector-switch')
+    );
+    expect(iconOnly.length).toBeGreaterThan(0);
+
+    const unlabelled = iconOnly.filter(
+      el => !el.getAttribute('aria-label')?.trim() || !el.getAttribute('title')?.trim()
+    );
+    expect(unlabelled.map(el => el.className)).toEqual([]);
+  });
+
+  it('reflects the editor flags as aria-pressed toggle buttons', async () => {
+    const node = new AudioPlayer({
+      id: 'audio-player',
+      name: 'Audio Player',
+    });
+
+    const { panel } = await setupInspectorForNode(node);
+
+    const flags = Array.from(
+      panel.querySelectorAll<HTMLButtonElement>('.editor-flags-row .inspector-btn--toggle')
+    );
+
+    expect(flags.map(flag => flag.getAttribute('aria-label'))).toEqual(['Visible', 'Locked']);
+    expect(flags.map(flag => flag.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
   });
 });
 

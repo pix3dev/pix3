@@ -15,6 +15,7 @@ import {
   type AnimationFramePropertyTarget,
   type AnimationResourcePropertyTarget,
 } from './animation-inspector-properties';
+import { IconSize } from '@/services/editor/IconService';
 import { getNodeVisuals } from '@/ui/scene-tree/node-visuals.helper';
 import { isPrefabChildNode, isPrefabNode } from '@/features/scene/prefab-utils';
 import { AddNodeToGroupCommand } from '@/features/scene/AddNodeToGroupCommand';
@@ -682,24 +683,26 @@ ${textPreview?.content || 'Empty file'}</pre
       <div class="property-group-section property-group-section--flags">
         <div class="editor-flags-row">
           <button
-            class="editor-flag-button ${visible ? 'is-active' : ''}"
+            class="inspector-btn inspector-btn--icon inspector-btn--toggle"
             type="button"
             ?disabled=${readOnly}
             aria-pressed=${String(visible)}
+            aria-label="Visible"
+            title=${visible ? 'Visible — click to hide in the editor' : 'Hidden — click to show'}
             @click=${() => this.host.applyPropertyChange('visible', !visible)}
           >
-            ${this.host.iconService.getIcon('eye', 14)}
-            <span>Visible</span>
+            ${this.host.iconService.getIcon(visible ? 'eye' : 'eye-off', IconSize.SMALL)}
           </button>
           <button
-            class="editor-flag-button ${locked ? 'is-active' : ''}"
+            class="inspector-btn inspector-btn--icon inspector-btn--toggle"
             type="button"
             ?disabled=${readOnly}
             aria-pressed=${String(locked)}
+            aria-label="Locked"
+            title=${locked ? 'Locked — click to unlock' : 'Unlocked — click to lock'}
             @click=${() => this.host.applyPropertyChange('locked', !locked)}
           >
-            ${this.host.iconService.getIcon(locked ? 'lock' : 'unlock', 14)}
-            <span>Locked</span>
+            ${this.host.iconService.getIcon(locked ? 'lock' : 'unlock', IconSize.SMALL)}
           </button>
         </div>
       </div>
@@ -814,6 +817,54 @@ ${textPreview?.content || 'Empty file'}</pre
     await this.host.commandDispatcher.execute(command);
   }
 
+  /**
+   * The enabled state of a component/effect card. This is a permanent property of
+   * an entity, not an action, so it renders as `role="switch"` and never as a
+   * button labelled with its own current state (`.plans/ui-consistency-pass.md`
+   * §3.3). `eye`/`eye-off` are deliberately NOT reused here: in this editor they
+   * already mean node *visibility* (editor flags, Scene Tree).
+   *
+   * @param lockedReason when set, the switch is disabled and explains why
+   *   (prefab instances don't serialize component overrides).
+   */
+  private renderEnabledSwitch(
+    enabled: boolean,
+    name: string,
+    lockedReason: string | null,
+    onToggle: () => void
+  ) {
+    const label = enabled ? `Disable ${name}` : `Enable ${name}`;
+    return html`
+      <button
+        class="inspector-switch"
+        type="button"
+        role="switch"
+        aria-checked=${String(enabled)}
+        aria-label=${label}
+        title=${lockedReason ?? label}
+        ?disabled=${lockedReason !== null}
+        @click=${onToggle}
+      ></button>
+    `;
+  }
+
+  /** Destructive card action: `trash-2`, neutral until hovered. */
+  private renderRemoveButton(name: string, lockedReason: string | null, onRemove: () => void) {
+    const label = `Remove ${name}`;
+    return html`
+      <button
+        class="inspector-btn inspector-btn--icon inspector-btn--danger"
+        type="button"
+        aria-label=${label}
+        title=${lockedReason ?? label}
+        ?disabled=${lockedReason !== null}
+        @click=${onRemove}
+      >
+        ${this.host.iconService.getIcon('trash-2', IconSize.SMALL)}
+      </button>
+    `;
+  }
+
   renderScriptsSection() {
     if (!this.host.primaryNode) return '';
 
@@ -862,24 +913,17 @@ ${textPreview?.content || 'Empty file'}</pre
                     <div class="script-name">${component.type}</div>
                   </div>
                   <div class="script-actions">
-                    <button
-                      class="component-action-link"
-                      type="button"
-                      ?disabled=${structureLocked}
-                      title=${structureLocked ? lockedTitle : ''}
-                      @click=${() => this.onToggleComponent(component.id, !component.enabled)}
-                    >
-                      ${component.enabled ? 'Disable' : 'Enable'}
-                    </button>
-                    <button
-                      class="component-action-link component-action-link--danger"
-                      type="button"
-                      ?disabled=${structureLocked}
-                      title=${structureLocked ? lockedTitle : ''}
-                      @click=${() => this.onRemoveComponent(component.id)}
-                    >
-                      Remove
-                    </button>
+                    ${this.renderEnabledSwitch(
+                      component.enabled,
+                      component.type,
+                      structureLocked ? lockedTitle : null,
+                      () => this.onToggleComponent(component.id, !component.enabled)
+                    )}
+                    ${this.renderRemoveButton(
+                      component.type,
+                      structureLocked ? lockedTitle : null,
+                      () => this.onRemoveComponent(component.id)
+                    )}
                   </div>
                 </div>
                 ${this.renderComponentProperties(component)}
@@ -1027,24 +1071,17 @@ ${textPreview?.content || 'Empty file'}</pre
                     <div class="script-name">${effect.info.displayName}</div>
                   </div>
                   <div class="script-actions">
-                    <button
-                      class="component-action-link"
-                      type="button"
-                      ?disabled=${structureLocked}
-                      title=${structureLocked ? lockedTitle : ''}
-                      @click=${() => this.onToggleEffect(effect.type, !effect.enabled)}
-                    >
-                      ${effect.enabled ? 'Disable' : 'Enable'}
-                    </button>
-                    <button
-                      class="component-action-link component-action-link--danger"
-                      type="button"
-                      ?disabled=${structureLocked}
-                      title=${structureLocked ? lockedTitle : ''}
-                      @click=${() => this.onRemoveEffect(effect.type)}
-                    >
-                      Remove
-                    </button>
+                    ${this.renderEnabledSwitch(
+                      effect.enabled,
+                      effect.info.displayName,
+                      structureLocked ? lockedTitle : null,
+                      () => this.onToggleEffect(effect.type, !effect.enabled)
+                    )}
+                    ${this.renderRemoveButton(
+                      effect.info.displayName,
+                      structureLocked ? lockedTitle : null,
+                      () => this.onRemoveEffect(effect.type)
+                    )}
                   </div>
                 </div>
                 ${params.length > 0

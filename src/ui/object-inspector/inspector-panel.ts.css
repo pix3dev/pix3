@@ -1,9 +1,13 @@
-inspector-panel {
+/* NOTE: the rest of this file is still unscoped Light-DOM (global) CSS — see
+ * `.plans/ui-consistency-pass.md` §3.3. New inspector styles belong in the
+ * sibling `inspector-controls.ts.css`, where every rule is scoped under
+ * `pix3-inspector-panel`. */
+pix3-inspector-panel {
   display: block;
   height: 100%;
 }
 
-pix3-panel {
+pix3-inspector-panel pix3-panel {
   height: 100%;
 }
 
@@ -475,31 +479,6 @@ pix3-panel {
   align-items: center;
   gap: 0.45rem;
   flex-wrap: wrap;
-}
-
-.editor-flag-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  border: 1px solid var(--line-1);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--fg-2);
-  padding: 0.28rem 0.55rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.editor-flag-button:hover:not(:disabled),
-.editor-flag-button.is-active {
-  color: var(--fg-0);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
-.editor-flag-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
 }
 
 .anchor-section {
@@ -1141,25 +1120,9 @@ pix3-panel {
 
 .script-actions {
   display: flex;
-  gap: 0.6rem;
+  align-items: center;
+  gap: 0.3rem;
   flex-shrink: 0;
-}
-
-.component-action-link {
-  background: transparent;
-  border: none;
-  color: var(--fg-2);
-  cursor: pointer;
-  padding: 0;
-  font-size: 0.74rem;
-}
-
-.component-action-link:hover {
-  color: var(--fg-0);
-}
-
-.component-action-link--danger:hover {
-  color: var(--danger);
 }
 
 .btn-icon {
