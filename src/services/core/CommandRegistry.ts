@@ -21,20 +21,25 @@ export interface CommandMenuItem {
 }
 
 /**
- * A labelled group inside a section, produced by a `menuPath` with a child segment
- * (`node/align` -> group `align` under section `node`).
+ * A submenu inside a section, produced by a `menuPath` with a child segment
+ * (`node/align` -> submenu `align` under section `node`).
  */
 export interface MenuSectionGroup {
-  /** Full menu path of the group, e.g. `node/align`. */
+  /** Full menu path of the submenu, e.g. `node/align`. */
   id: string;
   label: string;
+  /**
+   * Slot of the *row* that opens this submenu, in its parent section — same three-digit banding as
+   * a command's `menuOrder`, which is how a renderer interleaves it with the plain rows.
+   */
+  menuOrder: number;
   items: CommandMenuItem[];
 }
 
 /**
  * Represents a section of menu items organized by menu path. `items` are the parent-level rows;
- * `groups` are the labelled child groups. Both can be present — a renderer draws the plain items
- * first, then the groups.
+ * `groups` are the submenus. Both carry a `menuOrder`, and a renderer merges the two lists by it —
+ * a submenu row occupies a slot among the plain rows, it is not appended after them.
  */
 export interface MenuSection {
   id: string;
@@ -72,28 +77,52 @@ const SECTION_LABELS: Record<string, string> = {
   help: 'Help',
 };
 
+/** Lowest slot occupied by a submenu's own items — the fallback slot for its row. */
+const lowestOrder = (items: readonly CommandMenuItem[]): number =>
+  items.reduce(
+    (lowest, item) => Math.min(lowest, item.menuOrder ?? Number.MAX_SAFE_INTEGER),
+    Number.MAX_SAFE_INTEGER
+  );
+
+/** Presentation of the row that opens a submenu: its label and its slot in the parent section. */
+export interface SubmenuRowMeta {
+  readonly label: string;
+  readonly menuOrder: number;
+}
+
 /**
- * Display labels for the child segments of a `menuPath` (`node/align` -> key `align`). Anything
- * missing falls back to a capitalised segment.
+ * Metadata of the submenu *rows*, keyed by full menu path (`node/align`).
+ *
+ * A submenu row is not a command — it has no id, no handler and no metadata of its own — so this
+ * is the only place its label and its slot can live. Both fields belong here for the same reason:
+ * storing the slot once, next to the label, is giving that row its metadata, not duplicating a
+ * command's `menuOrder`.
+ *
+ * An unlisted path still renders: the label falls back to its capitalised last segment and the
+ * slot to the lowest `menuOrder` among its own items.
  */
-export const SUBMENU_LABELS: Record<string, string> = {
-  align: 'Align',
-  distribute: 'Distribute',
-  '2d': '2D',
-  '3d': '3D',
+export const SUBMENU_ROWS: Record<string, SubmenuRowMeta> = {
+  'node/align': { label: 'Align', menuOrder: 200 },
+  'node/distribute': { label: 'Distribute', menuOrder: 210 },
 };
 
 const capitalise = (segment: string): string =>
   segment.length === 0 ? segment : segment.charAt(0).toUpperCase() + segment.slice(1);
 
-/** Label for a child path (`align`, or `align/edges` for a deeper nesting). */
-const submenuLabel = (childPath: string): string => {
-  const known = SUBMENU_LABELS[childPath];
-  if (known) {
-    return known;
-  }
-  const lastSegment = childPath.split('/').pop() ?? childPath;
-  return SUBMENU_LABELS[lastSegment] ?? capitalise(lastSegment);
+/**
+ * Row metadata for a submenu at `fullPath` (`node/align`, or `node/align/edges` when nested):
+ * the full path first, then its last segment, then the fallbacks.
+ */
+const submenuRowMeta = (
+  fullPath: string,
+  items: readonly CommandMenuItem[]
+): { label: string; menuOrder: number } => {
+  const lastSegment = fullPath.split('/').pop() ?? fullPath;
+  const known = SUBMENU_ROWS[fullPath] ?? SUBMENU_ROWS[lastSegment];
+  return {
+    label: known?.label ?? capitalise(lastSegment),
+    menuOrder: known?.menuOrder ?? lowestOrder(items),
+  };
 };
 
 const sectionRank = (sectionId: string): number => {
@@ -114,12 +143,6 @@ interface SectionAccumulator {
   groups: Map<string, CommandMenuItem[]>;
 }
 
-const lowestOrder = (items: readonly CommandMenuItem[]): number =>
-  items.reduce(
-    (lowest, item) => Math.min(lowest, item.menuOrder ?? Number.MAX_SAFE_INTEGER),
-    Number.MAX_SAFE_INTEGER
-  );
-
 /**
  * Registry for managing commands and building menu structures from registered commands.
  * Commands can opt into the main menu by setting addToMenu=true and providing menuPath.
@@ -130,6 +153,7 @@ export class CommandRegistry {
   private registrationOrder = new Map<string, number>();
   private registrationCounter = 0;
   private keybindingService: KeybindingService;
+  private readonly changeListeners = new Set<() => void>();
 
   constructor(keybindingService?: KeybindingService) {
     if (keybindingService) {
@@ -152,6 +176,22 @@ export class CommandRegistry {
    * @param command The command to register
    */
   register(command: Command): void {
+    this.registerOne(command);
+    this.notifyChanged();
+  }
+
+  /**
+   * Register multiple commands at once. One change notification for the whole batch — the editor
+   * shell registers ~120 commands in a single call, and every menu does not need 120 rebuilds.
+   */
+  registerMany(...commands: Command[]): void {
+    for (const command of commands) {
+      this.registerOne(command);
+    }
+    this.notifyChanged();
+  }
+
+  private registerOne(command: Command): void {
     this.commands.set(command.metadata.id, command);
     this.registrationOrder.set(command.metadata.id, this.registrationCounter++);
 
@@ -165,11 +205,23 @@ export class CommandRegistry {
   }
 
   /**
-   * Register multiple commands at once.
+   * Subscribe to changes of the registered command set; returns the disposer.
+   *
+   * The main menu is generated from this registry, and the registry keeps filling up after the
+   * menu element is connected (window/align commands, and anything registered by a feature that
+   * loads later). Without a notification a menu built once at `connectedCallback` serves a stale
+   * snapshot forever — a section registered later has no button on the bar at all.
    */
-  registerMany(...commands: Command[]): void {
-    for (const command of commands) {
-      this.register(command);
+  onDidChangeCommands(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private notifyChanged(): void {
+    for (const listener of Array.from(this.changeListeners)) {
+      listener();
     }
   }
 
@@ -256,13 +308,14 @@ export class CommandRegistry {
         label: SECTION_LABELS[sectionId] ?? capitalise(sectionId),
         items: accumulator.items.sort((a, b) => this.compareMenuItems(a, b)),
         groups: Array.from(accumulator.groups.entries())
-          .map(([childPath, items]) => ({
-            id: `${sectionId}/${childPath}`,
-            label: submenuLabel(childPath),
-            items: items.sort((a, b) => this.compareMenuItems(a, b)),
-          }))
-          // Groups sit after the plain items, ordered by the first slot they occupy.
-          .sort((a, b) => lowestOrder(a.items) - lowestOrder(b.items) || a.id.localeCompare(b.id)),
+          .map(([childPath, items]) => {
+            const sorted = items.sort((a, b) => this.compareMenuItems(a, b));
+            const fullPath = `${sectionId}/${childPath}`;
+            const { label, menuOrder } = submenuRowMeta(fullPath, sorted);
+            return { id: fullPath, label, menuOrder, items: sorted };
+          })
+          // Ordered by the slot each submenu row occupies; the renderer merges them with `items`.
+          .sort((a, b) => a.menuOrder - b.menuOrder || a.id.localeCompare(b.id)),
       }));
   }
 
@@ -308,5 +361,7 @@ export class CommandRegistry {
 
   dispose(): void {
     this.commands.clear();
+    this.notifyChanged();
+    this.changeListeners.clear();
   }
 }
