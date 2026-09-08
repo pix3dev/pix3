@@ -16,9 +16,7 @@ export class CreateAnimatedSprite2DCommand extends CreateNodeBaseCommand<
     id: 'scene.create-animatedsprite2d',
     title: 'Create AnimatedSprite2D',
     description: 'Create a 2D animated sprite in the scene',
-    menuPath: 'create/2d',
-    addToMenu: true,
-    menuOrder: 160,
+    addToMenu: false,
     keywords: ['create', 'animated', 'sprite', '2d', 'ui'],
   };
 

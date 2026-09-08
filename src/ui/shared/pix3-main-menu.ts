@@ -1,10 +1,13 @@
 import { ComponentBase, customElement, html, inject, state, unsafeCSS } from '@/fw';
 import { createCommandContext } from '@/core/command';
 import { ServiceContainer } from '@/fw/di';
-import { CommandRegistry } from '@/services/core/CommandRegistry';
+import {
+  CommandRegistry,
+  MENU_SECTION_ORDER,
+  type CommandMenuItem,
+} from '@/services/core/CommandRegistry';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { NodeRegistry } from '@/services/scene/NodeRegistry';
-import { NodeTypePickerService } from '@/services/editor/NodeTypePickerService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { appState, getAppStateSnapshot } from '@/state';
 import styles from './pix3-main-menu.ts.css?raw';
@@ -16,6 +19,12 @@ interface MainMenuItem {
   icon?: string;
   commandId?: string;
   nodeTypeId?: string;
+  /**
+   * `menuOrder` of the backing command. The hundreds digit is a semantic band, and the dropdown
+   * draws a separator wherever it changes between two neighbours — so a band boundary cannot be
+   * forgotten the way an explicit separator entry could.
+   */
+  menuOrder?: number;
 }
 
 interface MainMenuSection {
@@ -24,6 +33,21 @@ interface MainMenuSection {
   items: MainMenuItem[];
   groupedItems?: Array<{ label: string; items: MainMenuItem[] }>;
 }
+
+/** `<hr>`-equivalent between two `menuOrder` bands. */
+const SEPARATOR_HTML = '<div class="menu-separator" role="separator"></div>';
+
+/** Semantic band of a menu row; rows without an order share one trailing band. */
+const bandOf = (item: MainMenuItem): number =>
+  item.menuOrder === undefined ? Number.POSITIVE_INFINITY : Math.floor(item.menuOrder / 100);
+
+const toMainMenuItem = (item: CommandMenuItem): MainMenuItem => ({
+  id: item.id,
+  label: item.label,
+  shortcut: item.shortcut,
+  commandId: item.commandId,
+  menuOrder: item.menuOrder,
+});
 
 /**
  * Synthetic section id for the "…" button. The menu bar is width-capped so it can never reach the
@@ -45,9 +69,6 @@ export class Pix3MainMenu extends ComponentBase {
 
   @inject(IconService)
   private readonly iconService!: IconService;
-
-  @inject(NodeTypePickerService)
-  private readonly nodeTypePickerService!: NodeTypePickerService;
 
   // Use light DOM (default) to avoid clipping issues with absolutely positioned dropdowns
   @state()
@@ -257,20 +278,37 @@ export class Pix3MainMenu extends ComponentBase {
     `;
     };
 
-    const content = section.groupedItems?.length
-      ? section.groupedItems
-          .map(
-            group => `
-              <div class="menu-group">
-                <div class="menu-group-label">${group.label}</div>
-                <div class="section-items">
-                  ${group.items.map(item => renderItem(item)).join('')}
-                </div>
-              </div>
-            `
-          )
-          .join('')
-      : `<div class="section-items">${section.items.map(item => renderItem(item)).join('')}</div>`;
+    /** Rows plus the automatic separators wherever the `menuOrder` band changes. */
+    const renderItems = (items: MainMenuItem[]): string =>
+      items
+        .map((item, index) => {
+          const separator =
+            index > 0 && bandOf(items[index - 1]) !== bandOf(item) ? SEPARATOR_HTML : '';
+          return `${separator}${renderItem(item)}`;
+        })
+        .join('');
+
+    // Parent-level rows first, then the labelled submenu groups — both can be present.
+    const blocks: string[] = [];
+    if (section.items.length > 0) {
+      blocks.push(`<div class="section-items">${renderItems(section.items)}</div>`);
+    }
+    for (const group of section.groupedItems ?? []) {
+      if (group.items.length === 0) {
+        continue;
+      }
+      blocks.push(`
+        <div class="menu-group">
+          <div class="menu-group-label">${group.label}</div>
+          <div class="section-items">${renderItems(group.items)}</div>
+        </div>
+      `);
+    }
+
+    const content =
+      section.items.length > 0 && blocks.length > 1
+        ? [blocks[0], SEPARATOR_HTML, ...blocks.slice(1)].join('')
+        : blocks.join('');
 
     return `
       <div class="menu-dropdown" role="menu" onmouseleave="this.dispatchEvent(new CustomEvent('menu-mouseleave', {bubbles: true}))">
@@ -384,22 +422,11 @@ export class Pix3MainMenu extends ComponentBase {
   }
 
   private toggleSection = (sectionId: string) => {
-    if (sectionId === 'create') {
-      this.activeSection = null;
-      this.menuOpenedByClick = false;
-      void this.openNodeTypePicker();
-      return;
-    }
-
     this.activeSection = this.activeSection === sectionId ? null : sectionId;
     this.menuOpenedByClick = this.activeSection !== null;
   };
 
   private handleSectionHover = (sectionId: string) => {
-    if (sectionId === 'create') {
-      return;
-    }
-
     // Only allow hover to open menus if a menu is already open (either by click or hover)
     if (this.activeSection !== null) {
       this.activeSection = sectionId;
@@ -421,33 +448,57 @@ export class Pix3MainMenu extends ComponentBase {
   };
 
   private buildMenuSections(): MainMenuSection[] {
-    const commandSections: MainMenuSection[] = this.commandRegistry
-      .buildMenuSections()
-      .map(section => ({
-        id: section.id,
-        label: section.label,
-        items: section.items.map(item => ({
-          id: item.id,
-          label: item.label,
-          shortcut: item.shortcut,
-          commandId: item.commandId,
-        })),
-      }));
+    const sections: MainMenuSection[] = this.commandRegistry.buildMenuSections().map(section => ({
+      id: section.id,
+      label: section.label,
+      items: section.items.map(toMainMenuItem),
+      groupedItems: section.groups.map(group => ({
+        label: group.label,
+        items: group.items.map(toMainMenuItem),
+      })),
+    }));
 
-    const createSection: MainMenuSection = {
+    // Create has two sources: commands that declare `menuPath: 'create'` (Prefab Instance) and the
+    // node-type registry. The command rows go on top; the registry groups follow, separated.
+    const nodeTypeGroups = this.buildNodeTypeGroups();
+    const existing = sections.find(section => section.id === 'create');
+    if (existing) {
+      existing.groupedItems = [...(existing.groupedItems ?? []), ...nodeTypeGroups];
+      return sections;
+    }
+
+    sections.splice(this.createSectionIndex(sections), 0, {
       id: 'create',
       label: 'Create',
       items: [],
+      groupedItems: nodeTypeGroups,
+    });
+    return sections;
+  }
+
+  /** Node types from the registry, grouped as 2D / UI / 3D / Audio. */
+  private buildNodeTypeGroups(): Array<{ label: string; items: MainMenuItem[] }> {
+    return this.nodeRegistry.getGroupedDropdownItems().map(group => ({
+      label: group.label,
+      items: group.items.map(item => ({
+        id: `create-${item.id}`,
+        // The verb already lives in the menu title, so the row is just the node type name.
+        label: item.label,
+        icon: item.icon,
+        nodeTypeId: item.id,
+      })),
+    }));
+  }
+
+  /** Where a synthesised Create section belongs, per the shared section order. */
+  private createSectionIndex(sections: MainMenuSection[]): number {
+    const rank = (id: string): number => {
+      const index = (MENU_SECTION_ORDER as readonly string[]).indexOf(id);
+      return index === -1 ? MENU_SECTION_ORDER.length : index;
     };
-
-    const sectionsWithoutCreate = commandSections.filter(section => section.id !== 'create');
-    const fileSectionIndex = sectionsWithoutCreate.findIndex(section => section.id === 'file');
-    if (fileSectionIndex >= 0) {
-      sectionsWithoutCreate.splice(fileSectionIndex + 1, 0, createSection);
-      return sectionsWithoutCreate;
-    }
-
-    return [createSection, ...sectionsWithoutCreate];
+    const createRank = rank('create');
+    const index = sections.findIndex(section => rank(section.id) > createRank);
+    return index === -1 ? sections.length : index;
   }
 
   protected render() {
@@ -523,24 +574,14 @@ export class Pix3MainMenu extends ComponentBase {
       id: OVERFLOW_SECTION_ID,
       label: 'More menus',
       items: [],
-      groupedItems: hidden.flatMap(section =>
-        section.groupedItems?.length
-          ? section.groupedItems.map(group => ({
-              label: `${section.label} — ${group.label}`,
-              items: group.items,
-            }))
-          : [{ label: section.label, items: section.items }]
-      ),
+      groupedItems: hidden.flatMap(section => [
+        ...(section.items.length > 0 ? [{ label: section.label, items: section.items }] : []),
+        ...(section.groupedItems ?? []).map(group => ({
+          label: `${section.label} — ${group.label}`,
+          items: group.items,
+        })),
+      ]),
     };
-  }
-
-  private async openNodeTypePicker(): Promise<void> {
-    const nodeTypeId = await this.nodeTypePickerService.showPicker();
-    if (!nodeTypeId) {
-      return;
-    }
-
-    await this.executeCreateMenuItem(nodeTypeId);
   }
 }
 

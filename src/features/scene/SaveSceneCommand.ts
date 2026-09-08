@@ -18,11 +18,11 @@ export class SaveSceneCommand extends CommandBase<void, void> {
     title: 'Save',
     description: 'Save the active scene to its current file',
     keywords: ['save', 'scene'],
-    menuPath: 'file',
     keybinding: 'Mod+S',
     when: '!isInputFocused',
-    addToMenu: true,
-    menuOrder: 10,
+    // The File menu's single Save row is `editor.save-active-resource`; this command keeps the
+    // Mod+S keybinding and its palette entry, but must not add a second "Save" item.
+    addToMenu: false,
   };
 
   private readonly params?: SaveSceneOperationParams;

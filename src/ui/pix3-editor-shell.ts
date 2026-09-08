@@ -106,6 +106,7 @@ import { OpenGeneratePanelCommand } from '@/features/editor/OpenGeneratePanelCom
 import { OpenLibraryDocumentCommand } from '@/features/library/OpenLibraryDocumentCommand';
 import { CheckScriptsCommand } from '@/features/scripts/CheckScriptsCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
+import { BrowseNodeTypesCommand } from '@/features/scene/BrowseNodeTypesCommand';
 import { SetTransformModeCommand } from '@/features/viewport/SetTransformModeCommand';
 import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
 import { ToggleAxisGizmoCommand } from '@/features/viewport/ToggleAxisGizmoCommand';
@@ -458,6 +459,8 @@ export class Pix3EditorShell extends ComponentBase {
     const openLibraryDocumentCommand = new OpenLibraryDocumentCommand();
     const checkScriptsCommand = new CheckScriptsCommand();
     const addAnimationPlayerCommand = new AddAnimationPlayerToSelectionCommand();
+    // Searchable fallback for the Create menu, whose rows are grouped by node type.
+    const browseNodeTypesCommand = new BrowseNodeTypesCommand();
 
     // Register viewport commands
     const selectModeCommand = new SetTransformModeCommand('select');
@@ -520,6 +523,7 @@ export class Pix3EditorShell extends ComponentBase {
       openLibraryDocumentCommand,
       checkScriptsCommand,
       addAnimationPlayerCommand,
+      browseNodeTypesCommand,
       newProjectCommand,
       closeProjectCommand,
       moveProjectToFolderCommand,

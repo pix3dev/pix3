@@ -102,7 +102,10 @@ pix3-main-menu {
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-pop);
   min-width: 200px;
-  overflow: hidden;
+  /* Create lists every registered node type, so a dropdown can be taller than the window. */
+  max-height: calc(100vh - 72px);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .menu-section {
@@ -183,6 +186,13 @@ pix3-main-menu {
   font-size: 11px;
   color: var(--fg-3);
   white-space: nowrap;
+}
+
+/* Drawn automatically between two `menuOrder` bands (the hundreds digit), never authored. */
+.menu-separator {
+  height: 1px;
+  margin: 4px 8px;
+  background-color: var(--line-1);
 }
 
 .menu-divider {
