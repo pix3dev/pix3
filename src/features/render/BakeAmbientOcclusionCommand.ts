@@ -29,9 +29,9 @@ export class BakeAmbientOcclusionCommand extends CommandBase<void, void> {
     title: 'Bake Ambient Occlusion',
     description: 'Bake AO for static meshes in this scene into lightmap textures',
     keywords: ['ao', 'ambient', 'occlusion', 'bake', 'lightmap', 'shadow'],
-    menuPath: 'tools',
+    menuPath: 'project',
     addToMenu: true,
-    menuOrder: 60,
+    menuOrder: 400,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

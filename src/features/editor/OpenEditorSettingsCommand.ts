@@ -5,11 +5,11 @@ import { CommandBase, type CommandMetadata, type CommandExecutionResult } from '
 export class OpenEditorSettingsCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'editor.open-settings',
-    title: 'Editor Settings',
+    title: 'Editor Settings…',
     description: 'Open the editor settings modal',
-    menuPath: 'file',
+    menuPath: 'edit',
     addToMenu: true,
-    menuOrder: 95,
+    menuOrder: 900,
     keywords: ['editor', 'settings', 'preferences'],
   };
 

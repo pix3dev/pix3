@@ -107,7 +107,7 @@ import { OpenLibraryDocumentCommand } from '@/features/library/OpenLibraryDocume
 import { CheckScriptsCommand } from '@/features/scripts/CheckScriptsCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
 import { BrowseNodeTypesCommand } from '@/features/scene/BrowseNodeTypesCommand';
-import { SetTransformModeCommand } from '@/features/viewport/SetTransformModeCommand';
+import { createTransformModeCommands } from '@/features/viewport/SetTransformModeCommand';
 import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
 import { ToggleAxisGizmoCommand } from '@/features/viewport/ToggleAxisGizmoCommand';
 import { ToggleLayer2DCommand } from '@/features/viewport/ToggleLayer2DCommand';
@@ -463,10 +463,7 @@ export class Pix3EditorShell extends ComponentBase {
     const browseNodeTypesCommand = new BrowseNodeTypesCommand();
 
     // Register viewport commands
-    const selectModeCommand = new SetTransformModeCommand('select');
-    const translateModeCommand = new SetTransformModeCommand('translate');
-    const rotateModeCommand = new SetTransformModeCommand('rotate');
-    const scaleModeCommand = new SetTransformModeCommand('scale');
+    const transformModeCommands = createTransformModeCommands();
     const toggleGridCommand = new ToggleGridCommand();
     const toggleAxisGizmoCommand = new ToggleAxisGizmoCommand();
     const toggleSnapToGridCommand = new ToggleSnapToGridCommand();
@@ -534,10 +531,7 @@ export class Pix3EditorShell extends ComponentBase {
       exportPlayableHtmlCommand,
       exportPlayableZipCommand,
       startRemotePreviewCommand,
-      selectModeCommand,
-      translateModeCommand,
-      rotateModeCommand,
-      scaleModeCommand,
+      ...transformModeCommands,
       toggleGridCommand,
       toggleAxisGizmoCommand,
       toggleSnapToGridCommand,
@@ -1249,7 +1243,7 @@ export class Pix3EditorShell extends ComponentBase {
       { id: 'game.start', label: 'Play Scene', icon: 'play', disabled: isPlaying },
       {
         id: 'game.start-main',
-        label: 'Play Game (Entry Scene)',
+        label: 'Play Game',
         icon: 'film',
         disabled: isPlaying,
       },

@@ -14,14 +14,14 @@ import { ServiceContainer } from '@/fw/di';
 export class ZoomDefaultCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.zoom-default',
-    title: 'Zoom Default',
+    title: 'Reset Zoom',
     description: 'Reset viewport zoom to default (1:1)',
     keywords: ['zoom', 'viewport', 'reset'],
     menuPath: 'view',
     keybinding: 'Home',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 30,
+    menuOrder: 620,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

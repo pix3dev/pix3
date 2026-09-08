@@ -11,11 +11,11 @@ import { CommandBase, type CommandExecutionResult, type CommandMetadata } from '
 export class OpenLibraryDocumentCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'library.open-document',
-    title: 'Asset Library',
+    title: 'Library',
     description: 'Open the reusable asset library (prefabs, images, fonts, audio, shaders)',
-    menuPath: 'view',
+    menuPath: 'window',
     addToMenu: true,
-    menuOrder: 48,
+    menuOrder: 130,
     keywords: ['library', 'assets', 'store', 'prefab', 'reuse', 'kit', 'marketplace'],
   };
 

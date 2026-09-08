@@ -18,11 +18,12 @@ export interface SaveAsPrefabCommandParams {
 export class SaveAsPrefabCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'scene.save-as-prefab',
-    title: 'Save Branch as Prefab',
+    title: 'Save Branch as Prefab…',
     description: 'Save selected node branch as prefab and replace it with instance',
     keywords: ['prefab', 'save', 'branch', 'instance'],
-    menuPath: 'file',
+    menuPath: 'node',
     addToMenu: true,
+    menuOrder: 300,
   };
 
   private readonly params?: SaveAsPrefabCommandParams;

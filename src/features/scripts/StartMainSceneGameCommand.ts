@@ -26,12 +26,14 @@ import { ensureSceneActive, openGameSurface } from '@/features/scripts/play-work
 export class StartMainSceneGameCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'game.start-main',
-    title: 'Play Game (Entry Scene)',
+    title: 'Play Game',
     description: 'Start the game from the project entry scene',
     keywords: ['play', 'game', 'start', 'main', 'run', 'entry'],
-    menuPath: 'project',
+    menuPath: 'run',
+    keybinding: 'F5 | Mod+Ctrl+Enter',
+    when: '!isInputFocused',
     addToMenu: true,
-    menuOrder: 101,
+    menuOrder: 100,
   };
 
   private readonly gamePlaySessionService: GamePlaySessionService;

@@ -24,12 +24,12 @@ export interface PublishToLibraryCommandParams {
 export class PublishToLibraryCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'library.publish-node',
-    title: 'Publish to Library',
+    title: 'Publish to Library…',
     description: 'Pack the selected node and its assets into your Asset Library',
     keywords: ['library', 'publish', 'prefab', 'reuse', 'save'],
-    menuPath: 'edit',
+    menuPath: 'node',
     addToMenu: true,
-    menuOrder: 90,
+    menuOrder: 310,
   };
 
   private readonly params: PublishToLibraryCommandParams;

@@ -63,6 +63,7 @@ export type {
   SelectionState,
   TabsState,
   TelemetryState,
+  TransformMode,
   ThemeName,
   UIState,
   RouterState,

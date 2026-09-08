@@ -11,14 +11,15 @@ import { ToggleUIFlagOperation } from './ToggleUIFlagOperation';
 export class ToggleGridCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-grid',
-    title: 'Toggle Grid',
+    title: 'Grid',
     description: 'Show or hide the grid in the viewport',
     keywords: ['grid', 'viewport', 'toggle'],
     menuPath: 'view',
     keybinding: 'G',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 20,
+    menuOrder: 300,
+    checked: snapshot => snapshot.ui.showGrid,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

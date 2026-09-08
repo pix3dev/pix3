@@ -17,7 +17,7 @@ export class UndoCommand extends CommandBase<void, void> {
     keybinding: 'Mod+Z',
     when: '!isInputFocused',
     addToMenu: true,
-    menuOrder: 0,
+    menuOrder: 100,
   };
 
   private readonly operations: OperationService;

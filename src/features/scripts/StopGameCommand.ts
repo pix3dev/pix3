@@ -14,13 +14,14 @@ import { closeGameSurface } from '@/features/scripts/play-workspace';
 export class StopGameCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'game.stop',
-    title: 'Stop Game',
+    title: 'Stop',
     description: 'Stop the game and close the tab',
     keywords: ['stop', 'game', 'close'],
-    menuPath: 'project',
-    keybinding: 'Mod+Ctrl+Shift+Enter',
+    menuPath: 'run',
+    keybinding: 'F8 | Mod+Ctrl+Shift+Enter',
+    when: '!isInputFocused',
     addToMenu: true,
-    menuOrder: 103,
+    menuOrder: 200,
   };
 
   private readonly gamePlaySessionService: GamePlaySessionService;

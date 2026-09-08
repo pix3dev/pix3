@@ -7,9 +7,9 @@ export class OpenGamePopoutWindowCommand extends CommandBase<void, void> {
     title: 'Open Game Window',
     description: 'Open or focus the dedicated external game preview window',
     keywords: ['game', 'window', 'popout'],
-    menuPath: 'project',
+    menuPath: 'run',
     addToMenu: true,
-    menuOrder: 105,
+    menuOrder: 300,
   };
 
   constructor(private readonly gamePlaySessionService: GamePlaySessionService) {

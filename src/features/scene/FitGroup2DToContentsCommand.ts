@@ -26,11 +26,11 @@ export class FitGroup2DToContentsCommand extends CommandBase<void, void> {
     title: 'Fit Group to Contents',
     description: 'Resize the selected Group2D to wrap its children without moving them',
     keywords: ['group', 'fit', 'resize', 'contents', 'shrink', 'wrap', '2d'],
-    menuPath: 'edit',
+    menuPath: 'node',
     keybinding: 'Mod+Alt+F',
     when: '!isInputFocused && (viewportFocused || sceneTreeFocused)',
     addToMenu: true,
-    menuOrder: 17,
+    menuOrder: 110,
   };
 
   private readonly params?: FitGroup2DToContentsCommandParams;

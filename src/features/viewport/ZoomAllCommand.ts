@@ -21,7 +21,7 @@ export class ZoomAllCommand extends CommandBase<void, void> {
     keybinding: 'Shift+F',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 31,
+    menuOrder: 710,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

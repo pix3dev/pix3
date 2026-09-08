@@ -1,11 +1,18 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { Command, CommandMetadata } from '@/core/command';
 import { KeybindingService } from '@/services/editor/KeybindingService';
 import { CommandRegistry } from '@/services/core/CommandRegistry';
+import { SwitchWorkspaceModeCommand } from '@/features/editor/SwitchWorkspaceModeCommand';
+import {
+  createTransformModeCommands,
+  transformModeCommandId,
+} from '@/features/viewport/SetTransformModeCommand';
+import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
+import { appState, resetAppState } from '@/state';
 
 /**
  * Two guards live in this file.
@@ -189,6 +196,63 @@ describe('CommandRegistry menu machinery', () => {
   });
 });
 
+describe('CommandRegistry.isChecked', () => {
+  afterEach(() => {
+    resetAppState();
+  });
+
+  it('returns undefined for a command that declares no checked predicate', () => {
+    const registry = registryWith({
+      id: 'edit.undo',
+      title: 'Undo',
+      menuPath: 'edit',
+      addToMenu: true,
+      menuOrder: 100,
+    });
+
+    // Not `false` — the menu has to tell "plain action" apart from "checkable but off".
+    expect(registry.isChecked('edit.undo')).toBeUndefined();
+  });
+
+  it('returns undefined for a command that is not registered at all', () => {
+    expect(registryWith().isChecked('view.toggle-grid')).toBeUndefined();
+  });
+
+  it('follows the predicate against live app state', () => {
+    const registry = registryWith(new ToggleGridCommand().metadata);
+
+    appState.ui.showGrid = true;
+    expect(registry.isChecked('view.toggle-grid')).toBe(true);
+
+    appState.ui.showGrid = false;
+    expect(registry.isChecked('view.toggle-grid')).toBe(false);
+  });
+
+  it('checks exactly one transform mode — the four commands are a radio group', () => {
+    const commands = createTransformModeCommands();
+    const registry = new CommandRegistry(new KeybindingService());
+    registry.registerMany(...commands);
+
+    for (const mode of ['select', 'translate', 'rotate', 'scale'] as const) {
+      appState.ui.transformMode = mode;
+      const checkedIds = commands
+        .map(command => command.metadata.id)
+        .filter(id => registry.isChecked(id) === true);
+      expect(checkedIds).toEqual([transformModeCommandId(mode)]);
+    }
+  });
+
+  it('reports the workspace toggle as checked only in Flow', () => {
+    const registry = registryWith(new SwitchWorkspaceModeCommand().metadata);
+
+    appState.ui.workspaceMode = 'studio';
+    expect(registry.isChecked('editor.switch-workspace-mode')).toBe(false);
+
+    appState.ui.workspaceMode = 'flow';
+    expect(registry.isChecked('editor.switch-workspace-mode')).toBe(true);
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Metadata guard — reads the `CommandMetadata` literals off disk.
 // ---------------------------------------------------------------------------
@@ -312,8 +376,7 @@ describe('command menu metadata', () => {
     expect(saveRows.map(command => command.id)).toEqual(['editor.save-active-resource']);
   });
 
-  // Unskip in G3 — the current metadata still has the documented collisions.
-  it.skip('gives every menu command a menuPath', () => {
+  it('gives every menu command a menuPath', () => {
     const offenders = scanCommandMetadata().filter(
       command => command.addToMenu && !command.menuPath
     );
@@ -323,8 +386,7 @@ describe('command menu metadata', () => {
     ).toEqual([]);
   });
 
-  // Unskip in G3 — the current metadata still has the documented collisions.
-  it.skip('gives every menu command a menuOrder', () => {
+  it('gives every menu command a menuOrder', () => {
     const offenders = scanCommandMetadata().filter(
       command => command.addToMenu && command.menuOrder === undefined
     );
@@ -334,8 +396,7 @@ describe('command menu metadata', () => {
     ).toEqual([]);
   });
 
-  // Unskip in G3 — the current metadata still has the documented collisions.
-  it.skip('keeps every (menuPath, menuOrder) pair unique', () => {
+  it('keeps every (menuPath, menuOrder) pair unique', () => {
     const slots = new Map<string, string[]>();
     for (const command of scanCommandMetadata()) {
       if (!command.addToMenu || !command.menuPath) {

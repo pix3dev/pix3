@@ -17,7 +17,7 @@ export class SaveActiveResourceCommand extends CommandBase<void, void> {
     keybinding: 'Mod+S',
     when: '!isInputFocused',
     addToMenu: true,
-    menuOrder: 10,
+    menuOrder: 200,
   };
 
   preconditions(context: CommandContext): CommandPreconditionResult {

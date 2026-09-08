@@ -69,6 +69,19 @@ export interface CommandMetadata {
    * If not specified, registration order is used.
    */
   readonly menuOrder?: number;
+  /**
+   * Makes the command a *checkable* menu item: the row renders as
+   * `role="menuitemcheckbox"` with a check glyph whenever this predicate is true.
+   *
+   * The same predicate is what the viewport toolbar reads through
+   * {@link CommandRegistry.isChecked}, so a toggle's menu check and its toolbar "active" state
+   * cannot drift apart. Declare it only for commands that represent a *state* (a view toggle, a
+   * transform mode); a plain action leaves it undefined and stays a `role="menuitem"`.
+   *
+   * The predicate must be pure and synchronous — it runs on every menu open and every toolbar
+   * render — and it must read its truth from the snapshot, never from a service field.
+   */
+  readonly checked?: (snapshot: AppStateSnapshot) => boolean;
 }
 
 /**

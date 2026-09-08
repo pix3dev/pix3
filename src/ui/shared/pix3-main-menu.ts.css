@@ -165,6 +165,26 @@ pix3-main-menu {
   opacity: 0.6;
 }
 
+/* Check gutter of a menu row. Present on EVERY row, checked or not (and on plain actions too), so
+   every label in a dropdown starts at the same x — a gutter that appears only when something is
+   checked makes labels jump as the state changes. */
+.menu-item-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  color: var(--accent);
+}
+
+.menu-item-check svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
 .menu-item-icon {
   display: inline-flex;
   align-items: center;

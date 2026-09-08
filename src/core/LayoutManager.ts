@@ -82,7 +82,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.agentChat]: 'Agent',
   [PANEL_COMPONENT_TYPES.library]: 'Library',
   [PANEL_COMPONENT_TYPES.localization]: 'Localization',
-  [PANEL_COMPONENT_TYPES.generate]: 'Generate',
+  [PANEL_COMPONENT_TYPES.generate]: 'Asset Generator',
 };
 
 /**

@@ -32,9 +32,9 @@ export class PublishToStoreCommand extends CommandBase<void, void> {
     title: 'Publish to Store…',
     description: 'Pack the selected node into the curated Pix3 Store as a draft item',
     keywords: ['library', 'store', 'publish', 'admin', 'prefab'],
-    menuPath: 'edit',
+    menuPath: 'node',
     addToMenu: true,
-    menuOrder: 91,
+    menuOrder: 320,
   };
 
   private readonly params: PublishToStoreCommandParams;

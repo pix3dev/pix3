@@ -25,7 +25,7 @@ export class DuplicateNodesCommand extends CommandBase<void, void> {
     keybinding: 'Mod+D',
     when: '!isInputFocused && (viewportFocused || sceneTreeFocused)',
     addToMenu: true,
-    menuOrder: 15,
+    menuOrder: 200,
   };
 
   private readonly params?: DuplicateNodesOperationParams;

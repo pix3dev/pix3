@@ -13,14 +13,15 @@ import { deriveSceneLayerCapabilities, isMixedScene } from './scene-layer-capabi
 export class ToggleLayer2DCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-layer-2d',
-    title: 'Toggle 2D Layer',
+    title: '2D Layer',
     description: 'Show or hide the 2D layer in the viewport',
     keywords: ['2d', 'layer', 'viewport', 'toggle'],
     menuPath: 'view',
     keybinding: '2',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 21,
+    menuOrder: 400,
+    checked: snapshot => snapshot.ui.showLayer2D,
   };
 
   preconditions(context: CommandContext): CommandPreconditionResult {

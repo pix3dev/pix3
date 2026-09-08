@@ -1,5 +1,6 @@
 import { injectable } from '@/fw/di';
 import type { Command } from '@/core/command';
+import { getAppStateSnapshot } from '@/state';
 import { KeybindingService } from '@/services/editor/KeybindingService';
 import { ServiceContainer } from '@/fw/di';
 
@@ -184,6 +185,25 @@ export class CommandRegistry {
    */
   getAllCommands(): Command[] {
     return Array.from(this.commands.values());
+  }
+
+  /**
+   * Checked state of a *checkable* command (a view toggle, a transform mode).
+   *
+   * `undefined` means the command declares no `checked` predicate and therefore is not a checkable
+   * item at all — a plain menu action. Callers must distinguish that from `false` ("checkable, but
+   * currently off"): the menu renders the first as `role="menuitem"` and the second as
+   * `role="menuitemcheckbox" aria-checked="false"`.
+   *
+   * This is the single source of truth for both the menu check and the viewport toolbar's active
+   * state, which is why it reads a fresh snapshot rather than taking one from the caller.
+   */
+  isChecked(commandId: string): boolean | undefined {
+    const checked = this.commands.get(commandId)?.metadata.checked;
+    if (!checked) {
+      return undefined;
+    }
+    return checked(getAppStateSnapshot());
   }
 
   /**

@@ -277,6 +277,14 @@ export interface PanelVisibilityState {
 export type NavigationMode = '2d' | '3d';
 export type EditorCameraProjection = 'perspective' | 'orthographic';
 
+/**
+ * Active viewport transform tool (Unity's Q/W/E/R). Declared here rather than in
+ * `ViewportRenderService` because it is what the four `view.transform-mode-*` commands report as
+ * their checked state: a menu check and a toolbar highlight both have to read the same snapshot,
+ * and a field on a service is not in one.
+ */
+export type TransformMode = 'select' | 'translate' | 'rotate' | 'scale';
+
 export interface Navigation2DSettings {
   /** Pan sensitivity for mouse/trackpad scrolling in 2D mode */
   panSensitivity: number;
@@ -342,6 +350,12 @@ export interface UIState {
   commandPaletteOpen: boolean;
   panelVisibility: PanelVisibilityState;
   navigationMode: NavigationMode;
+  /**
+   * Active transform tool of the viewport. The gizmo itself lives in
+   * `ViewportTransformSession`; this is the UI truth the toolbar highlight and the
+   * `View ▸ Select/Move/Rotate/Scale` menu checks read.
+   */
+  transformMode: TransformMode;
   /** 2D navigation settings (pan/zoom sensitivity) */
   navigation2D: Navigation2DSettings;
   /** Toggle for showing the 2D orthographic layer overlay */
@@ -628,6 +642,7 @@ export const createInitialAppState = (): AppState => ({
       logs: true,
     },
     navigationMode: '3d',
+    transformMode: 'select',
     navigation2D: {
       panSensitivity: 0.75,
       zoomSensitivity: 0.001,

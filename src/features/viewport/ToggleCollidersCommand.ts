@@ -11,12 +11,13 @@ import { ToggleUIFlagOperation } from './ToggleUIFlagOperation';
 export class ToggleCollidersCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-colliders',
-    title: 'Toggle Physics Colliders',
+    title: 'Physics Wireframe',
     description: 'Show or hide physics collider wireframes in the running game preview',
     keywords: ['collider', 'colliders', 'physics', 'debug', 'wireframe', 'toggle'],
     menuPath: 'view',
     addToMenu: true,
-    menuOrder: 24,
+    menuOrder: 510,
+    checked: snapshot => snapshot.ui.showPhysicsColliders,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

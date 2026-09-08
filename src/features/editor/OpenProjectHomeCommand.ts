@@ -10,11 +10,11 @@ import { CommandBase, type CommandMetadata, type CommandExecutionResult } from '
 export class OpenProjectHomeCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'editor.open-project-home',
-    title: 'Project Home',
+    title: 'Open Project…',
     description: 'Switch to the pinned Project Home dashboard tab',
-    menuPath: 'view',
+    menuPath: 'file',
     addToMenu: true,
-    menuOrder: 1,
+    menuOrder: 110,
     keybinding: 'Mod+1',
     when: '!isInputFocused',
     keywords: ['home', 'dashboard', 'project', 'start', 'overview'],

@@ -24,9 +24,9 @@ export class StartRemotePreviewCommand extends CommandBase<void, void> {
     title: 'Start Remote Preview',
     description:
       'Share a live preview link (QR) that streams the active scene to phones and browsers',
-    menuPath: 'project',
+    menuPath: 'run',
     addToMenu: true,
-    menuOrder: 215,
+    menuOrder: 310,
     keywords: ['remote', 'preview', 'qr', 'phone', 'mobile', 'share', 'relay', 'play'],
   };
 

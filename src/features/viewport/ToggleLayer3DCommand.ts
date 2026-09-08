@@ -13,14 +13,15 @@ import { deriveSceneLayerCapabilities, isMixedScene } from './scene-layer-capabi
 export class ToggleLayer3DCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-layer-3d',
-    title: 'Toggle 3D Layer',
+    title: '3D Layer',
     description: 'Show or hide the 3D layer in the viewport',
     keywords: ['3d', 'layer', 'viewport', 'toggle'],
     menuPath: 'view',
     keybinding: '3',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 22,
+    menuOrder: 410,
+    checked: snapshot => snapshot.ui.showLayer3D,
   };
 
   preconditions(context: CommandContext): CommandPreconditionResult {

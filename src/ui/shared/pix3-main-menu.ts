@@ -258,15 +258,24 @@ export class Pix3MainMenu extends ComponentBase {
 
     const renderItem = (item: MainMenuItem): string => {
       const isDisabled = item.commandId ? !this.canExecuteCommand(item.commandId) : false;
+      // `undefined` = not a checkable command at all; `false` = checkable and currently off.
+      // Read at render time, not when the sections were built, so a row opened after the state
+      // changed shows the current value.
+      const checked = item.commandId ? this.commandRegistry.isChecked(item.commandId) : undefined;
+      const isCheckable = checked !== undefined;
       return `
       <button
-        role="menuitem"
+        role="${isCheckable ? 'menuitemcheckbox' : 'menuitem'}"
         class="menu-item"
         data-menu-item="${item.id}"
+        ${isCheckable ? `aria-checked="${checked ? 'true' : 'false'}"` : ''}
         ${item.commandId ? `data-command-id="${item.commandId}"` : ''}
         ${item.nodeTypeId ? `data-node-type-id="${item.nodeTypeId}"` : ''}
         ${isDisabled ? 'disabled aria-disabled="true"' : ''}
       >
+        <span class="menu-item-check" aria-hidden="true">${
+          checked ? this.iconService.getIconSvg('check', IconSize.SMALL) : ''
+        }</span>
         ${
           item.icon
             ? `<span class="menu-item-icon">${this.iconService.getIconSvg(item.icon, IconSize.MEDIUM)}</span>`

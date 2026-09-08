@@ -9,6 +9,7 @@ import {
   type TransformMode,
 } from '@/services/viewport/ViewportRenderService';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import { CommandRegistry } from '@/services/core/CommandRegistry';
 import { IconService } from '@/services/editor/IconService';
 import { Navigation2DController } from '@/services/viewport/Navigation2DController';
 import { Polygon2DEditController } from '@/services/viewport/Polygon2DEditController';
@@ -43,6 +44,7 @@ import {
   deriveSceneLayerCapabilities,
   resolveValidNavigationMode,
 } from '@/features/viewport/scene-layer-capabilities';
+import { transformModeCommandId } from '@/features/viewport/SetTransformModeCommand';
 import { setEditorCameraProjection } from '@/features/viewport/SetEditorCameraProjectionCommand';
 import { setPreviewCamera } from '@/features/viewport/SetPreviewCameraCommand';
 import { align2DNodes } from '@/features/alignment/Align2DNodesCommand';
@@ -66,6 +68,9 @@ import {
 import '../shared/pix3-dropdown-button';
 import './viewport-visibility-popover';
 
+/** Transform tools in toolbar order; the radio group behind `appState.ui.transformMode`. */
+const TRANSFORM_MODES: readonly TransformMode[] = ['select', 'translate', 'rotate', 'scale'];
+
 /** Max gap (ms) between two clicks on the same node to count as a double-click. */
 const DOUBLE_CLICK_MS = 300;
 
@@ -78,6 +83,15 @@ export class EditorTabComponent extends ComponentBase {
 
   @inject(CommandDispatcher)
   private readonly commandDispatcher!: CommandDispatcher;
+
+  /**
+   * Read-only here: every toggle's "active" state in the toolbar is the `checked` predicate of the
+   * command behind it (`CommandRegistry.isChecked`) — the same predicate the main menu draws its
+   * check from. One predicate per toggle is what stops the two from drifting: before this, `W`
+   * moved the gizmo while the toolbar still highlighted Select.
+   */
+  @inject(CommandRegistry)
+  private readonly commandRegistry!: CommandRegistry;
 
   @inject(IconService)
   private readonly iconService!: IconService;
@@ -243,13 +257,7 @@ export class EditorTabComponent extends ComponentBase {
     super.connectedCallback();
 
     // Initialize state from current appState values
-    this.showGrid = appState.ui.showGrid;
-    this.showAxisGizmo = appState.ui.showAxisGizmo;
-    this.snapToGrid = appState.ui.snapToGrid;
-    this.showLayer2D = appState.ui.showLayer2D;
-    this.showLayer3D = appState.ui.showLayer3D;
-    this.showLighting = appState.ui.showLighting;
-    this.showCollisionShapes = appState.ui.showCollisionShapes;
+    this.syncToggleStatesFromCommands();
     this.navigationMode = appState.ui.navigationMode;
     this.editorCameraProjection = appState.ui.editorCameraProjection;
     this.syncAlignmentToolbarState();
@@ -276,13 +284,7 @@ export class EditorTabComponent extends ComponentBase {
           this.syncActiveState();
         }
       }
-      this.showGrid = appState.ui.showGrid;
-      this.showAxisGizmo = appState.ui.showAxisGizmo;
-      this.snapToGrid = appState.ui.snapToGrid;
-      this.showLayer2D = appState.ui.showLayer2D;
-      this.showLayer3D = appState.ui.showLayer3D;
-      this.showLighting = appState.ui.showLighting;
-      this.showCollisionShapes = appState.ui.showCollisionShapes;
+      this.syncToggleStatesFromCommands();
       this.navigationMode = appState.ui.navigationMode;
       this.editorCameraProjection = appState.ui.editorCameraProjection;
       this.requestUpdate();
@@ -853,8 +855,33 @@ export class EditorTabComponent extends ComponentBase {
   }
 
   private handleTransformModeChange(mode: TransformMode): void {
-    this.transformMode = mode;
-    this.viewportRenderer.setTransformMode(mode);
+    // Through the command, never straight onto the renderer: the command is what writes
+    // `appState.ui.transformMode`, and that write is what both this toolbar and the View menu read
+    // back as the active mode.
+    void this.commandDispatcher.executeById(transformModeCommandId(mode));
+  }
+
+  /**
+   * Every toolbar toggle's state, taken from the `checked` predicate of the command behind it.
+   *
+   * `isChecked` returns `undefined` for a command that declares no predicate — or one that is not
+   * registered yet — so `?? false` is the "off" fallback. The transform mode is a radio group:
+   * exactly one of the four predicates is true, and none of them is while no command is
+   * registered, which is why it falls back to `select`.
+   */
+  private syncToggleStatesFromCommands(): void {
+    const isChecked = (commandId: string): boolean =>
+      this.commandRegistry.isChecked(commandId) ?? false;
+
+    this.showGrid = isChecked('view.toggle-grid');
+    this.showAxisGizmo = isChecked('view.toggle-axis-gizmo');
+    this.snapToGrid = isChecked('view.toggle-snap-to-grid');
+    this.showLayer2D = isChecked('view.toggle-layer-2d');
+    this.showLayer3D = isChecked('view.toggle-layer-3d');
+    this.showLighting = isChecked('view.toggle-lighting');
+    this.showCollisionShapes = isChecked('view.toggle-collision-shapes');
+    this.transformMode =
+      TRANSFORM_MODES.find(mode => isChecked(transformModeCommandId(mode))) ?? 'select';
   }
 
   private handleAlignmentAction(action: Align2DActionId): void {

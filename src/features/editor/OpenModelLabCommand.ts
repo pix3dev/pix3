@@ -12,9 +12,9 @@ export class OpenModelLabCommand extends CommandBase<void, void> {
     id: 'editor.open-model-lab',
     title: 'Model Lab',
     description: 'Open Model Lab to generate 3D models and scenes',
-    menuPath: 'tools',
+    menuPath: 'window',
     addToMenu: true,
-    menuOrder: 11,
+    menuOrder: 520,
     keywords: [
       'model',
       'model lab',
