@@ -114,9 +114,18 @@
   300 Sync to Local Folder… / 310 Move Project to Folder… / 320 Open in VS Code ·
   900 Close Project
 - **Edit** — 100 Undo / 110 Redo · 200 Duplicate / 210 Delete · 900 Editor Settings…
-- **Create** — 100 Prefab Instance… · далее группы 2D / 3D / прочее из реестра типов нод
-  (строка называется типом ноды: `Sprite2D`, а не `Create Sprite2D` — глагол уже в
-  заголовке меню)
+- **Create** — группы 2D / UI / 3D / Audio из реестра типов нод (строка называется типом
+  ноды: `Sprite2D`, а не `Create Sprite2D` — глагол уже в заголовке меню) · 900 Browse All
+  Nodes… (поиск по всем типам)
+
+  Уточнено при реализации G1: пункта `Prefab Instance…` тут нет.
+  `CreatePrefabInstanceCommand` не запускается без `prefabPath`, поэтому строкой меню без
+  аргумента быть не может — префабы вставляются перетаскиванием из Assets/Library и через
+  Scene Tree. Его `menuPath: 'insert'` был мёртвой метадатой: команда нигде не
+  регистрировалась, так что меню `insert` никогда и не рисовалось. Зато выяснилось, что
+  клик по `Create` открывал модальный поиск, а `NodeRegistry.getGroupedDropdownItems()`
+  лежал мёртвым кодом — теперь Create настоящий дропдаун, а поиск остался командой
+  `scene.browse-node-types` внизу секции и в палитре.
 - **Node** — 100 Group Selection / 110 Fit Group to Contents · 200 Align ▸ /
   210 Distribute ▸ · 300 Save Branch as Prefab… / 310 Publish to Library… /
   320 Publish to Store…
@@ -165,7 +174,8 @@
 | New Project | New Project… | File | 100 |
 | Editor Settings | Editor Settings… | Edit | 900 |
 | Delete Object | Delete | Edit | 210 |
-| Create Prefab Instance (`insert`) | Prefab Instance… | Create | 100 |
+| Create Prefab Instance (`insert`) | вне меню (`addToMenu:false` — нужен `prefabPath`) | — | — |
+| — (новая команда) | Browse All Nodes… (`scene.browse-node-types`) | Create | 900 |
 | Create ColorRect2D / AnimatedSprite2D / SpineSkeleton2D / AnimatedSprite3D / Particles3D | убрать `menuPath`/`menuOrder` (реестр — единственный источник) | — | — |
 | Save Branch as Prefab | Save Branch as Prefab… | Node | 300 |
 | Publish to Library | Publish to Library… | Node | 310 |
