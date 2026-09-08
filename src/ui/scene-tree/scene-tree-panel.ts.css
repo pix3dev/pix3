@@ -3,7 +3,7 @@ pix3-scene-tree-panel {
   height: 100%;
 }
 
-pix3-panel {
+pix3-scene-tree-panel pix3-panel {
   height: 100%;
 }
 

@@ -21,6 +21,7 @@ import {
   isPrefabNode,
   type PrefabMetadata,
 } from '@/features/scene/prefab-utils';
+import { IconSize } from '@/services/editor/IconService';
 import type { InspectorPanel } from './inspector-panel';
 import type { NumberFieldAxis } from './property-editors';
 
@@ -45,6 +46,20 @@ export type DetachedPropertyOptions = {
   readOnly?: boolean;
   /** Axis chips for a vector2 pair, e.g. `['w', 'h']` for a size. */
   axes?: readonly [NumberFieldAxis, NumberFieldAxis];
+};
+
+/** Anchor modes per axis, in the order the segmented control renders them. */
+const HORIZONTAL_ANCHOR_MODES = ['left', 'center', 'right', 'stretch'] as const;
+const VERTICAL_ANCHOR_MODES = ['top', 'center', 'bottom', 'stretch'] as const;
+
+/** Text shown by an anchor-mode option if its glyph is ever missing. */
+const ANCHOR_MODE_FALLBACK_LABELS: Readonly<Record<string, string>> = {
+  left: 'L',
+  right: 'R',
+  top: 'T',
+  bottom: 'B',
+  center: 'C',
+  stretch: 'S',
 };
 
 const PROPERTY_GROUP_ORDER = [
@@ -257,26 +272,24 @@ export class InspectorPropertyRenderers {
                 </div>
                 <div class="anchor-controls">
                   <div class="anchor-control-row">
-                    <span class="anchor-axis-label">H</span>
-                    <div class="anchor-mode-group">
-                      ${['left', 'center', 'right', 'stretch'].map(option =>
-                        this.renderAnchorModeButton(
-                          'horizontal',
-                          option,
-                          horizontal,
-                          enabled,
-                          readOnly
-                        )
-                      )}
-                    </div>
+                    <span class="anchor-axis-label" aria-hidden="true">H</span>
+                    ${this.renderAnchorModeGroup(
+                      'horizontal',
+                      HORIZONTAL_ANCHOR_MODES,
+                      horizontal,
+                      enabled,
+                      readOnly
+                    )}
                   </div>
                   <div class="anchor-control-row">
-                    <span class="anchor-axis-label">V</span>
-                    <div class="anchor-mode-group">
-                      ${['top', 'center', 'bottom', 'stretch'].map(option =>
-                        this.renderAnchorModeButton('vertical', option, vertical, enabled, readOnly)
-                      )}
-                    </div>
+                    <span class="anchor-axis-label" aria-hidden="true">V</span>
+                    ${this.renderAnchorModeGroup(
+                      'vertical',
+                      VERTICAL_ANCHOR_MODES,
+                      vertical,
+                      enabled,
+                      readOnly
+                    )}
                   </div>
                 </div>
               </div>
@@ -470,24 +483,30 @@ export class InspectorPropertyRenderers {
             ${hasOriginalRatio
               ? html`
                   <button
-                    class="size-lock-button ${aspectRatioLocked ? 'locked' : ''}"
+                    class="inspector-btn inspector-btn--icon inspector-btn--toggle"
                     type="button"
+                    aria-pressed=${String(aspectRatioLocked)}
+                    aria-label="Lock aspect ratio"
                     title=${aspectRatioLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
                     @click=${handleToggleAspectRatio}
                   >
-                    ${this.host.iconService.getIcon(aspectRatioLocked ? 'lock' : 'unlock', 14)}
+                    ${this.host.iconService.getIcon(
+                      aspectRatioLocked ? 'lock' : 'unlock',
+                      IconSize.SMALL
+                    )}
                   </button>
                 `
               : ''}
             ${hasOriginalSize
               ? html`
                   <button
-                    class="size-reset-button"
+                    class="inspector-btn inspector-btn--icon"
                     type="button"
+                    aria-label="Reset to original texture size"
                     title=${`Reset to original texture size (${originalWidth} x ${originalHeight})`}
                     @click=${handleResetToOriginal}
                   >
-                    ${this.host.iconService.getIcon('refresh-cw', 14)}
+                    ${this.host.iconService.getIcon('rotate-ccw', IconSize.SMALL)}
                   </button>
                 `
               : ''}
@@ -965,11 +984,12 @@ export class InspectorPropertyRenderers {
             ${canExtract
               ? html`<button
                   type="button"
-                  class="localization-extract-button"
+                  class="inspector-btn"
                   title="Create a '${service.getDefaultLocale()}' key from the literal label"
                   @click=${() => void this.extractLocalizationKey(propertyName, node!)}
                 >
-                  Extract
+                  ${this.host.iconService.getIcon('key', IconSize.SMALL)}
+                  <span>Extract</span>
                 </button>`
               : ''}
           </div>
@@ -1170,12 +1190,13 @@ export class InspectorPropertyRenderers {
             ${isOverridden
               ? html`
                   <button
-                    class="property-revert-button"
+                    class="inspector-btn inspector-btn--icon"
                     type="button"
+                    aria-label="Revert prefab override"
                     title="Revert prefab override"
                     @click=${(e: Event) => this.onRevertPropertyClick(e, prop)}
                   >
-                    ${this.host.iconService.getIcon('rotate-ccw', 12)}
+                    ${this.host.iconService.getIcon('rotate-ccw', IconSize.SMALL)}
                   </button>
                 `
               : null}
@@ -1521,62 +1542,138 @@ export class InspectorPropertyRenderers {
     `;
   }
 
-  renderAnchorModeButton(
+  /**
+   * One axis of anchor modes as a segmented **radio group**: the four options are
+   * mutually exclusive, so they carry `role="radio"` + `aria-checked` inside a
+   * `role="radiogroup"`, not four independent buttons. Focus moves with a roving
+   * tabindex (only the checked option is tabbable) and the arrow keys select the
+   * neighbour, which is what a radio group is expected to do.
+   */
+  renderAnchorModeGroup(
     axis: 'horizontal' | 'vertical',
-    option: string,
+    options: readonly string[],
     currentValue: string,
     enabled: boolean,
     readOnly: boolean
   ) {
-    const label =
-      axis === 'horizontal'
-        ? {
-            left: 'L',
-            center: 'C',
-            right: 'R',
-            stretch: 'S',
-          }[option]
-        : {
-            top: 'T',
-            center: 'C',
-            bottom: 'B',
-            stretch: 'S',
-          }[option];
+    const checkedIndex = options.findIndex(option => enabled && currentValue === option);
+    const rovingIndex = checkedIndex === -1 ? 0 : checkedIndex;
+
+    return html`
+      <div
+        class="inspector-segment inspector-segment--equal"
+        role="radiogroup"
+        aria-label=${`${axis} anchor mode`}
+      >
+        ${options.map((option, index) =>
+          this.renderAnchorModeOption(
+            axis,
+            options,
+            option,
+            index,
+            index === checkedIndex,
+            index === rovingIndex,
+            readOnly
+          )
+        )}
+      </div>
+    `;
+  }
+
+  renderAnchorModeOption(
+    axis: 'horizontal' | 'vertical',
+    options: readonly string[],
+    option: string,
+    index: number,
+    checked: boolean,
+    tabbable: boolean,
+    readOnly: boolean
+  ) {
+    const fallback = ANCHOR_MODE_FALLBACK_LABELS[option] ?? option;
 
     return html`
       <button
-        class="anchor-mode-button ${enabled && currentValue === option ? 'is-active' : ''}"
+        class="inspector-segment__option"
         type="button"
+        role="radio"
+        aria-checked=${String(checked)}
+        tabindex=${tabbable ? 0 : -1}
         ?disabled=${readOnly}
         title=${option}
         aria-label=${`${axis} ${option}`}
         @click=${() => this.applyAnchorMode(axis, option)}
+        @keydown=${(event: KeyboardEvent) => this.onAnchorModeKeydown(event, axis, options, index)}
       >
-        ${this.renderAnchorModeIcon(axis, option, label ?? option)}
+        ${this.renderAnchorModeIcon(axis, option, fallback)}
       </button>
     `;
+  }
+
+  /**
+   * Arrow-key navigation inside one axis' radio group. Handled per option rather
+   * than on the group container: the container is not focusable, and a keyboard
+   * handler belongs on the element that takes focus.
+   */
+  onAnchorModeKeydown(
+    event: KeyboardEvent,
+    axis: 'horizontal' | 'vertical',
+    options: readonly string[],
+    index: number
+  ): void {
+    let nextIndex: number | null = null;
+    switch (event.key) {
+      case 'ArrowRight':
+      case 'ArrowDown':
+        nextIndex = (index + 1) % options.length;
+        break;
+      case 'ArrowLeft':
+      case 'ArrowUp':
+        nextIndex = (index - 1 + options.length) % options.length;
+        break;
+      case 'Home':
+        nextIndex = 0;
+        break;
+      case 'End':
+        nextIndex = options.length - 1;
+        break;
+      default:
+        return;
+    }
+
+    event.preventDefault();
+    const nextOption = options[nextIndex];
+    if (nextOption === undefined) {
+      return;
+    }
+
+    const group = (event.currentTarget as HTMLElement).parentElement;
+    const buttons = group
+      ? Array.from(group.querySelectorAll<HTMLButtonElement>('.inspector-segment__option'))
+      : [];
+    buttons[nextIndex]?.focus();
+    void this.applyAnchorMode(axis, nextOption);
   }
 
   renderAnchorModeIcon(axis: 'horizontal' | 'vertical', option: string, fallback: string) {
     if (axis === 'horizontal') {
       switch (option) {
         case 'left':
-          return html`<svg viewBox="0 0 14 14" aria-hidden="true">
+          return html`<svg class="inspector-segment__glyph" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M2 2v10"></path>
             <rect x="3.5" y="4" width="6" height="6"></rect>
           </svg>`;
         case 'center':
-          return html`<svg viewBox="0 0 14 14" aria-hidden="true">
+          return html`<svg class="inspector-segment__glyph" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M7 2v10"></path>
             <rect x="4" y="4" width="6" height="6"></rect>
           </svg>`;
         case 'right':
-          return html`<svg viewBox="0 0 14 14" aria-hidden="true">
+          return html`<svg class="inspector-segment__glyph" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M12 2v10"></path>
             <rect x="4.5" y="4" width="6" height="6"></rect>
           </svg>`;
         case 'stretch':
-          return html`<svg viewBox="0 0 14 14" aria-hidden="true">
+          return html`<svg class="inspector-segment__glyph" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M2 2v10M12 2v10"></path>
             <rect x="3" y="4" width="8" height="6"></rect>
           </svg>`;
@@ -1586,22 +1683,22 @@ export class InspectorPropertyRenderers {
     if (axis === 'vertical') {
       switch (option) {
         case 'top':
-          return html`<svg viewBox="0 0 14 14" aria-hidden="true">
+          return html`<svg class="inspector-segment__glyph" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M2 2h10"></path>
             <rect x="4" y="3.5" width="6" height="6"></rect>
           </svg>`;
         case 'center':
-          return html`<svg viewBox="0 0 14 14" aria-hidden="true">
+          return html`<svg class="inspector-segment__glyph" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M2 7h10"></path>
             <rect x="4" y="4" width="6" height="6"></rect>
           </svg>`;
         case 'bottom':
-          return html`<svg viewBox="0 0 14 14" aria-hidden="true">
+          return html`<svg class="inspector-segment__glyph" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M2 12h10"></path>
             <rect x="4" y="4.5" width="6" height="6"></rect>
           </svg>`;
         case 'stretch':
-          return html`<svg viewBox="0 0 14 14" aria-hidden="true">
+          return html`<svg class="inspector-segment__glyph" viewBox="0 0 14 14" aria-hidden="true">
             <path d="M2 2h10M2 12h10"></path>
             <rect x="4" y="3" width="6" height="8"></rect>
           </svg>`;
@@ -1893,12 +1990,13 @@ export class InspectorPropertyRenderers {
         ${isOverridden
           ? html`
               <button
-                class="property-revert-button"
+                class="inspector-btn inspector-btn--icon"
                 type="button"
+                aria-label="Revert prefab override"
                 title="Revert prefab override"
                 @click=${(e: Event) => this.onRevertPropertyClick(e, prop)}
               >
-                ${this.host.iconService.getIcon('rotate-ccw', 12)}
+                ${this.host.iconService.getIcon('rotate-ccw', IconSize.SMALL)}
               </button>
             `
           : null}
@@ -2025,14 +2123,15 @@ export class InspectorPropertyRenderers {
             ></pix3-number-field>
           </div>
           <button
-            class="group-fit-button"
+            class="inspector-btn"
             type="button"
             title="Fit to contents — resize this group to wrap its children (without moving them)"
             aria-label="Fit to contents"
             ?disabled=${readOnly || !hasChildren}
             @click=${() => this.fitGroup2DToContents()}
           >
-            ${this.host.iconService.getIcon('minimize-2', 14)}
+            ${this.host.iconService.getIcon('minimize-2', IconSize.SMALL)}
+            <span>Fit</span>
           </button>
         </div>
       `,

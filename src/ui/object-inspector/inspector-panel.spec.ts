@@ -374,7 +374,11 @@ describe('InspectorPanel compact object layout', () => {
     const chips = Array.from(panel.querySelectorAll('.group-chip-list--summary .group-chip')).map(
       chip => chip.textContent?.trim()
     );
-    const trigger = panel.querySelector('.summary-toolbar-button') as HTMLButtonElement | null;
+    // Matched by the disclosure state rather than the variant class: the trigger keeps a text
+    // label (no conventional icon means no icon-only variant), and that is not what this asserts.
+    const trigger = panel.querySelector(
+      '.inspector-summary-actions .inspector-btn[aria-expanded]'
+    ) as HTMLButtonElement | null;
 
     expect(chips).toEqual(['hud', 'ui']);
     expect(panel.querySelector('.groups-popover')).toBeNull();
@@ -434,11 +438,23 @@ describe('InspectorPanel compact object layout', () => {
     const { panel } = await setupInspectorForNode(node, execute);
 
     const anchorEditor = panel.querySelector('.anchor-visual-editor');
-    const horizontalLeftButton = panel.querySelector('.anchor-control-row .anchor-mode-button');
+    // The anchor modes are one radio group per axis, not four loose buttons.
+    const horizontalOptions = getAnchorModeOptions(panel, 'horizontal');
+    const horizontalLeftButton = horizontalOptions[0];
     const leftButtonIcon = horizontalLeftButton?.querySelector('svg');
 
     expect(anchorEditor).not.toBeNull();
     expect(leftButtonIcon).not.toBeNull();
+    expect(horizontalOptions).toHaveLength(4);
+    // Exactly one option is checked, and only that one is in the tab order
+    // (roving tabindex) — that is what makes it a radio group and not four
+    // independent buttons.
+    expect(
+      horizontalOptions.filter(option => option.getAttribute('aria-checked') === 'true')
+    ).toHaveLength(1);
+    expect(horizontalOptions.map(option => option.getAttribute('tabindex'))).toEqual(
+      horizontalOptions.map(option => (option.getAttribute('aria-checked') === 'true' ? '0' : '-1'))
+    );
 
     horizontalLeftButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
     await vi.waitFor(() => {
@@ -536,6 +552,76 @@ describe('InspectorPanel compact object layout', () => {
 
     expect(flags.map(flag => flag.getAttribute('aria-label'))).toEqual(['Visible', 'Locked']);
     expect(flags.map(flag => flag.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
+  });
+
+  it('labels every icon-only control on a Node2D and keeps no pre-primitive class', async () => {
+    const node = new Group2D({ id: 'group-root', name: 'HUD Root', width: 320, height: 180 });
+    node.layoutEnabled = true;
+
+    const { panel } = await setupInspectorForNode(node);
+
+    const iconOnly = Array.from(
+      panel.querySelectorAll<HTMLElement>('.inspector-btn--icon, .inspector-switch')
+    );
+    expect(iconOnly.length).toBeGreaterThan(0);
+    expect(
+      iconOnly
+        .filter(el => !el.getAttribute('aria-label')?.trim() || !el.getAttribute('title')?.trim())
+        .map(el => el.className)
+    ).toEqual([]);
+
+    // Every idiom the button pass replaced. A survivor here means a control was
+    // migrated in one place and left behind in another.
+    const retired = [
+      'inspector-button',
+      'summary-toolbar-button',
+      'btn-icon',
+      'btn-add-behavior',
+      'btn-add-group',
+      'btn-copy-resource',
+      'size-lock-button',
+      'size-reset-button',
+      'property-revert-button',
+      'group-fit-button',
+      'localization-extract-button',
+      'anchor-mode-button',
+      'animation-preview-btn',
+      'animation-default-btn',
+      'component-action-link',
+      'editor-flag-button',
+    ];
+    const survivors = retired.filter(name => panel.querySelector(`.${name}`) !== null);
+    expect(survivors).toEqual([]);
+  });
+
+  it('moves the anchor mode with the arrow keys inside the radio group', async () => {
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const node = new Group2D({ id: 'group-root', name: 'HUD Root', width: 320, height: 180 });
+    node.layoutEnabled = true;
+
+    const { panel } = await setupInspectorForNode(node, execute);
+
+    const modes = ['left', 'center', 'right', 'stretch'];
+    const options = getAnchorModeOptions(panel, 'horizontal');
+    expect(options).toHaveLength(modes.length);
+
+    const checkedIndex = options.findIndex(
+      option => option.getAttribute('aria-checked') === 'true'
+    );
+    expect(checkedIndex).toBeGreaterThanOrEqual(0);
+    const expectedMode = modes[(checkedIndex + 1) % modes.length];
+
+    options[checkedIndex]?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, composed: true })
+    );
+
+    await vi.waitFor(() => {
+      const lastCommand = execute.mock.calls.at(-1)?.[0] as {
+        params?: { propertyPath: string; value: unknown };
+      };
+      expect(lastCommand.params?.propertyPath).toBe('horizontalAlign');
+      expect(lastCommand.params?.value).toBe(expectedMode);
+    });
   });
 });
 
@@ -939,7 +1025,7 @@ describe('InspectorPanel animation section', () => {
     expect(panel.querySelector('.field-grid')).toBeNull();
     expect(panel.querySelector('.mini-button')).toBeNull();
     expect(panel.querySelector('.primary-button')).toBeNull();
-    expect(panel.querySelectorAll('.inspector-button').length).toBeGreaterThan(0);
+    expect(panel.querySelectorAll('.inspector-btn').length).toBeGreaterThan(0);
   });
 
   it('marks the active clip as selected and follows the selected frame index', async () => {
@@ -995,7 +1081,9 @@ describe('InspectorPanel animation section', () => {
   it('routes clip and frame edits back to the controller', async () => {
     const { panel, controller } = await setupInspectorForAnimation();
 
-    (panel.querySelector('.animation-clip-actions .btn-icon') as HTMLButtonElement).click();
+    (
+      panel.querySelector('.animation-clip-actions .inspector-btn--primary') as HTMLButtonElement
+    ).click();
     expect(controller.addClip).toHaveBeenCalledTimes(1);
 
     const otherClip = Array.from(
@@ -1004,7 +1092,7 @@ describe('InspectorPanel animation section', () => {
     otherClip.click();
     expect(controller.selectClip).toHaveBeenCalledWith('run');
 
-    const buttons = Array.from(panel.querySelectorAll('.inspector-button')) as HTMLButtonElement[];
+    const buttons = Array.from(panel.querySelectorAll('.inspector-btn')) as HTMLButtonElement[];
     const byLabel = (label: string) =>
       buttons.find(button => button.textContent?.trim() === label) as HTMLButtonElement;
 
@@ -1181,6 +1269,13 @@ async function setupInspectorForAnimation(): Promise<{
   await panel.updateComplete;
 
   return { panel, controller };
+}
+
+/** The `role="radio"` options of one anchor axis, in render order. */
+function getAnchorModeOptions(panel: HTMLElement, axis: 'horizontal' | 'vertical') {
+  const rows = Array.from(panel.querySelectorAll('.anchor-control-row'));
+  const row = rows[axis === 'horizontal' ? 0 : 1];
+  return Array.from(row?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
 }
 
 async function setupInspectorForNode(

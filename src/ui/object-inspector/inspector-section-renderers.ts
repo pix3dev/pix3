@@ -150,23 +150,23 @@ export class InspectorSectionRenderers {
             placeholder: 'res://textures/spritesheet.png',
           })
         )}
-        <div class="inspector-button-row">
+        <div class="inspector-btn-row">
           <button
-            class="inspector-button inspector-button--primary"
+            class="inspector-btn inspector-btn--primary"
             type="button"
             ?disabled=${texturePath.length === 0 || !animationState.activeClipName}
             @click=${() => void controller.openTextureSlicer()}
           >
-            ${this.host.iconService.getIcon('grid', 13)}
+            ${this.host.iconService.getIcon('grid', IconSize.SMALL)}
             <span>Generate Frames</span>
           </button>
           <button
-            class="inspector-button"
+            class="inspector-btn"
             type="button"
             ?disabled=${texturePath.length === 0}
             @click=${() => void controller.updateTexturePath('')}
           >
-            ${this.host.iconService.getIcon('x', 13)}
+            ${this.host.iconService.getIcon('x', IconSize.SMALL)}
             <span>Clear Texture</span>
           </button>
         </div>
@@ -192,23 +192,23 @@ export class InspectorSectionRenderers {
           <h4 class="group-title">Clips</h4>
           <div class="animation-clip-actions">
             <button
-              class="btn-icon"
+              class="inspector-btn inspector-btn--icon inspector-btn--primary"
               type="button"
-              title="Add Clip"
+              title="Add clip"
               aria-label="Add clip"
               @click=${() => void controller.addClip()}
             >
-              ${this.host.iconService.getIcon('plus', 14)}
+              ${this.host.iconService.getIcon('plus', IconSize.SMALL)}
             </button>
             <button
-              class="btn-icon"
+              class="inspector-btn inspector-btn--icon inspector-btn--danger"
               type="button"
-              title="Remove"
+              title="Remove active clip"
               aria-label="Remove active clip"
               ?disabled=${!animationState.activeClip}
               @click=${() => void controller.removeClip()}
             >
-              ${this.host.iconService.getIcon('trash-2', 14)}
+              ${this.host.iconService.getIcon('trash-2', IconSize.SMALL)}
             </button>
           </div>
         </div>
@@ -300,30 +300,30 @@ export class InspectorSectionRenderers {
             ${vertexCount ? `${vertexCount} vertices` : 'none authored'}
           </span>
         </div>
-        <div class="inspector-button-row">
+        <div class="inspector-btn-row">
           <button
-            class="inspector-button"
+            class="inspector-btn"
             type="button"
             @click=${() => void controller.addPolygonVertex()}
           >
-            ${this.host.iconService.getIcon('plus', 13)}
+            ${this.host.iconService.getIcon('plus', IconSize.SMALL)}
             <span>Add Vertex</span>
           </button>
           <button
-            class="inspector-button"
+            class="inspector-btn"
             type="button"
             ?disabled=${vertexCount === 0}
             @click=${() => void controller.clearPolygon()}
           >
-            ${this.host.iconService.getIcon('x', 13)}
+            ${this.host.iconService.getIcon('x', IconSize.SMALL)}
             <span>Clear Polygon</span>
           </button>
           <button
-            class="inspector-button"
+            class="inspector-btn"
             type="button"
             @click=${() => void controller.resetBoundingBox()}
           >
-            ${this.host.iconService.getIcon('refresh-cw', 13)}
+            ${this.host.iconService.getIcon('rotate-ccw', IconSize.SMALL)}
             <span>Reset Box</span>
           </button>
         </div>
@@ -424,11 +424,14 @@ ${textPreview?.content || 'Empty file'}</pre
             <div class="asset-value-wrapper">
               <span class="asset-value asset-path">${resourceUrl}</span>
               <button
-                class="btn-copy-resource"
+                class="inspector-btn"
+                type="button"
                 title="Copy Resource URL"
+                aria-label="Copy resource URL"
                 @click=${() => this.host.handleCopyResourceUrl(resourceUrl)}
               >
-                ${this.host.iconService.getIcon('copy', 14)}
+                ${this.host.iconService.getIcon('copy', IconSize.SMALL)}
+                <span>Copy</span>
               </button>
             </div>
           </div>
@@ -597,16 +600,18 @@ ${textPreview?.content || 'Empty file'}</pre
         </div>
 
         <div class="inspector-summary-actions">
+          <!-- Keeps its label: "edit the groups this node belongs to" has no icon anyone would
+               recognise, and the icon-only rule only covers conventional glyphs (trash, plus,
+               eye, lock, chevrons). -->
           <button
-            class="summary-toolbar-button ${this.host.isGroupsEditorOpen ? 'is-open' : ''}"
+            class="inspector-btn"
             type="button"
-            title="Edit groups"
+            title="Edit the groups this node belongs to"
             aria-expanded=${String(this.host.isGroupsEditorOpen)}
             @click=${(event: Event) => this.toggleGroupsEditor(event)}
           >
-            ${this.host.iconService.getIcon('grid', 14)}
+            ${this.host.iconService.getIcon('grid', IconSize.SMALL)}
             <span>Groups</span>
-            ${this.host.iconService.getIcon('chevron-down-caret', 12)}
           </button>
           ${this.host.isGroupsEditorOpen ? this.renderGroupsPopover() : ''}
         </div>
@@ -630,12 +635,13 @@ ${textPreview?.content || 'Empty file'}</pre
                   <div class="groups-popover-item">
                     <span class="group-chip group-chip--readonly">${group}</span>
                     <button
-                      class="btn-icon"
+                      class="inspector-btn inspector-btn--icon inspector-btn--danger"
                       type="button"
-                      title="Remove from group"
+                      title=${`Remove from group ${group}`}
+                      aria-label=${`Remove from group ${group}`}
                       @click=${() => this.removeFromGroup(group)}
                     >
-                      ${this.host.iconService.getIcon('x', 14)}
+                      ${this.host.iconService.getIcon('x', IconSize.SMALL)}
                     </button>
                   </div>
                 `
@@ -654,7 +660,15 @@ ${textPreview?.content || 'Empty file'}</pre
               }
             }}
           />
-          <button class="btn-add-group" type="button" @click=${() => this.addToGroup()}>Add</button>
+          <button
+            class="inspector-btn inspector-btn--primary"
+            type="button"
+            title="Add to group"
+            @click=${() => this.addToGroup()}
+          >
+            ${this.host.iconService.getIcon('plus', IconSize.SMALL)}
+            <span>Add</span>
+          </button>
         </div>
         ${this.host.newGroupError
           ? html`<div class="groups-error">${this.host.newGroupError}</div>`
@@ -725,24 +739,27 @@ ${textPreview?.content || 'Empty file'}</pre
             return html`
               <div class="animation-item ${isActive ? 'animation-item--active' : ''}">
                 <button
-                  class="animation-preview-btn"
-                  @click=${() => this.toggleAnimation(clip.name)}
+                  class="inspector-btn inspector-btn--icon inspector-btn--toggle"
+                  type="button"
+                  aria-pressed=${String(isActive)}
+                  aria-label=${isActive ? `Stop previewing ${clip.name}` : `Preview ${clip.name}`}
                   title=${isActive ? 'Stop preview animation' : 'Play preview animation'}
+                  @click=${() => this.toggleAnimation(clip.name)}
                 >
-                  <span class="animation-play-icon"
-                    >${this.host.iconService.getIcon(isActive ? 'stop' : 'play', 12)}</span
-                  >
-                  <span class="animation-name">${clip.name}</span>
-                  <span class="animation-duration">${clip.duration.toFixed(2)}s</span>
+                  ${this.host.iconService.getIcon(isActive ? 'stop' : 'play', IconSize.SMALL)}
                 </button>
+                <span class="animation-name">${clip.name}</span>
+                <span class="animation-duration">${clip.duration.toFixed(2)}s</span>
                 <button
-                  class="animation-default-btn ${isDefault ? 'animation-default-btn--active' : ''}"
-                  @click=${() => this.setInitialAnimation(clip.name)}
+                  class="inspector-btn inspector-btn--toggle"
+                  type="button"
+                  aria-pressed=${String(isDefault)}
                   title=${isDefault
                     ? 'Default startup animation'
                     : 'Set as default startup animation'}
+                  @click=${() => this.setInitialAnimation(clip.name)}
                 >
-                  ${isDefault ? 'Default' : 'Set Default'}
+                  <span>Default</span>
                 </button>
               </div>
             `;
@@ -750,12 +767,14 @@ ${textPreview?.content || 'Empty file'}</pre
         </div>
         <div class="animation-default-row">
           <button
-            class="animation-default-clear"
-            @click=${() => this.setInitialAnimation(null)}
+            class="inspector-btn"
+            type="button"
             ?disabled=${initialAnimation === null}
             title="Clear default startup animation (fallback to first clip)"
+            @click=${() => this.setInitialAnimation(null)}
           >
-            Clear Default
+            ${this.host.iconService.getIcon('rotate-ccw', IconSize.SMALL)}
+            <span>Clear Default</span>
           </button>
         </div>
       </div>
@@ -881,12 +900,13 @@ ${textPreview?.content || 'Empty file'}</pre
           <h4 class="group-title">Components</h4>
           <div class="group-actions">
             <button
-              class="btn-add-behavior"
+              class="inspector-btn inspector-btn--primary"
+              type="button"
               @click=${() => this.onAddBehavior()}
               ?disabled=${structureLocked}
               title=${structureLocked ? lockedTitle : 'Add Component'}
             >
-              ${this.host.iconService.getIcon('plus', 14)}
+              ${this.host.iconService.getIcon('plus', IconSize.SMALL)}
               <span>Add</span>
             </button>
           </div>
@@ -1046,12 +1066,13 @@ ${textPreview?.content || 'Empty file'}</pre
           <h4 class="group-title">Effects</h4>
           <div class="group-actions">
             <button
-              class="btn-add-behavior"
+              class="inspector-btn inspector-btn--primary"
+              type="button"
               @click=${() => this.onAddEffect()}
               ?disabled=${structureLocked}
               title=${structureLocked ? lockedTitle : 'Add Effect'}
             >
-              ${this.host.iconService.getIcon('plus', 14)}
+              ${this.host.iconService.getIcon('plus', IconSize.SMALL)}
               <span>Add</span>
             </button>
           </div>

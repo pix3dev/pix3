@@ -58,6 +58,15 @@ pix3-inspector-panel .inspector-btn:disabled {
   cursor: not-allowed;
 }
 
+/* Row container for a set of `.inspector-btn`s. Named after the primitive
+   (`.inspector-btn-row`), not after the old `.inspector-button` idiom it
+   replaced, so the row and the buttons in it read as one system. */
+pix3-inspector-panel .inspector-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
 /* ── --icon — icon only, 24×24. `aria-label` + `title` are mandatory. ─────── */
 pix3-inspector-panel .inspector-btn--icon {
   width: 24px;
@@ -100,6 +109,15 @@ pix3-inspector-panel .inspector-btn--toggle[aria-pressed='true'] {
 
 pix3-inspector-panel .inspector-btn--toggle[aria-pressed='true']:hover:not(:disabled) {
   border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* A disclosure trigger (`aria-expanded`) reads open with the same treatment as
+   a pressed toggle — it is a state, not a second idiom. `aria-pressed` is not
+   reused here: the button opens a popover, it does not hold a value. */
+pix3-inspector-panel .inspector-btn[aria-expanded='true'] {
+  border-color: var(--accent-line);
   background: var(--accent-soft);
   color: var(--accent);
 }
@@ -295,4 +313,32 @@ pix3-inspector-panel .inspector-segment__option:focus-visible {
 pix3-inspector-panel .inspector-segment__option:disabled {
   opacity: 0.55;
   cursor: not-allowed;
+}
+
+/* --equal — the group fills its row and every option takes the same slice
+   (the H/V anchor mode rows: four equal-width glyph cells). */
+pix3-inspector-panel .inspector-segment--equal {
+  flex: 1 1 auto;
+}
+
+pix3-inspector-panel .inspector-segment--equal .inspector-segment__option {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+}
+
+/* Hand-drawn option glyphs (anchor modes) paint with both fill and stroke, so
+   they cannot share the plain-stroke treatment Feather icons come with — hence
+   an explicit class rather than a blanket `.inspector-segment__option svg`
+   rule, which would flatten every Feather icon dropped into a segment. */
+pix3-inspector-panel .inspector-segment__glyph {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+pix3-inspector-panel .inspector-segment__glyph rect {
+  stroke: none;
 }
