@@ -145,8 +145,12 @@
   310 Asset Generator / 320 Agent Chat · 500 Game / 510 Sprite Editor / 520 Model Lab /
   530 UI Kit · 900 Reset Layout
 
-Проверить при реализации: `Collision Shapes` и `Physics Colliders` — два оверлея с почти
-одинаковыми именами. Если рисуют одно и то же, удалить один, а не переименовывать.
+Проверено: `Collision Shapes` и `Physics Colliders` — **разные** оверлеи, оба остаются.
+Первый (`view.toggle-collision-shapes`) рисует авторские 2D-коллайдеры/хитбоксы в
+**редакторе** (годотовское «Visible Collision Shapes»), второй (`view.toggle-colliders`,
+флаг `showPhysicsColliders`) — физический wireframe **запущенной игры**. Имена этого не
+передавали, поэтому второй переименован в **Physics Wireframe**; различие
+редактор-vs-игра остаётся в описаниях (они же тултипы).
 
 ### 2.4 Правила именования
 
