@@ -49,6 +49,11 @@ import { setEditorCameraProjection } from '@/features/viewport/SetEditorCameraPr
 import { setPreviewCamera } from '@/features/viewport/SetPreviewCameraCommand';
 import { align2DNodes } from '@/features/alignment/Align2DNodesCommand';
 import type { Align2DActionId } from '@/features/alignment/types';
+import {
+  computeAlign2DCapabilities,
+  NO_ALIGN_2D_CAPABILITIES,
+  type Align2DCapabilities,
+} from '@/features/alignment/align-2d-capabilities';
 import { SetPreviewLocaleCommand } from '@/features/localization/SetPreviewLocaleCommand';
 import { LocalizationEditorService } from '@/services/localization/LocalizationEditorService';
 import {
@@ -209,17 +214,13 @@ export class EditorTabComponent extends ComponentBase {
   @state()
   private marqueeSelectionRect?: { left: number; top: number; width: number; height: number };
 
+  /**
+   * What the current selection admits, from the shared `computeAlign2DCapabilities` helper — the
+   * very predicate the `Node > Align` / `Node > Distribute` commands run in `preconditions()`, so
+   * the strip and the menu rows cannot drift apart.
+   */
   @state()
-  private has2DSelection = false;
-
-  @state()
-  private canAlignToContainer = false;
-
-  @state()
-  private canAlignToSelectionBounds = false;
-
-  @state()
-  private canDistributeSelection = false;
+  private alignment: Align2DCapabilities = NO_ALIGN_2D_CAPABILITIES;
 
   @state()
   private sceneHas2D = true;
@@ -460,7 +461,7 @@ export class EditorTabComponent extends ComponentBase {
       isActive: isPreviewCameraActive,
     } = this.getPreviewCameraDropdownState();
     const localePreview = this.getPreviewLocaleDropdownState();
-    const showAlignmentTools = isSceneTab && this.has2DSelection;
+    const showAlignmentTools = isSceneTab && this.alignment.has2DSelection;
 
     return html`
       <div class="viewport-toolbar-shell">
@@ -482,9 +483,7 @@ export class EditorTabComponent extends ComponentBase {
             isPreviewCameraActive,
             editorCameraProjection: this.editorCameraProjection,
             showAlignmentTools,
-            canAlignToContainer: isSceneTab && this.canAlignToContainer,
-            canAlignToSelectionBounds: isSceneTab && this.canAlignToSelectionBounds,
-            canDistributeSelection: isSceneTab && this.canDistributeSelection,
+            alignment: this.alignment,
             showLocalePreview: isSceneTab && localePreview.show,
             previewLocaleLabel: localePreview.label,
             previewLocaleItems: localePreview.items,
@@ -789,44 +788,8 @@ export class EditorTabComponent extends ComponentBase {
 
   private syncAlignmentToolbarState(): void {
     const activeSceneId = appState.scenes.activeSceneId;
-    if (!activeSceneId) {
-      this.has2DSelection = false;
-      this.canAlignToContainer = false;
-      this.canAlignToSelectionBounds = false;
-      this.canDistributeSelection = false;
-      return;
-    }
-
-    const sceneGraph = this.sceneManager.getSceneGraph(activeSceneId);
-    if (!sceneGraph) {
-      this.has2DSelection = false;
-      this.canAlignToContainer = false;
-      this.canAlignToSelectionBounds = false;
-      this.canDistributeSelection = false;
-      return;
-    }
-
-    const selectedNodes = appState.selection.nodeIds
-      .map(nodeId => sceneGraph.nodeMap.get(nodeId) ?? null)
-      .filter((node): node is NodeBase => node !== null);
-    const selected2DNodes = selectedNodes.filter((node): node is Node2D => node instanceof Node2D);
-
-    if (selected2DNodes.length === 0) {
-      this.has2DSelection = false;
-      this.canAlignToContainer = false;
-      this.canAlignToSelectionBounds = false;
-      this.canDistributeSelection = false;
-      return;
-    }
-
-    const sharedParent = selected2DNodes[0]?.parentNode ?? null;
-    const sharesParent = selected2DNodes.every(node => node.parentNode === sharedParent);
-
-    this.has2DSelection = true;
-    this.canAlignToContainer =
-      sharesParent && (sharedParent === null || sharedParent instanceof Node2D);
-    this.canAlignToSelectionBounds = selected2DNodes.length > 1;
-    this.canDistributeSelection = selected2DNodes.length > 2;
+    const sceneGraph = activeSceneId ? this.sceneManager.getSceneGraph(activeSceneId) : null;
+    this.alignment = computeAlign2DCapabilities(sceneGraph, appState.selection.nodeIds);
   }
 
   /**

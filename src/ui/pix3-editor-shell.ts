@@ -108,6 +108,9 @@ import { CheckScriptsCommand } from '@/features/scripts/CheckScriptsCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
 import { BrowseNodeTypesCommand } from '@/features/scene/BrowseNodeTypesCommand';
 import { createTransformModeCommands } from '@/features/viewport/SetTransformModeCommand';
+import { createShowPanelCommands } from '@/features/window/ShowPanelCommand';
+import { createAlign2DMenuCommands } from '@/features/alignment/Align2DMenuCommands';
+import { ResetLayoutCommand } from '@/features/window/ResetLayoutCommand';
 import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
 import { ToggleAxisGizmoCommand } from '@/features/viewport/ToggleAxisGizmoCommand';
 import { ToggleLayer2DCommand } from '@/features/viewport/ToggleLayer2DCommand';
@@ -462,6 +465,13 @@ export class Pix3EditorShell extends ComponentBase {
     // Searchable fallback for the Create menu, whose rows are grouped by node type.
     const browseNodeTypesCommand = new BrowseNodeTypesCommand();
 
+    // Window menu: one open-or-focus row per closable panel, plus the layout escape hatch.
+    const showPanelCommands = createShowPanelCommands();
+    const resetLayoutCommand = new ResetLayoutCommand();
+
+    // Node > Align / Node > Distribute: the viewport strip's actions, as menu rows.
+    const align2DMenuCommands = createAlign2DMenuCommands();
+
     // Register viewport commands
     const transformModeCommands = createTransformModeCommands();
     const toggleGridCommand = new ToggleGridCommand();
@@ -521,6 +531,9 @@ export class Pix3EditorShell extends ComponentBase {
       checkScriptsCommand,
       addAnimationPlayerCommand,
       browseNodeTypesCommand,
+      ...showPanelCommands,
+      resetLayoutCommand,
+      ...align2DMenuCommands,
       newProjectCommand,
       closeProjectCommand,
       moveProjectToFolderCommand,

@@ -1,6 +1,7 @@
 import { html, type TemplateResult } from 'lit';
 import type { DropdownItem } from '@/ui/shared/pix3-dropdown-button';
-import type { Align2DActionId } from '@/features/alignment/types';
+import { ALIGN_2D_ACTION_LABELS, type Align2DActionId } from '@/features/alignment/types';
+import type { Align2DCapabilities } from '@/features/alignment/align-2d-capabilities';
 
 import type { EditorCameraProjection, NavigationMode } from '@/state';
 import type { IconService } from '@/services/editor/IconService';
@@ -28,9 +29,13 @@ export interface ViewportToolbarState {
   readonly isPreviewCameraActive: boolean;
   readonly editorCameraProjection: EditorCameraProjection;
   readonly showAlignmentTools: boolean;
-  readonly canAlignToContainer: boolean;
-  readonly canAlignToSelectionBounds: boolean;
-  readonly canDistributeSelection: boolean;
+  /**
+   * Which alignment actions the selection admits. Computed by
+   * `computeAlign2DCapabilities` — the same helper the `Node > Align` / `Node > Distribute`
+   * commands run in their `preconditions()`, so a hidden group here and a greyed menu row there
+   * can never disagree.
+   */
+  readonly alignment: Align2DCapabilities;
   /** Localization is configured for the project — show the preview-locale switch. */
   readonly showLocalePreview: boolean;
   readonly previewLocaleLabel: string;
@@ -61,9 +66,7 @@ export interface ViewportZoomOverlayHandlers {
 
 export interface AlignmentToolbarState {
   readonly showAlignmentTools: boolean;
-  readonly canAlignToContainer: boolean;
-  readonly canAlignToSelectionBounds: boolean;
-  readonly canDistributeSelection: boolean;
+  readonly alignment: Align2DCapabilities;
 }
 
 export interface AlignmentToolbarHandlers {
@@ -93,97 +96,39 @@ const TRANSFORM_MODES: readonly {
   { mode: 'scale', iconName: 'maximize-2', label: 'Scale (R)' },
 ];
 
-const CONTAINER_ALIGNMENT_ACTIONS: readonly {
+/**
+ * The three alignment groups, in toolbar order. Labels are not repeated here: they come from
+ * `ALIGN_2D_ACTION_LABELS`, shared with the `Node > Align` / `Node > Distribute` menu rows so the
+ * button and the row that run the same operation always read the same.
+ */
+interface AlignmentToolbarAction {
   readonly action: Align2DActionId;
   readonly iconName: string;
-  readonly label: string;
-}[] = [
-  { action: 'container-left', iconName: 'align-selection-left', label: 'Align Left to Container' },
-  {
-    action: 'container-center-x',
-    iconName: 'align-selection-center-x',
-    label: 'Align Horizontal Center to Container',
-  },
-  {
-    action: 'container-right',
-    iconName: 'align-selection-right',
-    label: 'Align Right to Container',
-  },
-  { action: 'container-top', iconName: 'align-selection-top', label: 'Align Top to Container' },
-  {
-    action: 'container-center-y',
-    iconName: 'align-selection-center-y',
-    label: 'Align Vertical Center to Container',
-  },
-  {
-    action: 'container-bottom',
-    iconName: 'align-selection-bottom',
-    label: 'Align Bottom to Container',
-  },
+}
+
+const CONTAINER_ALIGNMENT_ACTIONS: readonly AlignmentToolbarAction[] = [
+  { action: 'container-left', iconName: 'align-selection-left' },
+  { action: 'container-center-x', iconName: 'align-selection-center-x' },
+  { action: 'container-right', iconName: 'align-selection-right' },
+  { action: 'container-top', iconName: 'align-selection-top' },
+  { action: 'container-center-y', iconName: 'align-selection-center-y' },
+  { action: 'container-bottom', iconName: 'align-selection-bottom' },
 ];
 
-const SELECTION_ALIGNMENT_ACTIONS: readonly {
-  readonly action: Align2DActionId;
-  readonly iconName: string;
-  readonly label: string;
-}[] = [
-  {
-    action: 'selection-left',
-    iconName: 'align-container-left',
-    label: 'Align Left to Selection Bounds',
-  },
-  {
-    action: 'selection-center-x',
-    iconName: 'align-container-center-x',
-    label: 'Align Horizontal Center to Selection Bounds',
-  },
-  {
-    action: 'selection-right',
-    iconName: 'align-container-right',
-    label: 'Align Right to Selection Bounds',
-  },
-  {
-    action: 'selection-top',
-    iconName: 'align-container-top',
-    label: 'Align Top to Selection Bounds',
-  },
-  {
-    action: 'selection-center-y',
-    iconName: 'align-container-center-y',
-    label: 'Align Vertical Center to Selection Bounds',
-  },
-  {
-    action: 'selection-bottom',
-    iconName: 'align-container-bottom',
-    label: 'Align Bottom to Selection Bounds',
-  },
+const SELECTION_ALIGNMENT_ACTIONS: readonly AlignmentToolbarAction[] = [
+  { action: 'selection-left', iconName: 'align-container-left' },
+  { action: 'selection-center-x', iconName: 'align-container-center-x' },
+  { action: 'selection-right', iconName: 'align-container-right' },
+  { action: 'selection-top', iconName: 'align-container-top' },
+  { action: 'selection-center-y', iconName: 'align-container-center-y' },
+  { action: 'selection-bottom', iconName: 'align-container-bottom' },
 ];
 
-const DISTRIBUTION_ACTIONS: readonly {
-  readonly action: Align2DActionId;
-  readonly iconName: string;
-  readonly label: string;
-}[] = [
-  {
-    action: 'distribute-gap-x',
-    iconName: 'distribute-gap-x',
-    label: 'Distribute Horizontal Gaps',
-  },
-  {
-    action: 'distribute-center-x',
-    iconName: 'distribute-center-x',
-    label: 'Distribute Centers Horizontally',
-  },
-  {
-    action: 'distribute-gap-y',
-    iconName: 'distribute-gap-y',
-    label: 'Distribute Vertical Gaps',
-  },
-  {
-    action: 'distribute-center-y',
-    iconName: 'distribute-center-y',
-    label: 'Distribute Centers Vertically',
-  },
+const DISTRIBUTION_ACTIONS: readonly AlignmentToolbarAction[] = [
+  { action: 'distribute-gap-x', iconName: 'distribute-gap-x' },
+  { action: 'distribute-center-x', iconName: 'distribute-center-x' },
+  { action: 'distribute-gap-y', iconName: 'distribute-gap-y' },
+  { action: 'distribute-center-y', iconName: 'distribute-center-y' },
 ];
 
 export function renderViewportToolbar(
@@ -250,9 +195,7 @@ export function renderViewportToolbar(
       ${renderAlignmentToolbarGroups(
         {
           showAlignmentTools: state.showAlignmentTools,
-          canAlignToContainer: state.canAlignToContainer,
-          canAlignToSelectionBounds: state.canAlignToSelectionBounds,
-          canDistributeSelection: state.canDistributeSelection,
+          alignment: state.alignment,
         },
         {
           onRunAlignmentAction: handlers.onRunAlignmentAction,
@@ -355,16 +298,10 @@ function renderAlignmentToolbarGroups(
   handlers: AlignmentToolbarHandlers,
   iconService: IconService
 ): TemplateResult | null {
-  const showContainerAlignment =
-    state.showAlignmentTools && state.canAlignToContainer && Boolean(handlers.onRunAlignmentAction);
-  const showSelectionAlignment =
-    state.showAlignmentTools &&
-    state.canAlignToSelectionBounds &&
-    Boolean(handlers.onRunAlignmentAction);
-  const showDistribution =
-    state.showAlignmentTools &&
-    state.canDistributeSelection &&
-    Boolean(handlers.onRunAlignmentAction);
+  const canRun = state.showAlignmentTools && Boolean(handlers.onRunAlignmentAction);
+  const showContainerAlignment = canRun && state.alignment.canAlignToContainer;
+  const showSelectionAlignment = canRun && state.alignment.canAlignToSelectionBounds;
+  const showDistribution = canRun && state.alignment.canDistributeSelection;
 
   if (!showContainerAlignment && !showSelectionAlignment && !showDistribution) {
     return null;
@@ -375,11 +312,11 @@ function renderAlignmentToolbarGroups(
       ${showSelectionAlignment
         ? html`
             <div class="toolbar-group" role="group" aria-label="Align to selection bounds">
-              ${SELECTION_ALIGNMENT_ACTIONS.map(({ action, iconName, label }) =>
+              ${SELECTION_ALIGNMENT_ACTIONS.map(({ action, iconName }) =>
                 renderToolbarButton(
                   {
-                    ariaLabel: label,
-                    title: label,
+                    ariaLabel: ALIGN_2D_ACTION_LABELS[action],
+                    title: ALIGN_2D_ACTION_LABELS[action],
                     iconName,
                     onClick: () => handlers.onRunAlignmentAction?.(action),
                   },
@@ -392,11 +329,11 @@ function renderAlignmentToolbarGroups(
       ${showContainerAlignment
         ? html`
             <div class="toolbar-group" role="group" aria-label="Align to container">
-              ${CONTAINER_ALIGNMENT_ACTIONS.map(({ action, iconName, label }) =>
+              ${CONTAINER_ALIGNMENT_ACTIONS.map(({ action, iconName }) =>
                 renderToolbarButton(
                   {
-                    ariaLabel: label,
-                    title: label,
+                    ariaLabel: ALIGN_2D_ACTION_LABELS[action],
+                    title: ALIGN_2D_ACTION_LABELS[action],
                     iconName,
                     onClick: () => handlers.onRunAlignmentAction?.(action),
                   },
@@ -409,11 +346,11 @@ function renderAlignmentToolbarGroups(
       ${showDistribution
         ? html`
             <div class="toolbar-group" role="group" aria-label="Distribute selection">
-              ${DISTRIBUTION_ACTIONS.map(({ action, iconName, label }) =>
+              ${DISTRIBUTION_ACTIONS.map(({ action, iconName }) =>
                 renderToolbarButton(
                   {
-                    ariaLabel: label,
-                    title: label,
+                    ariaLabel: ALIGN_2D_ACTION_LABELS[action],
+                    title: ALIGN_2D_ACTION_LABELS[action],
                     iconName,
                     onClick: () => handlers.onRunAlignmentAction?.(action),
                   },

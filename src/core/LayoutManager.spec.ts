@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const loadLayout = vi.fn();
 const registerComponentFactoryFunction = vi.fn();
+const stackAddItem = vi.fn();
 let lastActiveComponentItem: unknown;
 let activeContentItemChangedHandler: ((...args: unknown[]) => void) | undefined;
 
@@ -23,9 +24,18 @@ class FakeGoldenLayout {
             componentType: 'profiler',
             parent: null,
           },
+          {
+            type: 'component',
+            componentType: 'assets',
+            parent: null,
+          },
         ],
         setActiveComponentItem(item: unknown) {
           lastActiveComponentItem = item;
+        },
+        addItem(config: unknown, index?: number) {
+          stackAddItem(config, index);
+          return 0;
         },
       },
     ],
@@ -63,6 +73,7 @@ describe('LayoutManagerService', () => {
   beforeEach(() => {
     loadLayout.mockReset();
     registerComponentFactoryFunction.mockReset();
+    stackAddItem.mockReset();
     lastActiveComponentItem = undefined;
     activeContentItemChangedHandler = undefined;
   });
@@ -130,5 +141,54 @@ describe('LayoutManagerService', () => {
     });
 
     expect(appState.ui.focusedPanelId).toBe('profiler');
+  });
+  /**
+   * `showPanel()` is the one path behind every `Window ▸ <panel>` row (and behind the
+   * `reveal*Panel()` family, which now delegates to it), so these pin its three contracts:
+   * idempotence, placement by neighbour, and hands off documents.
+   */
+  describe('showPanel', () => {
+    it('only focuses a panel that is already in the layout', async () => {
+      const { LayoutManagerService } = await import('./LayoutManager');
+
+      const service = new LayoutManagerService();
+      await service.initialize(document.createElement('div'));
+
+      service.showPanel('profiler');
+
+      expect(lastActiveComponentItem).toMatchObject({ componentType: 'profiler' });
+      expect(stackAddItem).not.toHaveBeenCalled();
+    });
+
+    it('docks a closed panel into the stack that hosts one of its default neighbours', async () => {
+      const { LayoutManagerService } = await import('./LayoutManager');
+
+      const service = new LayoutManagerService();
+      await service.initialize(document.createElement('div'));
+
+      // Logs is not in the fake layout; Assets — its first default neighbour — is, so Logs must
+      // land back in that stack rather than in a column of its own.
+      service.showPanel('logs');
+
+      expect(stackAddItem).toHaveBeenCalledTimes(1);
+      expect(stackAddItem.mock.calls[0]?.[0]).toMatchObject({
+        type: 'component',
+        componentType: 'logs',
+        title: 'Logs',
+        isClosable: true,
+      });
+    });
+
+    it('never docks a document type (viewport, game, code, …) as a panel', async () => {
+      const { LayoutManagerService } = await import('./LayoutManager');
+
+      const service = new LayoutManagerService();
+      await service.initialize(document.createElement('div'));
+
+      service.showPanel('game');
+
+      // Documents need a tab id and a resource, which only EditorTabService can supply.
+      expect(stackAddItem).not.toHaveBeenCalled();
+    });
   });
 });
