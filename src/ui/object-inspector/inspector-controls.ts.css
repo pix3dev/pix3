@@ -342,3 +342,71 @@ pix3-inspector-panel .inspector-segment__glyph {
 pix3-inspector-panel .inspector-segment__glyph rect {
   stroke: none;
 }
+
+/* ── Collapsible property sections (G10, §3.1) ─────────────────────────────
+ * Godot-style flat sections, not a Unity accordion: the section title row IS
+ * the disclosure button, so Enter/Space come from the native `<button>` and no
+ * key handler is needed. The `<h4>` stays for heading semantics and `.group-title`
+ * stays the label element (a non-collapsible section still renders it directly).
+ */
+pix3-inspector-panel .group-heading {
+  margin: 0;
+  font: inherit;
+}
+
+pix3-inspector-panel .group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-0);
+  text-align: left;
+  cursor: pointer;
+}
+
+pix3-inspector-panel .group-toggle .group-title {
+  /* The standalone `<h4 class="group-title">` carries a bottom margin; inside
+     the button row it would push the caret off-centre. */
+  margin: 0;
+}
+
+pix3-inspector-panel .group-toggle:hover .group-title {
+  color: var(--accent);
+}
+
+pix3-inspector-panel .group-toggle:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+pix3-inspector-panel .group-toggle-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-2);
+}
+
+pix3-inspector-panel .group-toggle-caret svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+pix3-inspector-panel .property-group-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+/* `display: flex` above would beat the `hidden` attribute, so restate it. */
+pix3-inspector-panel .property-group-section__body[hidden] {
+  display: none;
+}

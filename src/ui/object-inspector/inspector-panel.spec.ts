@@ -1,13 +1,14 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AmbientLightNode,
   AudioPlayer,
   Camera3D,
   Group2D,
-  type NodeBase,
+  NodeBase,
   PlaySoundBehavior,
   type PropertyDefinition,
+  type PropertySchema,
 } from '@pix3/runtime';
 
 type DragLike = Pick<DragEvent, 'dataTransfer'>;
@@ -1357,3 +1358,167 @@ async function setupInspectorForNode(
 
   return { panel, execute };
 }
+
+/**
+ * G10 section spine (`.plans/ui-consistency-pass.md` §3.1). The probe node owns
+ * its whole schema (a static `getPropertySchema` REPLACES the base class one),
+ * so each test states exactly the group names and `groups` metadata it is about.
+ */
+let probeSchema: PropertySchema = { nodeType: 'ProbeNode', properties: [] };
+
+class ProbeNode extends NodeBase {
+  static getPropertySchema(): PropertySchema {
+    return probeSchema;
+  }
+}
+
+function probeProperty(name: string, group: string): PropertyDefinition {
+  return {
+    name,
+    type: 'string',
+    ui: { label: name, group },
+    getValue: () => '',
+    setValue: () => {},
+  };
+}
+
+function setProbeSchema(
+  properties: [name: string, group: string][],
+  groups?: PropertySchema['groups']
+): void {
+  probeSchema = {
+    nodeType: 'ProbeNode',
+    properties: properties.map(([name, group]) => probeProperty(name, group)),
+    ...(groups ? { groups } : {}),
+  };
+}
+
+async function setupProbeInspector() {
+  return setupInspectorForNode(new ProbeNode({ id: 'probe-1', name: 'Probe', type: 'ProbeNode' }));
+}
+
+function getSectionTitles(panel: HTMLElement): string[] {
+  return Array.from(panel.querySelectorAll('.group-title')).map(
+    title => title.textContent?.trim() ?? ''
+  );
+}
+
+function getSectionToggle(panel: HTMLElement, sectionName: string): HTMLButtonElement | null {
+  return panel.querySelector<HTMLButtonElement>(`[data-section="${sectionName}"] .group-toggle`);
+}
+
+describe('InspectorPanel section spine', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    probeSchema = { nodeType: 'ProbeNode', properties: [] };
+  });
+
+  it('folds aliased groups into Transform instead of rendering them as their own sections', async () => {
+    setProbeSchema([
+      ['positionValue', 'Position'],
+      ['orderingValue', 'Ordering'],
+      ['zebraValue', 'Zebra'],
+    ]);
+
+    const { panel } = await setupProbeInspector();
+    const titles = getSectionTitles(panel);
+    const transformBody = panel.querySelector('[data-section="Transform"]');
+
+    expect(titles).toContain('Transform');
+    expect(titles).not.toContain('Position');
+    expect(titles).not.toContain('Ordering');
+    expect(transformBody?.textContent).toContain('positionValue');
+    expect(transformBody?.textContent).toContain('orderingValue');
+    // The unaliased group keeps its own name, after the spine.
+    expect(titles.indexOf('Transform')).toBeLessThan(titles.indexOf('Zebra'));
+  });
+
+  it('renders unaliased groups in declaration order and never alphabetically', async () => {
+    setProbeSchema([
+      ['zebraValue', 'Zebra'],
+      ['alphaValue', 'Alpha'],
+    ]);
+
+    const { panel } = await setupProbeInspector();
+    const titles = getSectionTitles(panel);
+
+    expect(titles.indexOf('Zebra')).toBeLessThan(titles.indexOf('Alpha'));
+  });
+
+  it('collapses a section the schema marks `expanded: false` and keeps the spine expanded', async () => {
+    setProbeSchema(
+      [
+        ['transformValue', 'Transform'],
+        ['debugValue', 'Debug Info'],
+      ],
+      {
+        'Debug Info': { label: 'Debug Info', expanded: false },
+        Transform: { label: 'Transform', expanded: false },
+      }
+    );
+
+    const { panel } = await setupProbeInspector();
+    const debugToggle = getSectionToggle(panel, 'Debug Info');
+    const debugBody = panel.querySelector<HTMLElement>(
+      '[data-section="Debug Info"] .property-group-section__body'
+    );
+
+    expect(debugToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(debugToggle?.getAttribute('aria-controls')).toBe(debugBody?.id);
+    expect(debugBody?.hasAttribute('hidden')).toBe(true);
+    // Node/Transform/Layout never start collapsed, whatever the schema says.
+    expect(getSectionToggle(panel, 'Transform')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('persists a collapsed section per node type and restores it on the next mount', async () => {
+    setProbeSchema([['transformValue', 'Transform']]);
+
+    const first = await setupProbeInspector();
+    getSectionToggle(first.panel, 'Transform')?.click();
+    await first.panel.updateComplete;
+
+    expect(getSectionToggle(first.panel, 'Transform')?.getAttribute('aria-expanded')).toBe('false');
+    expect(JSON.parse(localStorage.getItem('pix3.inspector.collapsed') ?? '{}')).toEqual({
+      'ProbeNode::Transform': true,
+    });
+
+    document.body.innerHTML = '';
+    const second = await setupProbeInspector();
+
+    expect(getSectionToggle(second.panel, 'Transform')?.getAttribute('aria-expanded')).toBe(
+      'false'
+    );
+  });
+
+  it('renders every section expanded when the stored collapse state is absent or malformed', async () => {
+    setProbeSchema([
+      ['transformValue', 'Transform'],
+      ['zebraValue', 'Zebra'],
+    ]);
+
+    const absent = await setupProbeInspector();
+    expect(
+      Array.from(absent.panel.querySelectorAll('.group-toggle')).map(toggle =>
+        toggle.getAttribute('aria-expanded')
+      )
+    ).toEqual(['true', 'true']);
+
+    document.body.innerHTML = '';
+    localStorage.setItem('pix3.inspector.collapsed', '{not json');
+    const malformed = await setupProbeInspector();
+    expect(
+      Array.from(malformed.panel.querySelectorAll('.group-toggle')).map(toggle =>
+        toggle.getAttribute('aria-expanded')
+      )
+    ).toEqual(['true', 'true']);
+
+    document.body.innerHTML = '';
+    localStorage.setItem('pix3.inspector.collapsed', '["ProbeNode::Zebra"]');
+    const wrongShape = await setupProbeInspector();
+    expect(
+      Array.from(wrongShape.panel.querySelectorAll('.group-toggle')).map(toggle =>
+        toggle.getAttribute('aria-expanded')
+      )
+    ).toEqual(['true', 'true']);
+  });
+});

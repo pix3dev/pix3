@@ -34,6 +34,12 @@ type ReadOnlyValue = boolean | ((target: unknown) => boolean) | undefined;
 type PropertySectionOptions = {
   className?: string;
   hideTitle?: boolean;
+  /** Render the title row as a disclosure button (G10). Ignored when titleless. */
+  collapsible?: boolean;
+  /** `(nodeTypeId, sectionName)` key half for the persisted state; defaults to `label`. */
+  sectionName?: string;
+  /** Start collapsed until the user says otherwise (schema `groups[x].expanded === false`). */
+  defaultCollapsed?: boolean;
 };
 
 /** Per-row overrides for {@link InspectorPropertyRenderers.renderDetachedProperty}. */
@@ -62,21 +68,136 @@ const ANCHOR_MODE_FALLBACK_LABELS: Readonly<Record<string, string>> = {
   stretch: 'S',
 };
 
-const PROPERTY_GROUP_ORDER = [
-  'Transform',
-  'Patch',
-  'Size',
-  'Slice',
-  'Tile',
-  'Anchor',
-  'Style',
-  'Sprite',
-  'Spine',
-  'Animation',
-];
-const PROPERTY_GROUP_ORDER_INDEX = new Map(
-  PROPERTY_GROUP_ORDER.map((groupName, index) => [groupName, index])
-);
+/**
+ * Inspector section spine (`.plans/ui-consistency-pass.md` §3.1). Schema group
+ * names come from ~65 different declarations; this alias table is the WHOLE
+ * mapping. A group that is not in it keeps its own name and renders in the tail
+ * band **in schema declaration order** — there is deliberately no alphabetical
+ * fallback: the alphabet is arbitrary to the reader and stops a schema author
+ * from putting `Sprite` above `Slice`. Godot and Unity draw properties in
+ * declaration order for exactly that reason.
+ */
+const SECTION_ALIAS: Readonly<Record<string, SpineSectionName>> = {
+  Base: 'Node',
+  Identity: 'Node',
+  General: 'Node',
+  Editor: 'Node',
+  Component: 'Node',
+  Debug: 'Node',
+  Runtime: 'Node',
+  Lifecycle: 'Node',
+  Transform: 'Transform',
+  Position: 'Transform',
+  Rotation: 'Transform',
+  Ordering: 'Transform',
+  Size: 'Layout',
+  Anchor: 'Layout',
+  Anchors: 'Layout',
+  Flow: 'Layout',
+};
+
+type SpineSectionName = 'Node' | 'Transform' | 'Layout';
+
+/** Band index per spine section; the node's own groups follow in {@link DECLARATION_BAND}. */
+const SECTION_BAND: Readonly<Record<SpineSectionName, number>> = {
+  Node: 0,
+  Transform: 1,
+  Layout: 2,
+};
+
+/** Everything the alias table does not name renders here, in declaration order. */
+const DECLARATION_BAND = 3;
+
+/**
+ * Reading order inside the Layout band, independent of how a schema happens to declare them.
+ * Anything else that aliases into Layout later sorts after these three.
+ */
+const LAYOUT_MEMBER_RANK: Readonly<Record<string, number>> = {
+  Size: 0,
+  Anchor: 1,
+  Anchors: 1,
+  Flow: 2,
+};
+
+/**
+ * One rendered section of the node property list. `Node` and `Transform` fold
+ * every aliased group into a single section; the `Layout` band keeps `Size` /
+ * `Anchor` / `Flow` as separate sections rendered exactly as before and only
+ * moves them into the band's slot (merging them into one section with
+ * subsections is G11, which also renames the runtime groups).
+ */
+interface InspectorSection {
+  /** Section title and the `sectionName` half of the collapse-state key. */
+  name: string;
+  /** Sort band; ties keep schema declaration order (Array#sort is stable). */
+  band: number;
+  /**
+   * Rank inside the band. Only the Layout band uses it: Size -> Anchors -> Flow is a reading
+   * order (how big am I, where do I sit, how do I place my children), and declaration order in
+   * `Node2D` happens to put Flow first, which reads backwards.
+   */
+  rank: number;
+  /** Spine sections never start collapsed, whatever a schema's `expanded` says. */
+  pinned: boolean;
+  /** Schema groups folded into this section, in declaration order. */
+  groups: { groupName: string; props: PropertyDefinition[] }[];
+}
+
+/** Collapse wiring threaded from {@link InspectorPropertyRenderers.renderSection}. */
+type SectionCollapseOptions = Pick<
+  PropertySectionOptions,
+  'collapsible' | 'sectionName' | 'defaultCollapsed'
+>;
+
+/** Single localStorage key holding every `(nodeTypeId, sectionName)` collapse flag. */
+export const INSPECTOR_COLLAPSED_SECTIONS_KEY = 'pix3.inspector.collapsed';
+
+/** Collapse-state record key: sections are per node type, not per node instance. */
+export function inspectorSectionStateKey(nodeTypeId: string, sectionName: string): string {
+  return `${nodeTypeId}::${sectionName}`;
+}
+
+/**
+ * Read the persisted collapse state. Every failure mode — a private window, a
+ * browser with site data blocked, a hand-edited or truncated value — resolves to
+ * "nothing stored", i.e. every section expanded. Collapse state is a
+ * convenience; it must never be able to break the inspector.
+ */
+export function readInspectorCollapsedSections(): Record<string, boolean> {
+  try {
+    const raw = localStorage.getItem(INSPECTOR_COLLAPSED_SECTIONS_KEY);
+    if (!raw) {
+      return {};
+    }
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      return {};
+    }
+    const state: Record<string, boolean> = {};
+    for (const [key, value] of Object.entries(parsed as Record<string, unknown>)) {
+      if (typeof value === 'boolean') {
+        state[key] = value;
+      }
+    }
+    return state;
+  } catch {
+    return {};
+  }
+}
+
+/** Persist the collapse state, ignoring a storage that refuses to be written. */
+export function writeInspectorCollapsedSections(state: Record<string, boolean>): void {
+  try {
+    localStorage.setItem(INSPECTOR_COLLAPSED_SECTIONS_KEY, JSON.stringify(state));
+  } catch {
+    // Blocked/full site data: the inspector still renders, it just forgets.
+  }
+}
+
+/** Stable DOM id fragment for a section body (`aria-controls` target). */
+function toSectionSlug(sectionName: string): string {
+  return sectionName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+}
 
 export function getPropertyDisplayValue(target: unknown, prop: PropertyDefinition): string {
   const value = prop.getValue(target);
@@ -155,23 +276,7 @@ export class InspectorPropertyRenderers {
         !summaryPropertyNames.has(prop.name) && !editorFlagNames.has(prop.name) && !prop.ui?.hidden
     );
 
-    const sortedGroups = Array.from(groupedProps.entries())
-      // 'Effect: *' groups come from the instance schema and are rendered as
-      // cards by renderEffectsSection, not as plain property groups.
-      .filter(
-        ([groupName]) =>
-          groupName !== 'Base' && groupName !== 'Editor' && !groupName.startsWith('Effect: ')
-      )
-      .sort(([nameA], [nameB]) => {
-        const orderA = PROPERTY_GROUP_ORDER_INDEX.get(nameA) ?? PROPERTY_GROUP_ORDER.length;
-        const orderB = PROPERTY_GROUP_ORDER_INDEX.get(nameB) ?? PROPERTY_GROUP_ORDER.length;
-
-        if (orderA !== orderB) {
-          return orderA - orderB;
-        }
-
-        return nameA.localeCompare(nameB);
-      });
+    const sections = this.buildSections(groupedProps);
 
     return html`
       <div class="property-section property-section--object">
@@ -184,7 +289,7 @@ export class InspectorPropertyRenderers {
               </div>
             `
           : ''}
-        ${sortedGroups.map(([groupName, props]) => this.renderPropertyGroup(groupName, props))}
+        ${sections.map(section => this.renderSection(section))}
         ${this.host.sectionRenderers.renderAnimationsSection()}
         ${this.host.sectionRenderers.renderEffectsSection()}
         ${this.host.sectionRenderers.renderScriptsSection()}
@@ -192,7 +297,120 @@ export class InspectorPropertyRenderers {
     `;
   }
 
-  renderPropertyGroup(groupName: string, props: PropertyDefinition[]) {
+  /**
+   * Order the schema's groups into the section spine (§3.1): `Node`, then
+   * `Transform`, then the `Layout` band, then everything else **in schema
+   * declaration order**. `getPropertiesByGroup` already yields groups in
+   * first-appearance order of `schema.properties`, and `extendPropertySchema` /
+   * a subclass's `getPropertySchema()` append after the base class, so
+   * "declaration order" is already "base groups first, subclass groups after" —
+   * all this has to do is not re-sort it.
+   */
+  private buildSections(groupedProps: Map<string, PropertyDefinition[]>): InspectorSection[] {
+    // The Layout band is 2D-only; on a 3D node a `Size` group keeps its own slot.
+    const is2D = this.host.primaryNode instanceof Node2D;
+    const sections: InspectorSection[] = [];
+    const foldedSections = new Map<SpineSectionName, InspectorSection>();
+
+    for (const [groupName, props] of groupedProps) {
+      // 'Base'/'Editor' are lifted into the header (summary row + editor flags)
+      // and the compact supplementary block; 'Effect: *' groups come from the
+      // instance schema and render as cards in renderEffectsSection.
+      if (groupName === 'Base' || groupName === 'Editor' || groupName.startsWith('Effect: ')) {
+        continue;
+      }
+
+      const alias = SECTION_ALIAS[groupName];
+      const group = { groupName, props };
+
+      if (alias === undefined || (alias === 'Layout' && !is2D)) {
+        sections.push({
+          name: groupName,
+          band: DECLARATION_BAND,
+          rank: 0,
+          pinned: false,
+          groups: [group],
+        });
+        continue;
+      }
+
+      if (alias === 'Layout') {
+        // G10 only moves Size/Anchor/Flow into the band; their markup is
+        // untouched (G11 merges them into one Layout section with subsections).
+        sections.push({
+          name: groupName,
+          band: SECTION_BAND.Layout,
+          rank: LAYOUT_MEMBER_RANK[groupName] ?? Object.keys(LAYOUT_MEMBER_RANK).length,
+          pinned: true,
+          groups: [group],
+        });
+        continue;
+      }
+
+      const folded = foldedSections.get(alias);
+      if (folded) {
+        folded.groups.push(group);
+        continue;
+      }
+
+      const section: InspectorSection = {
+        name: alias,
+        band: SECTION_BAND[alias],
+        rank: 0,
+        pinned: true,
+        groups: [group],
+      };
+      foldedSections.set(alias, section);
+      sections.push(section);
+    }
+
+    // Band first, then the Layout band's reading order; `Array#sort` is stable (ES2019), so
+    // equal ranks keep schema declaration order.
+    return sections.sort((a, b) => a.band - b.band || a.rank - b.rank);
+  }
+
+  private renderSection(section: InspectorSection) {
+    const props = section.groups.flatMap(group => group.props).filter(prop => !prop.ui?.hidden);
+
+    if (props.length === 0) {
+      return '';
+    }
+
+    const collapse: SectionCollapseOptions = {
+      collapsible: true,
+      sectionName: section.name,
+      defaultCollapsed: section.pinned ? false : this.isSectionCollapsedByDefault(section.name),
+    };
+
+    if (section.name === 'Node') {
+      return this.renderPropertySection(
+        this.getSectionLabel(section.name),
+        props.map(prop => this.renderPropertyInput(prop)),
+        collapse
+      );
+    }
+
+    if (section.name === 'Transform') {
+      return this.renderTransformGroup(this.getSectionLabel(section.name), props, collapse);
+    }
+
+    return this.renderPropertyGroup(section.groups[0]!.groupName, props, collapse);
+  }
+
+  /** A schema opts a section out of the default-expanded state with `expanded: false`. */
+  private isSectionCollapsedByDefault(sectionName: string): boolean {
+    return this.host.propertySchema?.groups?.[sectionName]?.expanded === false;
+  }
+
+  private getSectionLabel(sectionName: string): string {
+    return this.host.propertySchema?.groups?.[sectionName]?.label || sectionName;
+  }
+
+  renderPropertyGroup(
+    groupName: string,
+    props: PropertyDefinition[],
+    collapse: SectionCollapseOptions = {}
+  ) {
     const groupDef = this.host.propertySchema?.groups?.[groupName];
     const label = groupDef?.label || groupName;
 
@@ -203,7 +421,7 @@ export class InspectorPropertyRenderers {
     }
 
     if (groupName === 'Transform') {
-      return this.renderTransformGroup(label, visibleProps);
+      return this.renderTransformGroup(label, visibleProps, collapse);
     }
 
     if (groupName === 'Anchor' && this.host.primaryNode instanceof Node2D) {
@@ -211,13 +429,14 @@ export class InspectorPropertyRenderers {
     }
 
     if (groupName === 'Size') {
-      return this.renderSizeGroup(label, visibleProps);
+      return this.renderSizeGroup(label, visibleProps, collapse);
     }
 
     return this.renderPropertySection(
       label,
       visibleProps.map(prop => this.renderPropertyInput(prop)),
       {
+        ...collapse,
         hideTitle: groupName === 'Style' && visibleProps.length === 1,
       }
     );
@@ -303,7 +522,11 @@ export class InspectorPropertyRenderers {
     );
   }
 
-  renderTransformGroup(label: string, props: PropertyDefinition[]) {
+  renderTransformGroup(
+    label: string,
+    props: PropertyDefinition[],
+    collapse: SectionCollapseOptions = {}
+  ) {
     if (!this.host.primaryNode) {
       return '';
     }
@@ -312,6 +535,7 @@ export class InspectorPropertyRenderers {
       label,
       props.map(prop => this.renderTransformProperty(prop)),
       {
+        ...collapse,
         className: 'transform-section',
       }
     );
@@ -360,7 +584,11 @@ export class InspectorPropertyRenderers {
     return this.renderPropertyInput(prop);
   }
 
-  renderSizeGroup(label: string, props: PropertyDefinition[]) {
+  renderSizeGroup(
+    label: string,
+    props: PropertyDefinition[],
+    collapse: SectionCollapseOptions = {}
+  ) {
     if (!this.host.primaryNode) {
       return '';
     }
@@ -372,7 +600,8 @@ export class InspectorPropertyRenderers {
     if (!widthProp || !heightProp) {
       return this.renderPropertySection(
         label,
-        props.map(prop => this.renderPropertyInput(prop))
+        props.map(prop => this.renderPropertyInput(prop)),
+        collapse
       );
     }
 
@@ -384,13 +613,22 @@ export class InspectorPropertyRenderers {
     const height = heightState ? parseFloat(heightState.value) : 64;
 
     if (this.host.primaryNode instanceof Group2D) {
-      return this.renderGroup2DSizeGroup(label, widthProp, heightProp, width, height, readOnly);
+      return this.renderGroup2DSizeGroup(
+        label,
+        widthProp,
+        heightProp,
+        width,
+        height,
+        readOnly,
+        collapse
+      );
     }
 
     if (!(this.host.primaryNode instanceof Sprite2D)) {
       return this.renderPropertySection(
         label,
-        props.map(prop => this.renderPropertyInput(prop))
+        props.map(prop => this.renderPropertyInput(prop)),
+        collapse
       );
     }
 
@@ -515,6 +753,7 @@ export class InspectorPropertyRenderers {
         ${remainingProps.map(prop => this.renderPropertyInput(prop))}
       `,
       {
+        ...collapse,
         className: 'size-section',
         hideTitle: true,
       }
@@ -1959,18 +2198,63 @@ export class InspectorPropertyRenderers {
     `;
   }
 
+  /**
+   * A node property section. With `collapsible` the title row becomes a real
+   * `<button>` disclosure (Godot-style flat section, not a Unity accordion):
+   * chevron + label, `aria-expanded` + `aria-controls` pointing at the body, so
+   * Enter/Space come from the native button and need no key handler. Collapse
+   * state is pure UI — it goes straight to `localStorage`, not through a
+   * Command. A titleless section has nowhere to put the disclosure, so it stays
+   * as it was.
+   */
   renderPropertySection(label: string, content: unknown, options: PropertySectionOptions = {}) {
+    const collapsible = options.collapsible === true && options.hideTitle !== true;
+    const sectionName = options.sectionName ?? label;
+    const defaultCollapsed = options.defaultCollapsed === true;
+    const collapsed = collapsible
+      ? this.host.isSectionCollapsed(sectionName, defaultCollapsed)
+      : false;
+
     const classes = [
       'property-group-section',
       options.className,
       options.hideTitle ? 'property-group-section--titleless' : '',
+      collapsible ? 'property-group-section--collapsible' : '',
+      collapsed ? 'property-group-section--collapsed' : '',
     ]
       .filter(Boolean)
       .join(' ');
 
+    if (!collapsible) {
+      return html`
+        <div class=${classes}>
+          ${options.hideTitle ? '' : html`<h4 class="group-title">${label}</h4>`} ${content}
+        </div>
+      `;
+    }
+
+    const bodyId = `inspector-section-${toSectionSlug(sectionName)}`;
+
     return html`
-      <div class=${classes}>
-        ${options.hideTitle ? '' : html`<h4 class="group-title">${label}</h4>`} ${content}
+      <div class=${classes} data-section=${sectionName}>
+        <h4 class="group-heading">
+          <button
+            class="group-toggle"
+            type="button"
+            aria-expanded=${collapsed ? 'false' : 'true'}
+            aria-controls=${bodyId}
+            @click=${() => this.host.toggleSectionCollapsed(sectionName, defaultCollapsed)}
+          >
+            <span class="group-toggle-caret" aria-hidden="true">
+              ${this.host.iconService.getIcon(
+                collapsed ? 'chevron-right-caret' : 'chevron-down-caret',
+                IconSize.SMALL
+              )}
+            </span>
+            <span class="group-title">${label}</span>
+          </button>
+        </h4>
+        <div class="property-group-section__body" id=${bodyId} ?hidden=${collapsed}>${content}</div>
       </div>
     `;
   }
@@ -2084,7 +2368,8 @@ export class InspectorPropertyRenderers {
     heightProp: PropertyDefinition,
     width: number,
     height: number,
-    readOnly: boolean
+    readOnly: boolean,
+    collapse: SectionCollapseOptions = {}
   ) {
     const hasChildren = this.group2DHasNode2DChildren();
     return this.renderPropertySection(
@@ -2136,6 +2421,7 @@ export class InspectorPropertyRenderers {
         </div>
       `,
       {
+        ...collapse,
         className: 'size-section',
         hideTitle: true,
       }
