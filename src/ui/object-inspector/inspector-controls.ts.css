@@ -255,6 +255,94 @@ pix3-inspector-panel .inspector-subsection__hint:focus-visible {
   outline-offset: 1px;
 }
 
+/* A non-interactive muted line inside a subsection body — the counterpart of
+   `__hint`, for a caveat about a control that IS shown (e.g. `stretch` missing
+   from the axis a flow drives). */
+pix3-inspector-panel .inspector-subsection__note {
+  margin: 0;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+/* ── .inspector-callout — "another authority owns this" (G11) ─────────
+ * Explains a control the inspector has taken away rather than silently
+ * disabling it: which node drives this one, on which axis, and a way to get
+ * there. Informational, so it is a `<p>`/`role="note"`, not an alert.
+ */
+pix3-inspector-panel .inspector-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  box-sizing: border-box;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-1);
+  background: var(--accent-soft);
+}
+
+pix3-inspector-panel .inspector-callout__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 16px;
+  color: var(--accent);
+}
+
+pix3-inspector-panel .inspector-callout__icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+pix3-inspector-panel .inspector-callout__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+pix3-inspector-panel .inspector-callout__title {
+  margin: 0;
+  color: var(--fg-0);
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+pix3-inspector-panel .inspector-callout__detail {
+  margin: 0;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+pix3-inspector-panel .inspector-callout__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+/* ── One Layout section: Size, then the Anchors/Flow subsections (G11) ──── */
+pix3-inspector-panel .layout-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+pix3-inspector-panel .layout-size-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
 /* ── .inspector-segment — segmented radio group (G11 anchor modes) ─────────
  * `role="radiogroup"` wrapper with `role="radio"` options: these are mutually
  * exclusive modes, not independent buttons.

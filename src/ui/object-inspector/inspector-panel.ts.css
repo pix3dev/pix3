@@ -421,63 +421,6 @@ pix3-inspector-panel pix3-panel {
   flex-wrap: wrap;
 }
 
-.anchor-section {
-  gap: 0.4rem;
-}
-
-.anchor-section--collapsed {
-  padding-top: 0.15rem;
-  padding-bottom: 0.15rem;
-}
-
-.anchor-toggle-row,
-.anchor-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.anchor-toggle-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.28rem 0.55rem;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-2);
-  background: var(--bg-2);
-  color: var(--fg-2);
-  font-size: 0.76rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.anchor-toggle-button:hover:not(:disabled) {
-  border-color: var(--accent-line);
-  color: var(--fg-0);
-}
-
-.anchor-toggle-button.is-active {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.anchor-toggle-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.anchor-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.anchor-section--visual {
-  gap: 0.55rem;
-}
-
 .anchor-visual-editor {
   display: grid;
   grid-template-columns: minmax(4.75rem, 5rem) minmax(0, 1fr);

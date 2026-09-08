@@ -1218,7 +1218,7 @@ export class Node2D extends NodeBase {
           name: 'flowAlign',
           type: 'select',
           ui: {
-            label: 'Cross Align',
+            label: 'Cross Axis',
             group: 'Flow',
             options: ['start', 'center', 'end'],
             description: 'Where each child sits on the axis the flow does NOT own',
@@ -1248,9 +1248,9 @@ export class Node2D extends NodeBase {
           name: 'layoutEnabled',
           type: 'boolean',
           ui: {
-            label: 'Anchor',
+            label: 'Anchors',
             description: 'Enable anchor-based layout for this 2D node',
-            group: 'Anchor',
+            group: 'Anchors',
           },
           getValue: (node: unknown) => (node as Node2D).layoutEnabled,
           setValue: (node: unknown, value: unknown) => {
@@ -1263,7 +1263,7 @@ export class Node2D extends NodeBase {
           ui: {
             label: 'Horizontal',
             description: 'Horizontal anchor mode',
-            group: 'Anchor',
+            group: 'Anchors',
             options: ['left', 'center', 'right', 'stretch'],
             readOnly: target => !(target instanceof Node2D) || !target.layoutEnabled,
           },
@@ -1278,7 +1278,7 @@ export class Node2D extends NodeBase {
           ui: {
             label: 'Vertical',
             description: 'Vertical anchor mode',
-            group: 'Anchor',
+            group: 'Anchors',
             options: ['top', 'center', 'bottom', 'stretch'],
             readOnly: target => !(target instanceof Node2D) || !target.layoutEnabled,
           },
@@ -1305,8 +1305,8 @@ export class Node2D extends NodeBase {
           description: 'Draw order within the 2D pass',
           expanded: false,
         },
-        Anchor: {
-          label: 'Anchor',
+        Anchors: {
+          label: 'Anchors',
           description: 'Anchor-based layout relative to the containing frame',
           expanded: false,
         },

@@ -390,7 +390,7 @@ describe('InspectorPanel compact object layout', () => {
     expect(panel.querySelector('.groups-popover')).not.toBeNull();
   });
 
-  it('orders object sections with Transform before Anchor and hides the standalone Style title', async () => {
+  it('merges Size, Anchors and Flow into one Layout section after Transform', async () => {
     const { panel } = await setupInspectorForNode(
       new Group2D({
         id: 'group-root',
@@ -403,18 +403,29 @@ describe('InspectorPanel compact object layout', () => {
     const titles = Array.from(panel.querySelectorAll('.group-title')).map(title =>
       title.textContent?.trim()
     );
+    const subsections = Array.from(panel.querySelectorAll('.inspector-subsection__title')).map(
+      title => title.textContent?.trim()
+    );
 
     expect(titles).toContain('Transform');
-    expect(titles).toContain('Align');
+    expect(titles).toContain('Layout');
+    // Size / Anchors / Flow are sub-blocks of Layout now, not sections of their own.
     expect(titles).not.toContain('Anchor');
+    expect(titles).not.toContain('Anchors');
+    expect(titles).not.toContain('Align');
+    expect(titles).not.toContain('Flow');
     expect(titles).not.toContain('Style');
-    expect(titles.indexOf('Transform')).toBeLessThan(titles.indexOf('Align'));
+    expect(titles.filter(title => title === 'Layout')).toHaveLength(1);
+    expect(titles.indexOf('Transform')).toBeLessThan(titles.indexOf('Layout'));
+    // Reading order inside the section: how big am I, where do I sit, how do I place my children.
+    expect(subsections).toEqual(['Anchors', 'Flow']);
+    expect(panel.querySelector('.layout-section__body .layout-size-block')).not.toBeNull();
     expect(panel.textContent).toContain('Opacity');
     expect(panel.querySelector('.property-group--opacity')).not.toBeNull();
   });
 
-  it('hides anchor controls until anchor layout is enabled', async () => {
-    const { panel } = await setupInspectorForNode(
+  it('gives Anchors and Flow the same switch affordance and hint while they are off', async () => {
+    const { panel, execute } = await setupInspectorForNode(
       new Group2D({
         id: 'group-root',
         name: 'HUD Root',
@@ -423,7 +434,90 @@ describe('InspectorPanel compact object layout', () => {
       })
     );
 
+    const anchors = getSubsection(panel, 'Anchors');
+    const flow = getSubsection(panel, 'Flow');
+
+    // Same component, same slot, same role — that identity IS the step.
+    for (const block of [anchors, flow]) {
+      const toggle = block?.querySelector('.inspector-subsection__actions .inspector-switch');
+      expect(toggle?.getAttribute('role')).toBe('switch');
+      expect(toggle?.getAttribute('aria-checked')).toBe('false');
+      expect(toggle?.getAttribute('aria-label')?.trim()).toBeTruthy();
+      expect(toggle?.getAttribute('title')?.trim()).toBeTruthy();
+      // Off: one hint line, no property rows and no body.
+      expect(block?.querySelector('.inspector-subsection__body')).toBeNull();
+      expect(block?.querySelectorAll('.property-group')).toHaveLength(0);
+    }
+
+    expect(anchors?.querySelector('.inspector-subsection__hint')?.textContent?.trim()).toBe(
+      "Position this node against its parent's edges."
+    );
+    expect(flow?.querySelector('.inspector-subsection__hint')?.textContent?.trim()).toBe(
+      "Stack this node's children in a row or column."
+    );
     expect(panel.querySelector('.anchor-visual-editor')).toBeNull();
+
+    // Clicking the hint flips the switch on — same handler as the switch itself.
+    flow
+      ?.querySelector<HTMLButtonElement>('.inspector-subsection__hint')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+
+    await vi.waitFor(() => {
+      const lastCommand = execute.mock.calls.at(-1)?.[0] as {
+        params?: { propertyPath: string; value: unknown };
+      };
+      expect(lastCommand.params?.propertyPath).toBe('flowEnabled');
+      expect(lastCommand.params?.value).toBe(true);
+    });
+  });
+
+  it('produces exactly one undoable command per sub-block switch toggle', async () => {
+    const node = new Group2D({ id: 'group-root', name: 'HUD Root', width: 320, height: 180 });
+    const { panel, execute } = await setupInspectorForNode(node);
+
+    for (const [title, propertyPath] of [
+      ['Anchors', 'layoutEnabled'],
+      ['Flow', 'flowEnabled'],
+    ] as const) {
+      execute.mockClear();
+      getSubsection(panel, title)
+        ?.querySelector<HTMLButtonElement>('.inspector-switch')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+
+      await vi.waitFor(() => {
+        expect(execute).toHaveBeenCalledTimes(1);
+      });
+      const command = execute.mock.calls[0]?.[0] as {
+        params?: { propertyPath: string; value: unknown; historyMode?: string };
+      };
+      expect(command.params?.propertyPath).toBe(propertyPath);
+      expect(command.params?.value).toBe(true);
+      expect(command.params?.historyMode).toBe('commit');
+    }
+  });
+
+  it('lists the Flow properties in reading order and drops the flowEnabled row', async () => {
+    const node = new Group2D({ id: 'group-root', name: 'HUD Root', width: 320, height: 180 });
+    node.setFlow({ enabled: true, direction: 'vertical' });
+
+    const { panel } = await setupInspectorForNode(node);
+    const flowBody = getSubsection(panel, 'Flow')?.querySelector('.inspector-subsection__body');
+    // A checkbox row carries BOTH `.property-label` and `.property-label-text`,
+    // so read one label per row rather than every matching element.
+    const labels = Array.from(flowBody?.querySelectorAll('.property-group') ?? []).map(row =>
+      row.querySelector('.property-label-text, .property-label')?.textContent?.trim()
+    );
+
+    expect(labels).toEqual([
+      'Direction',
+      'Gap',
+      'Padding X',
+      'Padding Y',
+      'Cross Axis',
+      'Auto Size',
+    ]);
+    // `flowEnabled` became the header switch; repeating it as a checkbox row was the old idiom.
+    expect(labels).not.toContain('Flow');
   });
 
   it('renders the visual anchor editor with icon buttons and dispatches anchor updates', async () => {
@@ -590,6 +684,11 @@ describe('InspectorPanel compact object layout', () => {
       'animation-default-btn',
       'component-action-link',
       'editor-flag-button',
+      // G11: Anchors and Flow are one `.inspector-subsection` shape now.
+      'anchor-section-header',
+      'anchor-toggle-button',
+      'anchor-toggle-row',
+      'anchor-fields',
     ];
     const survivors = retired.filter(name => panel.querySelector(`.${name}`) !== null);
     expect(survivors).toEqual([]);
@@ -1279,6 +1378,23 @@ function getAnchorModeOptions(panel: HTMLElement, axis: 'horizontal' | 'vertical
   return Array.from(row?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
 }
 
+/** One Layout sub-block (`Anchors` / `Flow`) by title. */
+function getSubsection(panel: HTMLElement, title: string): HTMLElement | null {
+  return panel.querySelector<HTMLElement>(`.inspector-subsection[data-subsection="${title}"]`);
+}
+
+/** The two `pix3-number-field`s of the Transform Position row, in x/y order. */
+async function getPositionAxisFields(panel: HTMLElement): Promise<HTMLElement[]> {
+  const group = Array.from(panel.querySelectorAll('.transform-section .property-group')).find(
+    row => row.querySelector('.property-label')?.textContent?.trim() === 'Position'
+  );
+  const editor = group?.querySelector<
+    HTMLElement & { shadowRoot: ShadowRoot | null; updateComplete?: Promise<unknown> }
+  >('pix3-vector2-editor');
+  await editor?.updateComplete;
+  return Array.from(editor?.shadowRoot?.querySelectorAll<HTMLElement>('pix3-number-field') ?? []);
+}
+
 async function setupInspectorForNode(
   node: NodeBase,
   execute = vi.fn().mockResolvedValue(undefined)
@@ -1520,5 +1636,147 @@ describe('InspectorPanel section spine', () => {
         toggle.getAttribute('aria-expanded')
       )
     ).toEqual(['true', 'true']);
+  });
+});
+
+/**
+ * The verified axis table of `.plans/ui-consistency-pass.md` §3.2. The runtime does NOT
+ * ignore anchors under a flow parent: `Node2D.applyFlowLayout()` claims the MAIN axis
+ * (per `flow.direction`) and hands the CROSS axis to the child's own anchor when
+ * `layoutEnabled`, else places it by the parent's `Cross Axis`. So exactly one Position
+ * field is driven when the child anchors itself, and both when it does not.
+ */
+describe('InspectorPanel Layout under a flow parent', () => {
+  function makeFlowChild(direction: 'vertical' | 'horizontal', anchored: boolean) {
+    const parent = new Group2D({ id: 'hud', name: 'HUD', width: 320, height: 180 });
+    const child = new Group2D({ id: 'row', name: 'Row', width: 120, height: 32 });
+    parent.add(child);
+    child.layoutEnabled = anchored;
+    parent.setFlow({ enabled: true, direction });
+    return { parent, child };
+  }
+
+  it('disables only the axis a vertical flow drives and keeps the anchored cross axis editable', async () => {
+    const { child } = makeFlowChild('vertical', true);
+    const { panel } = await setupInspectorForNode(child);
+
+    const [x, y] = await getPositionAxisFields(panel);
+
+    expect(y?.hasAttribute('disabled')).toBe(true);
+    expect(y?.getAttribute('title')).toBe('Driven by Flow on HUD');
+    expect(x?.hasAttribute('disabled')).toBe(false);
+    expect(x?.hasAttribute('title')).toBe(false);
+  });
+
+  it('disables both axes when the child does not anchor itself', async () => {
+    const { child } = makeFlowChild('vertical', false);
+    const { panel } = await setupInspectorForNode(child);
+
+    const [x, y] = await getPositionAxisFields(panel);
+
+    expect(y?.hasAttribute('disabled')).toBe(true);
+    expect(x?.hasAttribute('disabled')).toBe(true);
+    expect(x?.getAttribute('title')).toBe('Driven by Flow on HUD');
+  });
+
+  it('mirrors the table for a horizontal flow — X driven, anchored Y editable', async () => {
+    const { child } = makeFlowChild('horizontal', true);
+    const { panel } = await setupInspectorForNode(child);
+
+    const [x, y] = await getPositionAxisFields(panel);
+
+    expect(x?.hasAttribute('disabled')).toBe(true);
+    expect(x?.getAttribute('title')).toBe('Driven by Flow on HUD');
+    expect(y?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('leaves Position fully editable when no parent flow drives the node', async () => {
+    const node = new Group2D({ id: 'row', name: 'Row', width: 120, height: 32 });
+    node.layoutEnabled = true;
+    const { panel } = await setupInspectorForNode(node);
+
+    const fields = await getPositionAxisFields(panel);
+
+    expect(fields).toHaveLength(2);
+    expect(fields.map(field => field.hasAttribute('disabled'))).toEqual([false, false]);
+    expect(panel.querySelector('.inspector-callout')).toBeNull();
+  });
+
+  it('explains who owns which axis and offers to select the flow parent', async () => {
+    const { parent, child } = makeFlowChild('vertical', true);
+    const { panel, execute } = await setupInspectorForNode(child);
+
+    const callout = panel.querySelector('.inspector-callout');
+    const selectParent = callout?.querySelector<HTMLButtonElement>('.inspector-btn');
+
+    expect(callout?.getAttribute('role')).toBe('note');
+    expect(callout?.querySelector('.inspector-callout__title')?.textContent?.trim()).toBe(
+      'Position driven by Flow on HUD'
+    );
+    expect(callout?.querySelector('.inspector-callout__detail')?.textContent?.trim()).toBe(
+      "Flow sets Y; this node's Anchors set X."
+    );
+    expect(selectParent?.getAttribute('aria-label')).toBe('Select HUD');
+    expect(selectParent?.getAttribute('title')).toBe('Select HUD');
+    // The Anchors sub-block stays live: the runtime still honours the cross axis.
+    expect(getSubsection(panel, 'Anchors')?.querySelector('.anchor-visual-editor')).not.toBeNull();
+
+    selectParent?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+
+    await vi.waitFor(() => {
+      const lastCommand = execute.mock.calls.at(-1)?.[0] as {
+        params?: { nodeId?: string | null };
+      };
+      expect(lastCommand.params?.nodeId).toBe(parent.nodeId);
+    });
+  });
+
+  it('points an un-anchored child at the parent Cross Axis instead', async () => {
+    const { child } = makeFlowChild('horizontal', false);
+    const { panel } = await setupInspectorForNode(child);
+
+    expect(
+      panel.querySelector('.inspector-callout__detail')?.textContent?.replace(/\s+/g, ' ').trim()
+    ).toBe("Flow sets X; the parent's Cross Axis sets Y. Turn Anchors on to author Y.");
+  });
+
+  it('removes `stretch` from the anchor axis the flow drives and says why', async () => {
+    const { child } = makeFlowChild('vertical', true);
+    const { panel } = await setupInspectorForNode(child);
+
+    const horizontal = getAnchorModeOptions(panel, 'horizontal').map(option =>
+      option.getAttribute('aria-label')
+    );
+    const vertical = getAnchorModeOptions(panel, 'vertical').map(option =>
+      option.getAttribute('aria-label')
+    );
+
+    // Cross axis keeps all four modes; the main axis loses `stretch` entirely —
+    // removed rather than disabled, because it fights how the flow measures the child.
+    expect(horizontal).toEqual([
+      'horizontal left',
+      'horizontal center',
+      'horizontal right',
+      'horizontal stretch',
+    ]);
+    expect(vertical).toEqual(['vertical top', 'vertical center', 'vertical bottom']);
+    expect(
+      getSubsection(panel, 'Anchors')
+        ?.querySelector('.inspector-subsection__note')
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim()
+    ).toBe('Stretch is unavailable on the V axis while Flow drives it.');
+  });
+
+  it('mirrors the removal onto the horizontal axis for a horizontal flow', async () => {
+    const { child } = makeFlowChild('horizontal', true);
+    const { panel } = await setupInspectorForNode(child);
+
+    expect(
+      getAnchorModeOptions(panel, 'horizontal').map(option => option.getAttribute('aria-label'))
+    ).toEqual(['horizontal left', 'horizontal center', 'horizontal right']);
+    expect(
+      getAnchorModeOptions(panel, 'vertical').map(option => option.getAttribute('aria-label'))
+    ).toEqual(['vertical top', 'vertical center', 'vertical bottom', 'vertical stretch']);
   });
 });

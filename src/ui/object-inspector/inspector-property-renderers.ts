@@ -14,6 +14,7 @@ import type { NodeBase, ScriptComponent } from '@pix3/runtime';
 import { ResizeGroup2DCommand } from '@/features/properties/ResizeGroup2DCommand';
 import { FitGroup2DToContentsCommand } from '@/features/scene/FitGroup2DToContentsCommand';
 import { UpdateLocaleEntryCommand } from '@/features/localization/UpdateLocaleEntryCommand';
+import { selectObject } from '@/features/selection/SelectObjectCommand';
 import {
   findPrefabInstanceRoot,
   getPrefabMetadata,
@@ -57,6 +58,14 @@ export type DetachedPropertyOptions = {
 /** Anchor modes per axis, in the order the segmented control renders them. */
 const HORIZONTAL_ANCHOR_MODES = ['left', 'center', 'right', 'stretch'] as const;
 const VERTICAL_ANCHOR_MODES = ['top', 'center', 'bottom', 'stretch'] as const;
+
+/**
+ * The one muted line each Layout sub-block shows while it is off (§3.2). Clicking
+ * it turns the block on, so it doubles as the discoverability affordance: an
+ * off switch alone never says what the thing would do.
+ */
+const ANCHORS_DISABLED_HINT = "Position this node against its parent's edges.";
+const FLOW_DISABLED_HINT = "Stack this node's children in a row or column.";
 
 /** Text shown by an anchor-mode option if its glyph is ever missing. */
 const ANCHOR_MODE_FALLBACK_LABELS: Readonly<Record<string, string>> = {
@@ -109,8 +118,10 @@ const SECTION_BAND: Readonly<Record<SpineSectionName, number>> = {
 const DECLARATION_BAND = 3;
 
 /**
- * Reading order inside the Layout band, independent of how a schema happens to declare them.
- * Anything else that aliases into Layout later sorts after these three.
+ * Reading order of the sub-blocks inside the single `Layout` section, independent of how a
+ * schema happens to declare them: Size -> Anchors -> Flow is a reading order (how big am I,
+ * where do I sit, how do I place my children), and `Node2D` declares Flow first, which reads
+ * backwards. Anything else that aliases into Layout later sorts after these three.
  */
 const LAYOUT_MEMBER_RANK: Readonly<Record<string, number>> = {
   Size: 0,
@@ -119,29 +130,46 @@ const LAYOUT_MEMBER_RANK: Readonly<Record<string, number>> = {
   Flow: 2,
 };
 
+/** Rank of a group inside the Layout section; unknown members sort after the three named ones. */
+function layoutMemberRank(groupName: string): number {
+  return LAYOUT_MEMBER_RANK[groupName] ?? Object.keys(LAYOUT_MEMBER_RANK).length;
+}
+
 /**
- * One rendered section of the node property list. `Node` and `Transform` fold
- * every aliased group into a single section; the `Layout` band keeps `Size` /
- * `Anchor` / `Flow` as separate sections rendered exactly as before and only
- * moves them into the band's slot (merging them into one section with
- * subsections is G11, which also renames the runtime groups).
+ * One rendered section of the node property list. Every spine section folds its
+ * aliased groups into a single section: `Node`, `Transform`, and — since G11 —
+ * `Layout`, whose folded members become the Size row plus the Anchors and Flow
+ * sub-blocks (§3.2).
  */
 interface InspectorSection {
   /** Section title and the `sectionName` half of the collapse-state key. */
   name: string;
   /** Sort band; ties keep schema declaration order (Array#sort is stable). */
   band: number;
-  /**
-   * Rank inside the band. Only the Layout band uses it: Size -> Anchors -> Flow is a reading
-   * order (how big am I, where do I sit, how do I place my children), and declaration order in
-   * `Node2D` happens to put Flow first, which reads backwards.
-   */
-  rank: number;
   /** Spine sections never start collapsed, whatever a schema's `expanded` says. */
   pinned: boolean;
   /** Schema groups folded into this section, in declaration order. */
   groups: { groupName: string; props: PropertyDefinition[] }[];
 }
+
+/**
+ * One `.inspector-subsection` inside the Layout section. Anchors and Flow pass
+ * the SAME options through the SAME renderer — the identical affordance is the
+ * point of the step, so there is deliberately no per-block markup.
+ */
+type InspectorSubsectionOptions = {
+  /** Sub-block title, also its `data-subsection` handle. */
+  title: string;
+  enabled: boolean;
+  /** Play mode / read-only collaborator: the switch and the body are both gated. */
+  readOnly: boolean;
+  /** The single muted line shown instead of the body while off; clicking it turns it on. */
+  hint: string;
+  /** `aria-label` and `title` of the switch, phrased as the action it performs. */
+  switchLabel: string;
+  onToggle: () => void;
+  body: unknown;
+};
 
 /** Collapse wiring threaded from {@link InspectorPropertyRenderers.renderSection}. */
 type SectionCollapseOptions = Pick<
@@ -327,21 +355,7 @@ export class InspectorPropertyRenderers {
         sections.push({
           name: groupName,
           band: DECLARATION_BAND,
-          rank: 0,
           pinned: false,
-          groups: [group],
-        });
-        continue;
-      }
-
-      if (alias === 'Layout') {
-        // G10 only moves Size/Anchor/Flow into the band; their markup is
-        // untouched (G11 merges them into one Layout section with subsections).
-        sections.push({
-          name: groupName,
-          band: SECTION_BAND.Layout,
-          rank: LAYOUT_MEMBER_RANK[groupName] ?? Object.keys(LAYOUT_MEMBER_RANK).length,
-          pinned: true,
           groups: [group],
         });
         continue;
@@ -356,7 +370,6 @@ export class InspectorPropertyRenderers {
       const section: InspectorSection = {
         name: alias,
         band: SECTION_BAND[alias],
-        rank: 0,
         pinned: true,
         groups: [group],
       };
@@ -364,9 +377,12 @@ export class InspectorPropertyRenderers {
       sections.push(section);
     }
 
-    // Band first, then the Layout band's reading order; `Array#sort` is stable (ES2019), so
-    // equal ranks keep schema declaration order.
-    return sections.sort((a, b) => a.band - b.band || a.rank - b.rank);
+    // Layout is the one section whose members are NOT read in declaration order (§3.2).
+    const layout = foldedSections.get('Layout');
+    layout?.groups.sort((a, b) => layoutMemberRank(a.groupName) - layoutMemberRank(b.groupName));
+
+    // `Array#sort` is stable (ES2019), so equal bands keep schema declaration order.
+    return sections.sort((a, b) => a.band - b.band);
   }
 
   private renderSection(section: InspectorSection) {
@@ -394,7 +410,90 @@ export class InspectorPropertyRenderers {
       return this.renderTransformGroup(this.getSectionLabel(section.name), props, collapse);
     }
 
+    if (section.name === 'Layout') {
+      return this.renderLayoutSection(section, collapse);
+    }
+
     return this.renderPropertyGroup(section.groups[0]!.groupName, props, collapse);
+  }
+
+  /**
+   * The single `Layout` section (§3.2): the Size row as plain content, then the
+   * Anchors and Flow sub-blocks — one `.inspector-subsection` each, with the
+   * same `role="switch"` in the same slot. Anchors and Flow are ORTHOGONAL (a
+   * panel can stretch to its parent *and* stack its own children) and act on
+   * different nodes — this one on itself, that one on its children — so they are
+   * two switches, never a `None / Anchors / Flow` radio.
+   */
+  private renderLayoutSection(section: InspectorSection, collapse: SectionCollapseOptions) {
+    if (!(this.host.primaryNode instanceof Node2D)) {
+      return '';
+    }
+
+    const groupProps = (...names: string[]): PropertyDefinition[] =>
+      section.groups
+        .filter(group => names.includes(group.groupName))
+        .flatMap(group => group.props)
+        .filter(prop => !prop.ui?.hidden);
+
+    const sizeProps = groupProps('Size');
+    // Both spellings: `SECTION_ALIAS` still accepts the pre-G11 `Anchor` so a
+    // consumer on an older runtime does not lose the sub-block.
+    const anchorProps = groupProps('Anchor', 'Anchors');
+    const flowProps = groupProps('Flow');
+
+    return this.renderPropertySection(
+      this.getSectionLabel(section.name),
+      html`
+        <div class="layout-section__body">
+          ${this.renderFlowParentCallout()}
+          ${sizeProps.length > 0
+            ? html`<div class="layout-size-block">${this.renderSizeContent(sizeProps)}</div>`
+            : ''}
+          ${anchorProps.length > 0 ? this.renderAnchorsSubsection() : ''}
+          ${flowProps.length > 0 ? this.renderFlowSubsection(flowProps) : ''}
+        </div>
+      `,
+      { ...collapse, className: 'layout-section' }
+    );
+  }
+
+  /**
+   * One Layout sub-block. Shared by Anchors and Flow on purpose: the whole point
+   * of G11 is that the two permanent layout rules look and behave identically.
+   */
+  private renderSubsection(options: InspectorSubsectionOptions) {
+    const bodyId = `inspector-subsection-${toSectionSlug(options.title)}`;
+
+    return html`
+      <div class="inspector-subsection" data-subsection=${options.title}>
+        <div class="inspector-subsection__header">
+          <h5 class="inspector-subsection__title">${options.title}</h5>
+          <div class="inspector-subsection__actions">
+            <button
+              class="inspector-switch"
+              type="button"
+              role="switch"
+              aria-checked=${String(options.enabled)}
+              aria-label=${options.switchLabel}
+              title=${options.switchLabel}
+              ?disabled=${options.readOnly}
+              @click=${options.onToggle}
+            ></button>
+          </div>
+        </div>
+        ${options.enabled
+          ? html`<div class="inspector-subsection__body" id=${bodyId}>${options.body}</div>`
+          : html`<button
+              class="inspector-subsection__hint"
+              type="button"
+              ?disabled=${options.readOnly}
+              @click=${options.onToggle}
+            >
+              ${options.hint}
+            </button>`}
+      </div>
+    `;
   }
 
   /** A schema opts a section out of the default-expanded state with `expanded: false`. */
@@ -424,10 +523,6 @@ export class InspectorPropertyRenderers {
       return this.renderTransformGroup(label, visibleProps, collapse);
     }
 
-    if (groupName === 'Anchor' && this.host.primaryNode instanceof Node2D) {
-      return this.renderAnchorGroup('Align', visibleProps);
-    }
-
     if (groupName === 'Size') {
       return this.renderSizeGroup(label, visibleProps, collapse);
     }
@@ -442,84 +537,228 @@ export class InspectorPropertyRenderers {
     );
   }
 
-  renderAnchorGroup(label: string, _props: PropertyDefinition[]) {
-    if (!this.host.primaryNode || !(this.host.primaryNode instanceof Node2D)) {
+  /**
+   * The Anchors sub-block: the switch in the header, and while it is on the
+   * anchor preview plus the two per-axis radio groups (G9's roving-tabindex
+   * `role="radiogroup"`, unchanged).
+   *
+   * Under a flow parent the block stays LIVE — the runtime splits the axes
+   * rather than ignoring anchors (`Node2D.applyFlowLayout`) — but `stretch` is
+   * dropped from the axis the flow drives, because stretching along the main
+   * axis fights how the flow measures the child.
+   */
+  renderAnchorsSubsection() {
+    const node = this.host.primaryNode;
+    if (!(node instanceof Node2D)) {
       return '';
     }
 
-    const enabled =
-      this.host.propertyValues['layoutEnabled']?.value === 'true' ||
-      this.host.primaryNode.layoutEnabled;
-    // Play mode is a read-only live mirror — gate the anchor toggle/edges/mode
-    // buttons so they can't silently mutate the authored node during play.
+    const enabled = this.isAnchorLayoutEnabled();
+    // Play mode is a read-only live mirror — gate the switch and every control
+    // in the body so they can't silently mutate the authored node during play.
     const readOnly = appState.collaboration.isReadOnly || appState.ui.isPlaying;
-    const horizontal =
-      this.host.propertyValues['horizontalAlign']?.value ?? this.host.primaryNode.horizontalAlign;
-    const vertical =
-      this.host.propertyValues['verticalAlign']?.value ?? this.host.primaryNode.verticalAlign;
+    const horizontal = this.host.propertyValues['horizontalAlign']?.value ?? node.horizontalAlign;
+    const vertical = this.host.propertyValues['verticalAlign']?.value ?? node.verticalAlign;
     const previewClass = `anchor-preview anchor-preview--h-${horizontal} anchor-preview--v-${vertical}`;
+    const flowMainAxis = this.getFlowMainAxis();
+    // Removed, not disabled: an option that cannot be picked is noise.
+    const horizontalModes =
+      flowMainAxis === 'horizontal'
+        ? HORIZONTAL_ANCHOR_MODES.filter(mode => mode !== 'stretch')
+        : HORIZONTAL_ANCHOR_MODES;
+    const verticalModes =
+      flowMainAxis === 'vertical'
+        ? VERTICAL_ANCHOR_MODES.filter(mode => mode !== 'stretch')
+        : VERTICAL_ANCHOR_MODES;
 
-    return this.renderPropertySection(
-      label,
-      html`
-        <div class="anchor-section-header">
-          <h4 class="group-title">${label}</h4>
-          <button
-            class=${`anchor-toggle-button ${enabled ? 'is-active' : ''}`}
-            type="button"
-            title=${enabled ? 'Disable anchor layout' : 'Enable anchor layout'}
-            aria-label=${enabled ? 'Disable anchor layout' : 'Enable anchor layout'}
-            ?disabled=${readOnly}
-            @click=${() => this.host.applyPropertyChange('layoutEnabled', !enabled)}
-          >
-            ${this.host.iconService.getIcon('anchor', 14)}
-            <span>${enabled ? 'Enabled' : 'Disabled'}</span>
-          </button>
+    return this.renderSubsection({
+      title: 'Anchors',
+      enabled,
+      readOnly,
+      hint: ANCHORS_DISABLED_HINT,
+      switchLabel: enabled ? 'Disable Anchors' : 'Enable Anchors',
+      onToggle: () => void this.host.applyPropertyChange('layoutEnabled', !enabled),
+      body: html`
+        <div class="anchor-visual-editor">
+          <div class="anchor-preview-shell">
+            <div class="anchor-preview-frame">
+              <div class=${previewClass}></div>
+              ${this.renderAnchorPreviewEdge('left', horizontal, vertical, readOnly)}
+              ${this.renderAnchorPreviewEdge('right', horizontal, vertical, readOnly)}
+              ${this.renderAnchorPreviewEdge('top', horizontal, vertical, readOnly)}
+              ${this.renderAnchorPreviewEdge('bottom', horizontal, vertical, readOnly)}
+              ${this.renderAnchorPreviewEdge('center', horizontal, vertical, readOnly)}
+            </div>
+          </div>
+          <div class="anchor-controls">
+            <div class="anchor-control-row">
+              <span class="anchor-axis-label" aria-hidden="true">H</span>
+              ${this.renderAnchorModeGroup(
+                'horizontal',
+                horizontalModes,
+                horizontal,
+                enabled,
+                readOnly
+              )}
+            </div>
+            <div class="anchor-control-row">
+              <span class="anchor-axis-label" aria-hidden="true">V</span>
+              ${this.renderAnchorModeGroup('vertical', verticalModes, vertical, enabled, readOnly)}
+            </div>
+          </div>
         </div>
-        ${enabled
-          ? html`
-              <div class="anchor-visual-editor">
-                <div class="anchor-preview-shell">
-                  <div class="anchor-preview-frame">
-                    <div class=${previewClass}></div>
-                    ${this.renderAnchorPreviewEdge('left', horizontal, vertical, readOnly)}
-                    ${this.renderAnchorPreviewEdge('right', horizontal, vertical, readOnly)}
-                    ${this.renderAnchorPreviewEdge('top', horizontal, vertical, readOnly)}
-                    ${this.renderAnchorPreviewEdge('bottom', horizontal, vertical, readOnly)}
-                    ${this.renderAnchorPreviewEdge('center', horizontal, vertical, readOnly)}
-                  </div>
-                </div>
-                <div class="anchor-controls">
-                  <div class="anchor-control-row">
-                    <span class="anchor-axis-label" aria-hidden="true">H</span>
-                    ${this.renderAnchorModeGroup(
-                      'horizontal',
-                      HORIZONTAL_ANCHOR_MODES,
-                      horizontal,
-                      enabled,
-                      readOnly
-                    )}
-                  </div>
-                  <div class="anchor-control-row">
-                    <span class="anchor-axis-label" aria-hidden="true">V</span>
-                    ${this.renderAnchorModeGroup(
-                      'vertical',
-                      VERTICAL_ANCHOR_MODES,
-                      vertical,
-                      enabled,
-                      readOnly
-                    )}
-                  </div>
-                </div>
-              </div>
-            `
+        ${flowMainAxis
+          ? html`<p class="inspector-subsection__note">
+              Stretch is unavailable on the ${flowMainAxis === 'vertical' ? 'V' : 'H'} axis while
+              Flow drives it.
+            </p>`
           : ''}
       `,
-      {
-        className: 'anchor-section anchor-section--visual',
-        hideTitle: true,
-      }
-    );
+    });
+  }
+
+  /**
+   * The Flow sub-block — the same component and the same switch as Anchors, with
+   * the container's own flow properties (Direction / Gap / Padding / Cross Axis /
+   * Auto Size) as its body. `flowEnabled` itself becomes the switch, so it is not
+   * repeated as a checkbox row.
+   */
+  renderFlowSubsection(props: PropertyDefinition[]) {
+    const node = this.host.primaryNode;
+    if (!(node instanceof Node2D)) {
+      return '';
+    }
+
+    const enabled = this.isFlowEnabled();
+    const readOnly = appState.collaboration.isReadOnly || appState.ui.isPlaying;
+    const bodyProps = props.filter(prop => prop.name !== 'flowEnabled');
+
+    return this.renderSubsection({
+      title: 'Flow',
+      enabled,
+      readOnly,
+      hint: FLOW_DISABLED_HINT,
+      switchLabel: enabled ? 'Disable Flow' : 'Enable Flow',
+      onToggle: () => void this.host.applyPropertyChange('flowEnabled', !enabled),
+      body: bodyProps.map(prop => this.renderPropertyInput(prop)),
+    });
+  }
+
+  /** Pending edit first, then the node — the idiom every anchor control here uses. */
+  private isAnchorLayoutEnabled(): boolean {
+    const node = this.host.primaryNode;
+    if (!(node instanceof Node2D)) {
+      return false;
+    }
+    return this.host.propertyValues['layoutEnabled']?.value === 'true' || node.layoutEnabled;
+  }
+
+  private isFlowEnabled(): boolean {
+    const node = this.host.primaryNode;
+    if (!(node instanceof Node2D)) {
+      return false;
+    }
+    return this.host.propertyValues['flowEnabled']?.value === 'true' || node.flow.enabled;
+  }
+
+  /** The flow-enabled `Node2D` parent placing this node, or `null`. */
+  private getFlowParent(): Node2D | null {
+    const node = this.host.primaryNode;
+    if (!(node instanceof Node2D)) {
+      return null;
+    }
+    const parent = node.parent;
+    return parent instanceof Node2D && parent.flow.enabled ? parent : null;
+  }
+
+  /** Which of this node's axes a parent flow drives, or `null` when nothing does. */
+  private getFlowMainAxis(): 'horizontal' | 'vertical' | null {
+    const parent = this.getFlowParent();
+    if (!parent) {
+      return null;
+    }
+    return parent.flow.direction === 'horizontal' ? 'horizontal' : 'vertical';
+  }
+
+  /**
+   * Position axes another authority owns, per the verified table in §3.2. For a
+   * vertical flow: the flow always drives Y, and X belongs to this node's own
+   * anchor when it has one, otherwise to the parent's `Cross Axis`. Horizontal
+   * mirrors it. Disabling ONLY the driven axis is Unity's "driven by
+   * LayoutGroup" idiom — disabling both would hide an axis the author still owns.
+   */
+  private getFlowDrivenPositionAxes(): { axes: ('x' | 'y')[]; title: string } | null {
+    const parent = this.getFlowParent();
+    if (!parent) {
+      return null;
+    }
+    const vertical = parent.flow.direction !== 'horizontal';
+    const axes: ('x' | 'y')[] = [vertical ? 'y' : 'x'];
+    if (!this.isAnchorLayoutEnabled()) {
+      axes.push(vertical ? 'x' : 'y');
+    }
+    return { axes, title: `Driven by Flow on ${this.getNodeDisplayName(parent)}` };
+  }
+
+  private getNodeDisplayName(node: Node2D): string {
+    return node.name || node.nodeId;
+  }
+
+  /**
+   * The "someone else places you" callout at the top of the Layout section: which
+   * node drives this one, which axis is whose, and a way to get there. Informational,
+   * hence `role="note"`; selecting the parent goes through the normal selection
+   * command and touches no scene state.
+   */
+  renderFlowParentCallout() {
+    const parent = this.getFlowParent();
+    if (!parent) {
+      return '';
+    }
+
+    const vertical = parent.flow.direction !== 'horizontal';
+    const mainAxis = vertical ? 'Y' : 'X';
+    const crossAxis = vertical ? 'X' : 'Y';
+    const parentName = this.getNodeDisplayName(parent);
+    const detail = this.isAnchorLayoutEnabled()
+      ? `Flow sets ${mainAxis}; this node's Anchors set ${crossAxis}.`
+      : `Flow sets ${mainAxis}; the parent's Cross Axis sets ${crossAxis}. Turn Anchors on to author ${crossAxis}.`;
+
+    return html`
+      <div class="inspector-callout" role="note">
+        <span class="inspector-callout__icon" aria-hidden="true">
+          ${this.host.iconService.getIcon('layout', IconSize.SMALL)}
+        </span>
+        <div class="inspector-callout__body">
+          <p class="inspector-callout__title">Position driven by Flow on ${parentName}</p>
+          <p class="inspector-callout__detail">${detail}</p>
+        </div>
+        <div class="inspector-callout__actions">
+          <button
+            class="inspector-btn"
+            type="button"
+            title=${`Select ${parentName}`}
+            aria-label=${`Select ${parentName}`}
+            @click=${() => void this.selectFlowParent()}
+          >
+            ${this.host.iconService.getIcon('arrow-up-left', IconSize.SMALL)}
+            <span>Select</span>
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  private async selectFlowParent(): Promise<void> {
+    const parent = this.getFlowParent();
+    if (!parent) {
+      return;
+    }
+    try {
+      await this.host.commandDispatcher.execute(selectObject(parent.nodeId));
+    } catch (error) {
+      console.error('[InspectorPanel] Failed to select the flow parent', error);
+    }
   }
 
   renderTransformGroup(
@@ -584,6 +823,11 @@ export class InspectorPropertyRenderers {
     return this.renderPropertyInput(prop);
   }
 
+  /**
+   * The `Size` group as its own titled section — the shape a node keeps when
+   * `Size` is NOT part of a 2D Layout section (a 3D sprite, say). Inside the
+   * Layout section the same content is rendered bare by {@link renderSizeContent}.
+   */
   renderSizeGroup(
     label: string,
     props: PropertyDefinition[],
@@ -593,46 +837,78 @@ export class InspectorPropertyRenderers {
       return '';
     }
 
-    const widthProp = props.find(p => p.name === 'width');
-    const heightProp = props.find(p => p.name === 'height');
-    const remainingProps = props.filter(p => p.name !== 'width' && p.name !== 'height');
-
-    if (!widthProp || !heightProp) {
+    if (!this.hasInlineSizeEditor(props)) {
       return this.renderPropertySection(
         label,
         props.map(prop => this.renderPropertyInput(prop)),
         collapse
       );
+    }
+
+    return this.renderPropertySection(label, this.renderSizeContent(props), {
+      ...collapse,
+      className: 'size-section',
+      hideTitle: true,
+    });
+  }
+
+  /**
+   * The inline W/H editor exists for the node types that own a resizable box —
+   * a Group2D (resize scales its children) and a Sprite2D (aspect lock + reset
+   * to texture size). Anything else falls back to plain property rows.
+   */
+  private hasInlineSizeEditor(props: PropertyDefinition[]): boolean {
+    const node = this.host.primaryNode;
+    if (!(node instanceof Group2D) && !(node instanceof Sprite2D)) {
+      return false;
+    }
+    return props.some(prop => prop.name === 'width') && props.some(prop => prop.name === 'height');
+  }
+
+  /** The Size row with no section wrapper — the Layout section's first block (§3.2). */
+  renderSizeContent(props: PropertyDefinition[]): unknown {
+    const node = this.host.primaryNode;
+    const widthProp = props.find(prop => prop.name === 'width');
+    const heightProp = props.find(prop => prop.name === 'height');
+
+    if (!widthProp || !heightProp || !this.hasInlineSizeEditor(props)) {
+      return props.map(prop => this.renderPropertyInput(prop));
     }
 
     const widthState = this.host.propertyValues[widthProp.name];
     const heightState = this.host.propertyValues[heightProp.name];
-    const readOnly = this.isPropertyReadOnly(widthProp.ui?.readOnly, this.host.primaryNode);
-
+    const readOnly = this.isPropertyReadOnly(widthProp.ui?.readOnly, node);
     const width = widthState ? parseFloat(widthState.value) : 64;
     const height = heightState ? parseFloat(heightState.value) : 64;
 
-    if (this.host.primaryNode instanceof Group2D) {
-      return this.renderGroup2DSizeGroup(
-        label,
-        widthProp,
-        heightProp,
-        width,
-        height,
-        readOnly,
-        collapse
-      );
+    if (node instanceof Group2D) {
+      return this.renderGroup2DSizeContent(widthProp, heightProp, width, height, readOnly);
     }
 
-    if (!(this.host.primaryNode instanceof Sprite2D)) {
-      return this.renderPropertySection(
-        label,
-        props.map(prop => this.renderPropertyInput(prop)),
-        collapse
-      );
+    if (!(node instanceof Sprite2D)) {
+      return props.map(prop => this.renderPropertyInput(prop));
     }
 
-    const node = this.host.primaryNode;
+    return this.renderSprite2DSizeContent(
+      node,
+      widthProp,
+      heightProp,
+      width,
+      height,
+      readOnly,
+      props.filter(prop => prop.name !== 'width' && prop.name !== 'height')
+    );
+  }
+
+  private renderSprite2DSizeContent(
+    node: Sprite2D,
+    widthProp: PropertyDefinition,
+    heightProp: PropertyDefinition,
+    width: number,
+    height: number,
+    readOnly: boolean,
+    remainingProps: PropertyDefinition[]
+  ) {
     const aspectRatioLocked = node.aspectRatioLocked;
     const textureAspectRatio = node.textureAspectRatio;
     const originalWidth = node.originalWidth;
@@ -679,85 +955,79 @@ export class InspectorPropertyRenderers {
       void this.host.applyPropertyChange('aspectRatioLocked', newLocked);
     };
 
-    return this.renderPropertySection(
-      label,
-      html`
-        <div class="property-group property-group--size-inline">
-          ${this.renderPropertyLabel(
-            widthProp,
-            'Size',
-            this.isPropertyOverriddenForPrimaryNode(widthProp)
-          )}
-          <div class="size-inline-editor">
-            <pix3-number-field
-              axis="w"
-              class="size-inline-input"
-              .value=${width}
-              .step=${widthProp.ui?.step ?? 1}
-              .precision=${widthProp.ui?.precision ?? 0}
-              .min=${1}
-              .sensitivity=${0.5}
-              ?disabled=${readOnly}
-              @commit-change=${(e: CustomEvent<{ value: number }>) =>
-                handleWidthChange(e.detail.value)}
-            ></pix3-number-field>
-            <pix3-number-field
-              axis="h"
-              class="size-inline-input"
-              .value=${height}
-              .step=${heightProp.ui?.step ?? 1}
-              .precision=${heightProp.ui?.precision ?? 0}
-              .min=${1}
-              .sensitivity=${0.5}
-              ?disabled=${readOnly}
-              @commit-change=${(e: CustomEvent<{ value: number }>) =>
-                handleHeightChange(e.detail.value)}
-            ></pix3-number-field>
-            ${widthProp.ui?.unit || heightProp.ui?.unit
-              ? html`
-                  <span class="size-inline-unit">${widthProp.ui?.unit ?? heightProp.ui?.unit}</span>
-                `
-              : ''}
-            ${hasOriginalRatio
-              ? html`
-                  <button
-                    class="inspector-btn inspector-btn--icon inspector-btn--toggle"
-                    type="button"
-                    aria-pressed=${String(aspectRatioLocked)}
-                    aria-label="Lock aspect ratio"
-                    title=${aspectRatioLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
-                    @click=${handleToggleAspectRatio}
-                  >
-                    ${this.host.iconService.getIcon(
-                      aspectRatioLocked ? 'lock' : 'unlock',
-                      IconSize.SMALL
-                    )}
-                  </button>
-                `
-              : ''}
-            ${hasOriginalSize
-              ? html`
-                  <button
-                    class="inspector-btn inspector-btn--icon"
-                    type="button"
-                    aria-label="Reset to original texture size"
-                    title=${`Reset to original texture size (${originalWidth} x ${originalHeight})`}
-                    @click=${handleResetToOriginal}
-                  >
-                    ${this.host.iconService.getIcon('rotate-ccw', IconSize.SMALL)}
-                  </button>
-                `
-              : ''}
-          </div>
+    return html`
+      <div class="property-group property-group--size-inline">
+        ${this.renderPropertyLabel(
+          widthProp,
+          'Size',
+          this.isPropertyOverriddenForPrimaryNode(widthProp)
+        )}
+        <div class="size-inline-editor">
+          <pix3-number-field
+            axis="w"
+            class="size-inline-input"
+            .value=${width}
+            .step=${widthProp.ui?.step ?? 1}
+            .precision=${widthProp.ui?.precision ?? 0}
+            .min=${1}
+            .sensitivity=${0.5}
+            ?disabled=${readOnly}
+            @commit-change=${(e: CustomEvent<{ value: number }>) =>
+              handleWidthChange(e.detail.value)}
+          ></pix3-number-field>
+          <pix3-number-field
+            axis="h"
+            class="size-inline-input"
+            .value=${height}
+            .step=${heightProp.ui?.step ?? 1}
+            .precision=${heightProp.ui?.precision ?? 0}
+            .min=${1}
+            .sensitivity=${0.5}
+            ?disabled=${readOnly}
+            @commit-change=${(e: CustomEvent<{ value: number }>) =>
+              handleHeightChange(e.detail.value)}
+          ></pix3-number-field>
+          ${widthProp.ui?.unit || heightProp.ui?.unit
+            ? html`
+                <span class="size-inline-unit">${widthProp.ui?.unit ?? heightProp.ui?.unit}</span>
+              `
+            : ''}
+          ${hasOriginalRatio
+            ? html`
+                <button
+                  class="inspector-btn inspector-btn--icon inspector-btn--toggle"
+                  type="button"
+                  aria-pressed=${String(aspectRatioLocked)}
+                  aria-label="Lock aspect ratio"
+                  title=${aspectRatioLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+                  ?disabled=${readOnly}
+                  @click=${handleToggleAspectRatio}
+                >
+                  ${this.host.iconService.getIcon(
+                    aspectRatioLocked ? 'lock' : 'unlock',
+                    IconSize.SMALL
+                  )}
+                </button>
+              `
+            : ''}
+          ${hasOriginalSize
+            ? html`
+                <button
+                  class="inspector-btn inspector-btn--icon"
+                  type="button"
+                  aria-label="Reset to original texture size"
+                  title=${`Reset to original texture size (${originalWidth} x ${originalHeight})`}
+                  ?disabled=${readOnly}
+                  @click=${handleResetToOriginal}
+                >
+                  ${this.host.iconService.getIcon('rotate-ccw', IconSize.SMALL)}
+                </button>
+              `
+            : ''}
         </div>
-        ${remainingProps.map(prop => this.renderPropertyInput(prop))}
-      `,
-      {
-        ...collapse,
-        className: 'size-section',
-        hideTitle: true,
-      }
-    );
+      </div>
+      ${remainingProps.map(prop => this.renderPropertyInput(prop))}
+    `;
   }
 
   getSelectOptions(prop: PropertyDefinition): SelectOption[] {
@@ -1451,6 +1721,9 @@ export class InspectorPropertyRenderers {
       } catch {
         console.warn(`Failed to parse vector2 value for ${prop.name}:`, state.value);
       }
+      // A flow parent owns one Position axis and may own both (§3.2). Disabling
+      // only the driven field keeps the axis the author still controls editable.
+      const driven = prop.name === 'position' ? this.getFlowDrivenPositionAxes() : null;
       return html`
         <div class="property-group">
           ${labelTemplate}
@@ -1460,6 +1733,8 @@ export class InspectorPropertyRenderers {
             .step=${prop.ui?.step ?? 0.01}
             .precision=${prop.ui?.precision ?? 2}
             .sensitivity=${getScrubSensitivity(prop)}
+            .disabledAxes=${driven?.axes ?? []}
+            .disabledAxisTitle=${driven?.title ?? ''}
             ?disabled=${readOnly}
             @preview-change=${(e: CustomEvent) =>
               this.host.previewPropertyChange(prop.name, e.detail)}
@@ -2362,70 +2637,60 @@ export class InspectorPropertyRenderers {
     }
   }
 
-  renderGroup2DSizeGroup(
-    label: string,
+  private renderGroup2DSizeContent(
     widthProp: PropertyDefinition,
     heightProp: PropertyDefinition,
     width: number,
     height: number,
-    readOnly: boolean,
-    collapse: SectionCollapseOptions = {}
+    readOnly: boolean
   ) {
     const hasChildren = this.group2DHasNode2DChildren();
-    return this.renderPropertySection(
-      label,
-      html`
-        <div class="property-group property-group--size-inline">
-          ${this.renderPropertyLabel(
-            widthProp,
-            'Size',
-            this.isPropertyOverriddenForPrimaryNode(widthProp)
-          )}
-          <div class="size-inline-editor">
-            <pix3-number-field
-              axis="w"
-              class="size-inline-input"
-              .value=${width}
-              .step=${widthProp.ui?.step ?? 1}
-              .precision=${widthProp.ui?.precision ?? 0}
-              .min=${1}
-              .sensitivity=${0.5}
-              ?disabled=${readOnly}
-              @commit-change=${(e: CustomEvent<{ value: number }>) =>
-                this.applyGroup2DSizeChange(e.detail.value, height)}
-            ></pix3-number-field>
-            <pix3-number-field
-              axis="h"
-              class="size-inline-input"
-              .value=${height}
-              .step=${heightProp.ui?.step ?? 1}
-              .precision=${heightProp.ui?.precision ?? 0}
-              .min=${1}
-              .sensitivity=${0.5}
-              ?disabled=${readOnly}
-              @commit-change=${(e: CustomEvent<{ value: number }>) =>
-                this.applyGroup2DSizeChange(width, e.detail.value)}
-            ></pix3-number-field>
-          </div>
-          <button
-            class="inspector-btn"
-            type="button"
-            title="Fit to contents — resize this group to wrap its children (without moving them)"
-            aria-label="Fit to contents"
-            ?disabled=${readOnly || !hasChildren}
-            @click=${() => this.fitGroup2DToContents()}
-          >
-            ${this.host.iconService.getIcon('minimize-2', IconSize.SMALL)}
-            <span>Fit</span>
-          </button>
+    return html`
+      <div class="property-group property-group--size-inline">
+        ${this.renderPropertyLabel(
+          widthProp,
+          'Size',
+          this.isPropertyOverriddenForPrimaryNode(widthProp)
+        )}
+        <div class="size-inline-editor">
+          <pix3-number-field
+            axis="w"
+            class="size-inline-input"
+            .value=${width}
+            .step=${widthProp.ui?.step ?? 1}
+            .precision=${widthProp.ui?.precision ?? 0}
+            .min=${1}
+            .sensitivity=${0.5}
+            ?disabled=${readOnly}
+            @commit-change=${(e: CustomEvent<{ value: number }>) =>
+              this.applyGroup2DSizeChange(e.detail.value, height)}
+          ></pix3-number-field>
+          <pix3-number-field
+            axis="h"
+            class="size-inline-input"
+            .value=${height}
+            .step=${heightProp.ui?.step ?? 1}
+            .precision=${heightProp.ui?.precision ?? 0}
+            .min=${1}
+            .sensitivity=${0.5}
+            ?disabled=${readOnly}
+            @commit-change=${(e: CustomEvent<{ value: number }>) =>
+              this.applyGroup2DSizeChange(width, e.detail.value)}
+          ></pix3-number-field>
         </div>
-      `,
-      {
-        ...collapse,
-        className: 'size-section',
-        hideTitle: true,
-      }
-    );
+        <button
+          class="inspector-btn"
+          type="button"
+          title="Fit to contents — resize this group to wrap its children (without moving them)"
+          aria-label="Fit to contents"
+          ?disabled=${readOnly || !hasChildren}
+          @click=${() => this.fitGroup2DToContents()}
+        >
+          ${this.host.iconService.getIcon('minimize-2', IconSize.SMALL)}
+          <span>Fit</span>
+        </button>
+      </div>
+    `;
   }
 
   group2DHasNode2DChildren(): boolean {

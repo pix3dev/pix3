@@ -6,6 +6,7 @@
  */
 
 import { html, css, customElement, property, state } from '@/fw';
+import { ifDefined } from 'lit/directives/if-defined.js';
 import { ComponentBase } from '@/fw/component-base';
 
 export interface Vector2Value {
@@ -395,6 +396,19 @@ export class Vector2Editor extends ComponentBase {
   @property({ type: Boolean })
   disabled = false;
 
+  /**
+   * Axes another authority owns, disabled one at a time rather than as a pair —
+   * a child of a flow container keeps the cross axis editable while the flow
+   * drives the main one (`.plans/ui-consistency-pass.md` §3.2). Unity's
+   * "driven by LayoutGroup" idiom.
+   */
+  @property({ attribute: false })
+  disabledAxes: readonly ('x' | 'y')[] = [];
+
+  /** Tooltip explaining who owns an axis listed in {@link disabledAxes}. */
+  @property({ type: String })
+  disabledAxisTitle = '';
+
   static styles = css`
     :host {
       display: flex;
@@ -416,16 +430,28 @@ export class Vector2Editor extends ComponentBase {
     this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
   }
 
+  private isAxisDisabled(axis: 'x' | 'y'): boolean {
+    return this.disabled || this.disabledAxes.includes(axis);
+  }
+
+  /** `title` only where it explains something: a driven axis, not a read-only pair. */
+  private axisTitle(axis: 'x' | 'y'): string | undefined {
+    return !this.disabled && this.disabledAxes.includes(axis) && this.disabledAxisTitle
+      ? this.disabledAxisTitle
+      : undefined;
+  }
+
   protected render() {
     return html`
       <div class="vector-input-group">
         <pix3-number-field
           axis="x"
+          title=${ifDefined(this.axisTitle('x'))}
           .value=${this.x}
           .step=${this.step}
           .precision=${this.precision}
           .sensitivity=${this.sensitivity}
-          ?disabled=${this.disabled}
+          ?disabled=${this.isAxisDisabled('x')}
           @preview-change=${(e: CustomEvent<{ value: number }>) =>
             this.emit('preview-change', { x: e.detail.value, y: this.y })}
           @commit-change=${(e: CustomEvent<{ value: number }>) =>
@@ -433,11 +459,12 @@ export class Vector2Editor extends ComponentBase {
         ></pix3-number-field>
         <pix3-number-field
           axis="y"
+          title=${ifDefined(this.axisTitle('y'))}
           .value=${this.y}
           .step=${this.step}
           .precision=${this.precision}
           .sensitivity=${this.sensitivity}
-          ?disabled=${this.disabled}
+          ?disabled=${this.isAxisDisabled('y')}
           @preview-change=${(e: CustomEvent<{ value: number }>) =>
             this.emit('preview-change', { x: this.x, y: e.detail.value })}
           @commit-change=${(e: CustomEvent<{ value: number }>) =>
