@@ -197,6 +197,13 @@ Scene Tree, обобщённого пункта у них быть не може
 док из меню, а в Golden Layout это схлопывает стек и двигает соседей. Закрытие остаётся на
 крестике вкладки (так же у Unity).
 
+Сверка с `PANEL_DISPLAY_TITLES` (`src/core/LayoutManager.ts`) — единственный источник имён,
+поэтому пункты Window берут их, а не текст из §2.3: `agentChat` = **Agent**,
+`library` = **Library**, `animationTimeline` = **Animation**, `background` = **Home**
+(в меню не попадает — это `File ▸ Open Project…`), `generate` переименовывается в
+**Asset Generator** сразу в обоих местах. `animation` и `spriteEditor` дают одинаковое
+«Sprite Editor» на один и тот же компонент — в Window идёт только `spriteEditor`.
+
 Реализация: `LayoutManager.focusPanel()` уже есть, как и частные `reveal*Panel()` для
 Agent/Localization/Library/Generate. Заводится одна фабрика `ShowPanelCommand`
 (`window.show-<type>`), обобщающая логику «нет в раскладке → добавить в дефолтный стек».
