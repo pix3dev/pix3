@@ -116,7 +116,7 @@ The main menu is generated from command metadata — there is no menu file to ed
 - The menu title supplies context: under `Run` the row is `Stop`, not
   `Stop Game`; under `Create` it is the node type, not `Create <Type>`.
 
-Rationale and the full inventory: `.plans/ui-consistency-pass.md` §2.
+Rationale and the full inventory: `.plans/done/ui-consistency-pass.md` §2.
 
 ## 7. Inspector controls: one primitive set
 
