@@ -88,6 +88,66 @@ html`<button class="my-icon-btn" aria-label="Refresh">
 - `@inject(SomeService)`; services are `@injectable()` singletons. Requires
   `reflect-metadata` (already imported in `main.ts`).
 
+## 6. Adding a menu command
+
+The main menu is generated from command metadata — there is no menu file to edit.
+
+- **Pick the section by what the command acts on**, not by what feels close:
+  `file` (the project as a file), `edit` (undo/dup/delete + Editor Settings),
+  `create` (new nodes), `node` (operations on the selection), `view` (what the
+  viewport shows), `run` (play/stop and preview), `project` (settings, build,
+  export, bake), `window` (open or focus a panel or editor). Anything that opens
+  a panel goes in `window` — the View/Tools split it replaced is why nobody
+  could find Logs.
+- **`menuOrder` is banded**: hundreds digit = semantic group, tens = slot, units
+  reserved for later inserts. A separator is drawn automatically wherever the
+  hundreds digit changes between neighbours, so grouping is the numbering, not
+  markup. `(menuPath, menuOrder)` must be unique and `menuOrder` is mandatory —
+  `CommandRegistry.menu.spec.ts` fails the build otherwise, naming the offenders.
+- **A two-state command is checkable, not a verb**: give it
+  `checked: snapshot => …` and title it with the noun the check mark modifies
+  (`Grid`, not `Toggle Grid`). The same predicate feeds `commandRegistry
+  .isChecked(id)`, which the viewport toolbar reads for its pressed state — so a
+  toggle cannot show one thing in the menu and another on the toolbar.
+- **Ellipsis** means the command asks for input or confirmation *before* acting.
+  Opening a panel or a tab is not a dialog.
+- **A submenu** is `menuPath: 'node/align'`. Its row is not a command, so its
+  label and its slot in the parent both live in `SUBMENU_ROWS`.
+- The menu title supplies context: under `Run` the row is `Stop`, not
+  `Stop Game`; under `Create` it is the node type, not `Create <Type>`.
+
+Rationale and the full inventory: `.plans/ui-consistency-pass.md` §2.
+
+## 7. Inspector controls: one primitive set
+
+`src/ui/object-inspector/inspector-controls.ts.css` is the whole vocabulary, and
+every rule in it is scoped under `pix3-inspector-panel` — that file's older
+sibling is 1500 lines of unscoped Light-DOM globals, one of which was styling
+`pix3-panel` across the entire editor. Do not add a seventh button class.
+
+- `.inspector-btn` — quiet action, icon + label. `--primary` for the single
+  "add" action of a list, `--danger` for destructive (neutral at rest, red only
+  on hover/focus), `--toggle` for a pressed state (`aria-pressed`), `--icon` for
+  icon-only.
+- **Icon-only** is for a control with ≤3 neighbours whose glyph is conventional
+  (`trash-2`, `plus`, `eye`, `lock`, `rotate-ccw`, chevrons). Anything else keeps
+  its label — "edit the groups this node belongs to" has no icon anyone knows.
+  Icon-only controls MUST carry both `title` and `aria-label`; a spec asserts it
+  across the whole inspector.
+- **Enabled/disabled state is `.inspector-switch`** (`role="switch"`,
+  `aria-checked`), never a button labelled with its own current state. Do not
+  reach for `eye`/`eye-off` here: in this editor those mean *visibility*.
+- **A single choice is `.inspector-segment`**, a `role="radiogroup"` with roving
+  tabindex — not a row of buttons that happen to look pressed.
+- **A sub-block is `.inspector-subsection`** (header + right-hand actions slot +
+  body + hint). Two systems that do comparable things get the same shape: that is
+  why Anchors and Flow now read alike instead of one being a button and the other
+  a checkbox.
+- **Section order comes from the schema**, not the alphabet: three pinned bands
+  (`Node`, `Transform`, `Layout`) and then declaration order. `groups[name]
+  .expanded === false` starts a section collapsed; collapse state persists per
+  node type under one `localStorage` key.
+
 ## Quick checklist before finishing a UI change
 
 - [ ] No emoji / symbol glyphs used as icons — all via `IconService`.
@@ -95,4 +155,8 @@ html`<button class="my-icon-btn" aria-label="Refresh">
 - [ ] Colours come from theme tokens / the shared palette, not literals.
 - [ ] Subscriptions disposed in `disconnectedCallback`.
 - [ ] State changes flow through Commands/Operations, not direct mutation.
+- [ ] A new menu command has a unique banded `menuOrder`, the right section, and
+      a `checked` predicate if it is a toggle.
+- [ ] Inspector controls reuse the primitives; icon-only ones have `title` +
+      `aria-label`.
 - [ ] `npm run type-check` and `npm run lint` are clean for the touched files.
