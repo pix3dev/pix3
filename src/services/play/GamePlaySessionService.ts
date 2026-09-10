@@ -29,6 +29,7 @@ import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSet
 import { SetGamePopoutWindowOpenOperation } from '@/features/scripts/SetGamePopoutWindowOpenOperation';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
 import { isDocumentActive } from '@/services/core/page-activity';
+import { PeekService } from '@/services/viewport/PeekService';
 
 type GameHostKind = 'tab' | 'popout';
 
@@ -73,6 +74,9 @@ export class GamePlaySessionService {
 
   @inject(LocalizationEditorService)
   private readonly localizationEditorService!: LocalizationEditorService;
+
+  @inject(PeekService)
+  private readonly peekService!: PeekService;
 
   private initialized = false;
   private disposeUiSubscription?: () => void;
@@ -561,6 +565,12 @@ export class GamePlaySessionService {
       this.assetLoader.setAtlasResolver(null);
     }
 
+    // Editor Peek: the mask cannot ride along with the graph (it is not serialized, and this clone
+    // comes from serialize→parse), so it is pushed in from outside — BEFORE startScene, so the very
+    // first frame already honours it, and as a live sink so toggling a chip mid-game takes effect
+    // without a restart. That is the headline use case: hide the HUD to see the world under it.
+    this.peekService.setRuntimeSink(ids => runner.setEditorPeekMask(ids));
+
     // The project's own web fonts, registered before the first frame — otherwise a caption in a
     // family the manifest ships is drawn by a system substitute at a different width.
     runner.setProjectFonts(appState.project.manifest?.fonts ?? null);
@@ -648,6 +658,10 @@ export class GamePlaySessionService {
     // exactly the bug D5 exists to prevent. Leaving is tied to play mode *ending* — see
     // `syncRuntimeToUiState` — and to `dispose`. Entities the departing scene owned are despawned by
     // each `core:NetworkedNode`'s `despawnOnDetach`, so no ghosts survive the reload.
+
+    // Drop the Peek sink with the runner it pointed at, or a chip toggled while nothing is playing
+    // would reach a stopped runner.
+    this.peekService.setRuntimeSink(null);
 
     if (this.runner) {
       this.runner.stop();

@@ -75,6 +75,9 @@ const READ_ONLY_ALLOWED_OPERATIONS = new Set([
   'viewport.set-editor-camera-projection',
   'viewport.set-preview-camera',
   'viewport.toggle-ui-flag',
+  // Peek is a per-user view mask that never reaches the document, so a read-only collab session
+  // must still be able to look behind something.
+  'viewport.set-peek-visibility',
   'scripts.set-play-mode',
   'scripts.set-game-popout-window-open',
   'editor.update-settings',

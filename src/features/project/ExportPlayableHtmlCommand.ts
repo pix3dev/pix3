@@ -19,6 +19,7 @@ import type {
   PlayableHtmlBuildArtifact,
   PlayableHtmlBundleSizeReport,
 } from '@/services/export/PlayableHtmlBuildService';
+import { buildPeekExportWarning } from './peek-export-warning';
 import {
   buildAssetProvenanceItems,
   buildInclusionSummaryLines,
@@ -295,8 +296,10 @@ export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
         : '';
 
     return (
-      `Your standalone playable HTML bundle is built and ready to save.\n\n` +
-      `Entry scene: ${artifact.entryScenePath || '(auto-selected)'}\n` +
+      `Your standalone playable HTML bundle is built and ready to save.` +
+      // Before the size report, not after: this is the one line that can make the author cancel.
+      buildPeekExportWarning() +
+      `\n\nEntry scene: ${artifact.entryScenePath || '(auto-selected)'}\n` +
       `Scenes: ${artifact.sceneCount}, Assets: ${artifact.assetCount}, Generated files: ${artifact.fileCount}` +
       this.buildBundleSizeReportSection(artifact.sizeReport) +
       this.buildInclusionReportSection(artifact) +

@@ -35,8 +35,15 @@ import {
 } from '@/services/scripting/ScriptCompilerService';
 import { CommandRegistry } from '@/services/core/CommandRegistry';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
+import {
+  PeekHideCommand,
+  PeekShowAllCommand,
+  PeekShowCommand,
+  PeekSoloCommand,
+} from '@/features/peek/PeekCommands';
 import { LoggingService } from '@/services/core/LoggingService';
 import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
+import { PeekService } from '@/services/viewport/PeekService';
 import { AssetGenService, type AssetPostProcessPreset } from '@/services/image-gen/AssetGenService';
 import {
   MAX_SFX_ITERATIONS,
@@ -475,6 +482,9 @@ export class AgentToolRegistry {
   @inject(LoggingService)
   private readonly logger!: LoggingService;
 
+  @inject(PeekService)
+  private readonly peek!: PeekService;
+
   @inject(ViewportRendererService)
   private readonly viewportRenderer!: ViewportRendererService;
 
@@ -760,6 +770,41 @@ export class AgentToolRegistry {
         handler: async args => {
           await this.ensureActiveScene();
           return this.findNodes(asString(args.text));
+        },
+      },
+      {
+        name: 'peek',
+        description:
+          "The HUMAN's view mask. Hide, reveal or solo whole branches of the scene so a person (or you) can see what is UNDERNEATH — three stacked UI screens, a HUD covering the world. Affects the editor viewport and the running preview ONLY: it is never written to the .pix3scene, never reaches the export, and the shipped game shows every branch. To hide something IN THE GAME use set_property with `visible` (or `initiallyVisible` for the starting state) — never this. Actions: 'list' returns the branches with their current state (call it first; the ids are what the other actions take), 'hide'/'show' take nodeIds or nodeNames, 'solo' fades every branch except one, 'show_all' clears the mask. Branches are derived from scene structure (top-level nodes — one level deeper when there is a single root — plus prefab instance roots and CanvasLayer2D), so a node in the middle of a subtree is not addressable here: pick its branch. Wherever a masked branch exists, `scene_tree`, `node_inspect`, `play_status`, `game_observe` and `viewport_screenshot` say so, so do not read a missing object in a screenshot as a bug before checking.",
+        inputSchema: {
+          type: 'object',
+          properties: {
+            action: {
+              type: 'string',
+              enum: ['list', 'hide', 'show', 'solo', 'show_all'],
+              description: 'What to do. Start with "list".',
+            },
+            nodeIds: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Branch node ids (from action "list").',
+            },
+            nodeNames: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Branch names, resolved case-insensitively. Use when you have no ids.',
+            },
+          },
+          required: ['action'],
+          additionalProperties: false,
+        },
+        handler: async args => {
+          await this.ensureActiveScene();
+          return this.peekTool(
+            asString(args.action),
+            Array.isArray(args.nodeIds) ? (args.nodeIds as string[]) : [],
+            Array.isArray(args.nodeNames) ? (args.nodeNames as string[]) : []
+          );
         },
       },
       {
@@ -1374,11 +1419,14 @@ export class AgentToolRegistry {
             sampleMs?: number,
             frames?: number
           ) => ReturnType<GameInputService['observe']>;
-          return observe(
+          const observed = observe(
             Array.isArray(args.nodes) ? (args.nodes as string[]) : [],
             typeof args.sampleMs === 'number' ? args.sampleMs : 0,
             typeof args.frames === 'number' ? args.frames : undefined
           );
+          // The mask is live during play, so a masked branch would otherwise read here as a node
+          // the game failed to show.
+          return Promise.resolve(observed).then(result => ({ ...result, ...this.peekNote() }));
         },
       },
       {
@@ -2303,6 +2351,7 @@ export class AgentToolRegistry {
       ...tree,
       sceneVersion: graph.version,
       ...this.playingElsewhereNote(roots),
+      ...this.peekNote(),
       // Authoring surface: performance advice belongs here, where it can be acted on.
       ...renderabilityNote(roots, { includeAdvice: true }),
     };
@@ -2356,7 +2405,10 @@ export class AgentToolRegistry {
       componentType: c.type,
       enabled: c.enabled,
     }));
-    return dto;
+    // `nodeToDTO` already stamps this node's own `hiddenByEditor`; the note covers the case that
+    // misleads — an ANCESTOR branch is masked, so this node draws nothing in the editor while its
+    // own flags all say it should.
+    return { ...dto, ...this.peekNote() };
   }
 
   private findNodes(text: string): NodeSummary[] {
@@ -2370,6 +2422,110 @@ export class AgentToolRegistry {
       }
     }
     return matches;
+  }
+
+  /**
+   * `peek` — read or drive the human's editor-only view mask.
+   *
+   * Routed through the same commands the strip uses, so the agent and the person cannot end up
+   * with two different notions of what is masked. Every reply restates the branch list, because a
+   * model that changed the mask and then reads a screenshot needs to know what it just did.
+   */
+  private async peekTool(
+    action: string,
+    nodeIds: readonly string[],
+    nodeNames: readonly string[]
+  ): Promise<Record<string, unknown>> {
+    const branches = this.peek.getSnapshot().branches;
+    const byName = new Map(branches.map(branch => [branch.label.toLowerCase(), branch.nodeId]));
+    const resolved: string[] = [];
+    const unresolved: string[] = [];
+    for (const id of nodeIds) {
+      if (branches.some(branch => branch.nodeId === id)) {
+        resolved.push(id);
+      } else {
+        unresolved.push(id);
+      }
+    }
+    for (const name of nodeNames) {
+      const id = byName.get(name.trim().toLowerCase());
+      if (id) {
+        resolved.push(id);
+      } else {
+        unresolved.push(name);
+      }
+    }
+
+    const describe = (): Record<string, unknown> => ({
+      ok: true,
+      action,
+      branches: this.peek.getSnapshot().branches,
+      note: 'Editor/preview view only — the mask is not in the scene file and not in the export. Use set_property `visible` to hide something in the GAME.',
+      ...(unresolved.length > 0
+        ? {
+            unresolved,
+            unresolvedHint:
+              'Not a branch. Only the ids/names from action "list" are addressable — for a node deeper in a subtree, mask its branch instead.',
+          }
+        : {}),
+    });
+
+    if (action === 'list') {
+      return describe();
+    }
+    if (action === 'show_all') {
+      await this.dispatcher.execute(new PeekShowAllCommand());
+      return describe();
+    }
+    if (resolved.length === 0) {
+      return {
+        ok: false,
+        error: `"${action}" needs at least one branch. Pass nodeIds or nodeNames from action "list".`,
+        branches,
+        // Carried into the refusal too: "needs a branch" after the model DID name one is what makes
+        // it retry the same call instead of reading the list.
+        ...(unresolved.length > 0
+          ? {
+              unresolved,
+              unresolvedHint:
+                'Not a branch. Only the ids/names from action "list" are addressable — for a node deeper in a subtree, mask its branch instead.',
+            }
+          : {}),
+      };
+    }
+    if (action === 'hide') {
+      await this.dispatcher.execute(new PeekHideCommand(resolved));
+    } else if (action === 'show') {
+      await this.dispatcher.execute(new PeekShowCommand(resolved));
+    } else if (action === 'solo') {
+      await this.dispatcher.execute(new PeekSoloCommand([resolved[0]]));
+    } else {
+      return { ok: false, error: `Unknown peek action "${action}".`, branches };
+    }
+    return describe();
+  }
+
+  /**
+   * The Peek mask, restated on every tool that reports what is on screen.
+   *
+   * Without it the feature's worst failure mode is wide open in both directions: the agent "fixes"
+   * the visibility of something the person merely masked, or reads its absence from a screenshot as
+   * a rendering bug. Absent (not `false`) when nothing is masked, so it costs nothing in the
+   * normal case.
+   */
+  private peekNote(): { peekHidden?: string[]; peekWarning?: string } {
+    const hidden = this.peek.getSnapshot().branches.filter(branch => branch.hidden);
+    if (hidden.length === 0) {
+      return {};
+    }
+    return {
+      peekHidden: hidden.map(branch => branch.label),
+      peekWarning: `Peek: ${hidden
+        .map(branch => branch.label)
+        .join(
+          ', '
+        )} hidden in the EDITOR view only (the human's mask, or yours via the peek tool). These branches are NOT missing and NOT invisible in the game — do not "fix" them. Use the peek tool to reveal them.`,
+    };
   }
 
   private getSelection(): {
@@ -3817,6 +3973,7 @@ export class AgentToolRegistry {
       ok: true,
       view,
       ...(view === 'editor' ? this.editorLightingNote() : {}),
+      ...this.peekNote(),
       width: shot.width,
       height: shot.height,
       mimeType: shot.mimeType,
@@ -3893,6 +4050,7 @@ export class AgentToolRegistry {
       ok: true,
       view: 'editor',
       ...this.editorLightingNote(),
+      ...this.peekNote(),
       framed: frame,
       ...(opts.nodeId ? { framedNodeId: opts.nodeId, framedNodeName: framedNode?.name } : {}),
       width: result.width,
@@ -4774,8 +4932,16 @@ export class AgentToolRegistry {
       textures: number;
     };
     visible3D?: Visible3DSummary;
+    peekHidden?: string[];
+    peekWarning?: string;
   } {
-    const status = { isPlaying: appState.ui.isPlaying, playModeStatus: appState.ui.playModeStatus };
+    // The Peek mask stays live during play (that is the point — hide the HUD, see the world), so
+    // the black-screen triage call has to name it before a masked branch reads as a broken one.
+    const status = {
+      isPlaying: appState.ui.isPlaying,
+      playModeStatus: appState.ui.playModeStatus,
+      ...this.peekNote(),
+    };
     const runtime = this.playSession.getActiveRuntime();
     if (!runtime) {
       return status;

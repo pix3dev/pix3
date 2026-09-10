@@ -19,6 +19,7 @@ import {
   type PlayableExportDialogResult,
 } from '@/services/export/PlayableExportDialogService';
 import { PlayableExportProgressDialogService } from '@/services/export/PlayableExportProgressDialogService';
+import { buildPeekExportWarning } from './peek-export-warning';
 import type {
   PlayableHtmlBuildService,
   PlayableZipBuildArtifact,
@@ -119,8 +120,9 @@ export class ExportPlayableZipCommand extends CommandBase<void, void> {
       const readyToSave = await this.dialogService.showConfirmation({
         title: 'Zip Export Ready',
         message:
-          `The archive is built and ready to save.\n\n` +
-          `Entry scene: ${artifact.entryScenePath || '(auto-selected)'}\n` +
+          `The archive is built and ready to save.` +
+          buildPeekExportWarning() +
+          `\n\nEntry scene: ${artifact.entryScenePath || '(auto-selected)'}\n` +
           `Scenes: ${artifact.sceneCount}, Assets: ${artifact.assetCount}\n` +
           `index.html: ${this.formatBytes(artifact.htmlBytes)}, assets: ${this.formatBytes(artifact.assetBytes)}, ` +
           `zip: ${this.formatBytes(artifact.zipBlob.size)}` +

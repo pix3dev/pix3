@@ -23,6 +23,7 @@ import {
 import { ProjectRoutineStore } from '@/services/agent/ProjectTraceStore';
 import { BRIDGE_TOKEN_SECRET_ID } from '@/services/llm/BridgeProviders';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
+import { PeekService } from '@/services/viewport/PeekService';
 import {
   AgentChatHistoryStore,
   type AgentConversationMeta,
@@ -477,6 +478,9 @@ export class AgentChatService {
 
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
+
+  @inject(PeekService)
+  private readonly peek!: PeekService;
 
   @inject(ProjectStorageService)
   private readonly storage!: ProjectStorageService;
@@ -1938,6 +1942,21 @@ export class AgentChatService {
       const extra =
         selectedIds.length > labels.length ? ` (+${selectedIds.length - labels.length} more)` : '';
       lines.push(`- Selected node(s): ${labels.join(', ')}${extra}`);
+    }
+
+    // The human's Peek mask. In the live block, not the cached prefix — it changes whenever they
+    // click a chip. One line, because the risk it defuses is cheap to state and expensive to hit:
+    // a masked branch looks exactly like a missing one in a screenshot.
+    const peekHidden = this.peek
+      .getSnapshot()
+      .branches.filter(branch => branch.hidden)
+      .map(branch => branch.label);
+    if (peekHidden.length > 0) {
+      lines.push(
+        `- Peek: ${peekHidden.join(
+          ', '
+        )} hidden in the editor VIEW only (not in the scene file, not in the game, not in the export). Do not "fix" their visibility; reveal them with the peek tool if you need to see them.`
+      );
     }
 
     const outline = this.buildSceneOutline();

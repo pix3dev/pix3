@@ -396,7 +396,10 @@ export class ScriptExecutionService {
       position: { x: node.position.x, y: node.position.y, z: node.position.z },
       rotation: { x: node.rotation.x, y: node.rotation.y, z: node.rotation.z },
       scale: { x: node.scale.x, y: node.scale.y, z: node.scale.z },
-      visible: node.visible,
+      // The AUTHORED flag, not the effective one: `visible` folds in the editor's Peek mask, and
+      // restoring a masked value after play would write the mask into `properties.visible` — i.e.
+      // into the scene file.
+      visible: node.authoredVisible,
     };
     snapshots.push(snapshot);
 

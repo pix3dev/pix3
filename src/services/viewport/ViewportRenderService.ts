@@ -83,6 +83,7 @@ import {
   type Selection2DOverlay,
 } from '@/services/viewport/TransformTool2d';
 import { isDocumentActive } from '@/services/core/page-activity';
+import { isPointerBlocked } from './peek-gating';
 
 export type TransformMode = 'select' | 'translate' | 'rotate' | 'scale';
 const EDITOR_ORTHOGRAPHIC_FRUSTUM_HEIGHT = 12;
@@ -2726,7 +2727,7 @@ export class ViewportRendererService {
       this.transformSession.setActiveTargetSelection(targetNodeId);
       const sceneGraph = this.sceneManager.getActiveSceneGraph();
       const node = sceneGraph?.nodeMap.get(targetNodeId);
-      if (node instanceof NodeBase && node.visible && !node.properties.locked) {
+      if (node instanceof NodeBase && node.visible && !isPointerBlocked(node)) {
         return node;
       }
       return null;
@@ -2738,7 +2739,7 @@ export class ViewportRendererService {
     if (iconNodeId) {
       const sceneGraph = this.sceneManager.getActiveSceneGraph();
       const node = sceneGraph?.nodeMap.get(iconNodeId);
-      if (node instanceof NodeBase && node.visible && !node.properties.locked) {
+      if (node instanceof NodeBase && node.visible && !isPointerBlocked(node)) {
         return node;
       }
     }
@@ -2785,8 +2786,8 @@ export class ViewportRendererService {
       while (current) {
         if (current instanceof NodeBase) {
           // Skip locked nodes - they cannot be selected by pointer
-          const isLocked = Boolean((current as NodeBase).properties.locked);
-          if (!isLocked && this.isVisibleInHierarchy(current)) {
+          const isBlocked = isPointerBlocked(current as NodeBase);
+          if (!isBlocked && this.isVisibleInHierarchy(current)) {
             return current;
           }
         }
@@ -2848,7 +2849,7 @@ export class ViewportRendererService {
       const node = sceneGraph.nodeMap.get(nodeId);
       if (
         !(node instanceof Node2D) ||
-        Boolean(node.properties.locked) ||
+        isPointerBlocked(node) ||
         !this.isVisibleInHierarchy(node) ||
         !this.picking.get2DVisual(node)
       ) {

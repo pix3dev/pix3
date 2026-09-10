@@ -94,7 +94,16 @@ export interface NodeDTO {
   nodeId: string;
   type: string;
   name: string;
+  /** The node's OWN authored flag — what the scene file says (see also `hiddenByEditor`). */
   visible: boolean;
+  /**
+   * Present and `true` when the human has Peek-hidden this branch in THEIR editor.
+   *
+   * Editor-only and never in the scene file or the export: the game shows the node. It is reported
+   * because the alternative is the feature's worst failure mode — the agent "fixing" the visibility
+   * of something the person merely masked, or reading its absence from a screenshot as a bug.
+   */
+  hiddenByEditor?: boolean;
   transform: TransformDTO;
   groups: string[];
   componentCount: number;
@@ -144,7 +153,9 @@ export function nodeToDTO(node: NodeBase, depth: number): NodeDTO {
     nodeId: node.nodeId,
     type: node.type,
     name: node.name,
-    visible: node.visible,
+    // `authoredVisible` — optional-guarded because this also runs against nodes from a consumer
+    // project's own (possibly older) @pix3/runtime copy, where the getter does not exist.
+    visible: node.authoredVisible ?? node.visible,
     transform: transformOf(node),
     groups: [...node.groups],
     componentCount: node.components.length,
@@ -154,6 +165,9 @@ export function nodeToDTO(node: NodeBase, depth: number): NodeDTO {
   // already has (measured in Flow eval runs) or concludes the engine dropped its script.
   // Optional-guarded because this also runs against nodes from a consumer project's own (possibly
   // older) @pix3/runtime copy, where the field does not exist.
+  if (node.hiddenByEditor === true) {
+    dto.hiddenByEditor = true;
+  }
   const pending = node.pendingComponents ?? [];
   if (pending.length > 0) {
     dto.pendingComponents = pending.map(def => def.type);

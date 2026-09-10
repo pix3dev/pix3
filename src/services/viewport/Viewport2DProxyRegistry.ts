@@ -47,6 +47,7 @@ import { Checkbox2D } from '@pix3/runtime';
 import { InventorySlot2D } from '@pix3/runtime';
 import { getProjectTextureFiltering } from '@pix3/runtime';
 import { appState } from '@/state';
+import { isPeekDimmedInTree, PEEK_DIM_OPACITY } from './peek-gating';
 import {
   deriveAnimationDocumentId,
   parseAnimationResourceText,
@@ -2425,10 +2426,12 @@ export class Viewport2DProxyRegistry {
 
   private getEffective2DOpacity(node: Node2D): number {
     const effective = node.computedOpacity;
-    if (!Number.isFinite(effective)) {
-      return 1;
-    }
-    return Math.max(0, Math.min(1, effective));
+    const authored = Number.isFinite(effective) ? Math.max(0, Math.min(1, effective)) : 1;
+    // Peek solo fades the branches the author is NOT looking at rather than hiding them, which is
+    // what makes solo recoverable — "everything vanished" stops being a reachable state. The fade
+    // is an editor-view multiplier only: `Node2D.opacity` is untouched, so nothing about it is
+    // saved or shipped.
+    return isPeekDimmedInTree(node) ? authored * PEEK_DIM_OPACITY : authored;
   }
 
   /**

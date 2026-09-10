@@ -264,11 +264,11 @@ export function renderViewportToolbar(
 
       ${state.canToggleLayerVisibility
         ? html`
-            <div class="toolbar-group" role="group" aria-label="Layer visibility">
+            <div class="toolbar-group" role="group" aria-label="Dimension filter">
               ${renderToolbarButton(
                 {
-                  ariaLabel: 'Toggle 2D layer visibility',
-                  title: `2D Layer: ${state.showLayer2D ? 'Visible' : 'Hidden'} (2)`,
+                  ariaLabel: 'Show 2D content',
+                  title: `2D content: ${state.showLayer2D ? 'Shown' : 'Hidden'} (2)`,
                   iconName: 'layer-2d',
                   isPressed: state.showLayer2D,
                   isActive: state.showLayer2D,
@@ -279,8 +279,8 @@ export function renderViewportToolbar(
               )}
               ${renderToolbarButton(
                 {
-                  ariaLabel: 'Toggle 3D layer visibility',
-                  title: `3D Layer: ${state.showLayer3D ? 'Visible' : 'Hidden'} (3)`,
+                  ariaLabel: 'Show 3D content',
+                  title: `3D content: ${state.showLayer3D ? 'Shown' : 'Hidden'} (3)`,
                   iconName: 'layer-3d',
                   isPressed: state.showLayer3D,
                   isActive: state.showLayer3D,

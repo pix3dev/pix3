@@ -13,8 +13,11 @@ import { deriveSceneLayerCapabilities, isMixedScene } from './scene-layer-capabi
 export class ToggleLayer2DCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-layer-2d',
-    title: 'Toggle 2D Layer',
-    description: 'Show or hide the 2D layer in the viewport',
+    // "Show 2D", not "Toggle 2D Layer": this is a viewport DIMENSION filter, and the word
+    // "layer" already means a draw band (CanvasLayer2D / zIndex) in this editor. One word must not
+    // mean two things in the same menu — Peek's branch chips would have made it three.
+    title: 'Show 2D',
+    description: 'Show or hide 2D content in the viewport',
     keywords: ['2d', 'layer', 'viewport', 'toggle'],
     menuPath: 'view',
     keybinding: '2',
@@ -37,7 +40,7 @@ export class ToggleLayer2DCommand extends CommandBase<void, void> {
     const operations = context.container.getService<OperationService>(
       context.container.getOrCreateToken(OperationService)
     );
-    await operations.invoke(new ToggleUIFlagOperation('showLayer2D', 'Toggle 2D Layer'));
+    await operations.invoke(new ToggleUIFlagOperation('showLayer2D', 'Show 2D'));
 
     return {
       didMutate: true,

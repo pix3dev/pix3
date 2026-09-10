@@ -14,6 +14,7 @@ import { SpineSkeleton2D } from '@pix3/runtime';
 import { UIControl2D } from '@pix3/runtime';
 import type { SceneGraph } from '@pix3/runtime';
 import type { Viewport2DProxyRegistry } from './Viewport2DProxyRegistry';
+import { isPointerBlocked } from './peek-gating';
 
 const LAYER_GIZMOS = 2;
 
@@ -255,7 +256,7 @@ export class ViewportPicking {
       if (!(node instanceof NodeBase)) {
         continue;
       }
-      if (node.properties.locked) {
+      if (isPointerBlocked(node)) {
         continue;
       }
       return node;
@@ -387,7 +388,7 @@ export class ViewportPicking {
       return false;
     }
 
-    if (Boolean(node.properties.locked) || !this.deps.isVisibleInHierarchy(node)) {
+    if (isPointerBlocked(node) || !this.deps.isVisibleInHierarchy(node)) {
       return false;
     }
 

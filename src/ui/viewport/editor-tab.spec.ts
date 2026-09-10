@@ -552,8 +552,8 @@ describe('EditorTabComponent', () => {
     const root = panel.shadowRoot;
     // A single-layer scene has nothing to reveal by hiding a layer, so neither
     // layer button nor the mode toggle is shown.
-    expect(root?.querySelector('[aria-label="Toggle 2D layer visibility"]')).toBeNull();
-    expect(root?.querySelector('[aria-label="Toggle 3D layer visibility"]')).toBeNull();
+    expect(root?.querySelector('[aria-label="Show 2D content"]')).toBeNull();
+    expect(root?.querySelector('[aria-label="Show 3D content"]')).toBeNull();
     expect(root?.querySelector('[aria-label="Toggle navigation mode"]')).toBeNull();
   });
 
@@ -570,8 +570,8 @@ describe('EditorTabComponent', () => {
     await panel.updateComplete;
 
     const root = panel.shadowRoot;
-    expect(root?.querySelector('[aria-label="Toggle 2D layer visibility"]')).toBeNull();
-    expect(root?.querySelector('[aria-label="Toggle 3D layer visibility"]')).toBeNull();
+    expect(root?.querySelector('[aria-label="Show 2D content"]')).toBeNull();
+    expect(root?.querySelector('[aria-label="Show 3D content"]')).toBeNull();
     expect(root?.querySelector('[aria-label="Toggle navigation mode"]')).toBeNull();
   });
 
@@ -591,8 +591,8 @@ describe('EditorTabComponent', () => {
     await panel.updateComplete;
 
     const root = panel.shadowRoot;
-    expect(root?.querySelector('[aria-label="Toggle 2D layer visibility"]')).not.toBeNull();
-    expect(root?.querySelector('[aria-label="Toggle 3D layer visibility"]')).not.toBeNull();
+    expect(root?.querySelector('[aria-label="Show 2D content"]')).not.toBeNull();
+    expect(root?.querySelector('[aria-label="Show 3D content"]')).not.toBeNull();
     expect(root?.querySelector('[aria-label="Toggle navigation mode"]')).not.toBeNull();
   });
 });

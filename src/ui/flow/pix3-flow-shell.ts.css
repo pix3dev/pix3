@@ -455,6 +455,30 @@ pix3-flow-shell .flow-stage__bar {
   font-size: 11px;
 }
 
+/* Peek's chips over the game frame, bottom-left. Not in the stage BAR: they are a scene-scoped
+   control, not a run control, and mixing them into the Play/Restart cluster would invite
+   mis-clicks on the one thing there that is not undoable by pressing it again. `pointer-events`
+   is opted back in on `.peek` alone, so an empty column never swallows a click meant for the
+   game. */
+pix3-flow-shell .flow-stage__frame > pix3-peek-strip {
+  position: absolute;
+  left: 24px;
+  bottom: 24px;
+  z-index: 4;
+  max-height: calc(100% - 48px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  pointer-events: none;
+}
+
+pix3-flow-shell .flow-stage__frame > pix3-peek-strip::-webkit-scrollbar {
+  display: none;
+}
+
+pix3-flow-shell .flow-stage__frame > pix3-peek-strip .peek {
+  pointer-events: auto;
+}
+
 pix3-flow-shell .flow-stage__button {
   display: inline-flex;
   align-items: center;

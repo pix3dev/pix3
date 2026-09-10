@@ -1,0 +1,269 @@
+/* Peek strip: labelled toggle chips for the branches of the scene, plus the "N hidden · Show all"
+   exit pill. Light-DOM, so every rule is scoped under the element tag.
+
+   The element collapses to nothing when the scene has fewer than two branches (the component
+   returns `nothing`), so `display: contents` would leave a stray grid/flex gap in the host bar —
+   hence a real box that simply has no children to lay out. */
+
+/* The host carries NO box of its own — no padding, no background — so a strip that renders
+   `nothing` (fewer than two branches) occupies nothing at all without needing `display: none`,
+   which would take it out of a grid/flex host's placement. Everything visual lives on `.peek`,
+   which only exists when there are chips. */
+pix3-peek-strip {
+  display: block;
+  min-width: 0;
+}
+
+/* A COLUMN, bottom-anchored: the chips read as a list of branches, one line each, and the labels
+   left-align into a scannable edge instead of a ragged row that re-flows every time a name changes
+   length. Growing upward from the bottom keeps the first chip in the same place as the list grows.
+   `align-items: flex-start` shrink-wraps each chip to its own label rather than stretching them all
+   to the longest one. */
+pix3-peek-strip .peek {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  gap: 4px;
+  min-width: 0;
+}
+
+pix3-peek-strip .peek__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 12rem;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px solid var(--line-1);
+  border-radius: 999px;
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+pix3-peek-strip .peek__chip svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+pix3-peek-strip .peek__chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-peek-strip .peek__chip:hover {
+  border-color: var(--line-2);
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-peek-strip .peek__chip:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+/* Hidden reads as struck-through and receded — the chip is still a chip (one click puts it back),
+   it just no longer claims to be showing anything. */
+pix3-peek-strip .peek__chip[data-hidden='true'] {
+  border-color: var(--line-1);
+  background: transparent;
+  color: var(--fg-3);
+}
+
+pix3-peek-strip .peek__chip[data-hidden='true'] .peek__chip-label {
+  text-decoration: line-through;
+}
+
+/* Faded by somebody else's solo: the same visual language the viewport is using on the branch. */
+pix3-peek-strip .peek__chip[data-dimmed='true'] {
+  opacity: 0.5;
+}
+
+pix3-peek-strip .peek__chip[data-soloed='true'] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--fg-0);
+}
+
+pix3-peek-strip .peek__overflow {
+  position: relative;
+  display: inline-flex;
+}
+
+pix3-peek-strip .peek__chip--overflow {
+  color: var(--fg-2);
+}
+
+/* The overflow popover.
+   `DropdownPortal` MOVES this element into a `.pix3-dropdown-portal` div appended to `document.body`
+   and positions THAT (position/top/left/z-index), so the menu itself must be styled under both
+   selectors: the first covers the frame before the move, the second is where it actually lives while
+   open. Styling it only under the element tag leaves the popover completely unstyled once portalled
+   — measured live as a transparent, mispositioned box. Same pattern as
+   `.pix3-dropdown-portal .dropdown__menu` in pix3-dropdown-button.ts.css. */
+pix3-peek-strip .peek__menu,
+.pix3-dropdown-portal .peek__menu {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  /* Shrink-wrap, and this is load-bearing rather than cosmetic. `DropdownPortal` measures the moved
+     element to decide whether the popover fits on screen, and it measures it AFTER the move but
+     BEFORE positioning the container — while the container is still a static block at the end of
+     `<body>`. A block-level flex box there stretches to the full body width, so the measurement came
+     back at ~viewport width, the "goes off the right edge" branch fired, and the popover was clamped
+     to `left: 0` instead of sitting under its trigger. Measured live: trigger at x=525, popover at
+     x=0. */
+  width: max-content;
+  max-width: min(20rem, calc(100vw - 32px));
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: var(--bg-1);
+  box-shadow: var(--shadow-pop);
+}
+
+/* Chips inside the popover: full-width rows rather than pills in a row, and they need the base chip
+   rules restated because the portal moved them out of `pix3-peek-strip`'s scope. */
+.pix3-dropdown-portal .peek__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 16rem;
+  justify-content: flex-start;
+  padding: 3px 7px;
+  border: 1px solid var(--line-1);
+  border-radius: 4px;
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pix3-dropdown-portal .peek__chip svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+  flex: none;
+}
+
+.pix3-dropdown-portal .peek__chip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pix3-dropdown-portal .peek__chip:hover {
+  border-color: var(--line-2);
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+.pix3-dropdown-portal .peek__chip[data-hidden='true'] {
+  background: transparent;
+  color: var(--fg-3);
+}
+
+.pix3-dropdown-portal .peek__chip[data-hidden='true'] .peek__chip-label {
+  text-decoration: line-through;
+}
+
+.pix3-dropdown-portal .peek__chip[data-dimmed='true'] {
+  opacity: 0.5;
+}
+
+.pix3-dropdown-portal .peek__chip[data-soloed='true'] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--fg-0);
+}
+
+/* The pill: state readout and exit in one control. Warn-toned because it reports a divergence
+   between what the author sees and what the game ships — see the export warning that pairs with
+   it — without escalating to danger, since nothing is broken. */
+pix3-peek-strip .peek__pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: 2px;
+  padding: 3px 8px;
+  border: 1px solid var(--warn-soft);
+  border-radius: 999px;
+  background: var(--warn-soft);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+/* Reserved, not removed: `visibility` keeps the row's height so the chips above it never shift
+   when a mask is raised or cleared (see renderPill). `visibility: hidden` also takes the button out
+   of the tab order and the a11y tree on its own; `disabled` + `aria-hidden` in the template say so
+   explicitly. */
+pix3-peek-strip .peek__pill[data-idle='true'] {
+  visibility: hidden;
+}
+
+pix3-peek-strip .peek__pill:hover {
+  border-color: var(--warn);
+}
+
+pix3-peek-strip .peek__pill:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+pix3-peek-strip .peek__pill-action {
+  color: var(--fg-2);
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+pix3-peek-strip .peek__pill:hover .peek__pill-action {
+  color: var(--fg-0);
+}
+
+/* Inside a viewport (Studio and Vibe's scene view alike, since both render `pix3-editor-tab`):
+   a bottom-left overlay painted over the canvas, sitting with the transform-mode and zoom
+   overlays rather than with the toolbar chrome.
+
+   `pointer-events` is the same two-step the toolbar islands use — none on the positioned box so
+   the empty column never eats a drag on the canvas underneath, auto on `.peek` itself. Bottom-left
+   is chosen against the zoom overlay (bottom-right) and the transform overlay (top-left). */
+.viewport-host > pix3-peek-strip {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 6;
+  max-height: calc(100% - 24px);
+  overflow-y: auto;
+  scrollbar-width: none;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viewport-host > pix3-peek-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.viewport-host > pix3-peek-strip .peek {
+  pointer-events: auto;
+}

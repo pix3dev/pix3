@@ -520,6 +520,177 @@ describe('AgentToolRegistry', () => {
     });
   });
 
+  /**
+   * `peek` is the one tool that changes what the HUMAN sees rather than what the game is, so the
+   * cases here are all about that boundary staying legible: the reply must say it is editor-only,
+   * and every tool that reports what is on screen must name an active mask — otherwise the agent
+   * "fixes" a branch the person merely masked, or reads its absence from a screenshot as a bug.
+   */
+  describe('peek', () => {
+    const branch = (nodeId: string, label: string, hidden = false) => ({
+      nodeId,
+      label,
+      type: 'Group2D',
+      hidden,
+      dimmed: false,
+      soloed: false,
+    });
+
+    const peekStub = (branches: ReturnType<typeof branch>[]) => ({
+      getSnapshot: () => ({
+        branches,
+        hiddenCount: branches.filter(b => b.hidden).length,
+        soloActive: false,
+      }),
+    });
+
+    it('lists the branches and says the mask is editor-only', async () => {
+      const registry = buildRegistry({
+        sceneManager: activeSceneManager(),
+        peek: peekStub([branch('world', 'World'), branch('hud', 'HUD', true)]),
+      });
+
+      const result = (await registry.execute('peek', { action: 'list' })) as Record<
+        string,
+        unknown
+      >;
+
+      expect(result.ok).toBe(true);
+      expect((result.branches as { label: string }[]).map(b => b.label)).toEqual(['World', 'HUD']);
+      expect(String(result.note)).toMatch(/not in the scene file and not in the export/);
+      expect(String(result.note)).toMatch(/set_property/);
+    });
+
+    it('resolves branch names case-insensitively and dispatches a hide', async () => {
+      const dispatched: string[] = [];
+      const registry = buildRegistry({
+        sceneManager: activeSceneManager(),
+        peek: peekStub([branch('hud', 'HUD')]),
+        dispatcher: {
+          execute: (command: CommandMeta) => {
+            dispatched.push(command.metadata.id);
+            return Promise.resolve(true);
+          },
+        },
+      });
+
+      const result = (await registry.execute('peek', {
+        action: 'hide',
+        nodeNames: ['hud'],
+      })) as Record<string, unknown>;
+
+      expect(result.ok).toBe(true);
+      expect(dispatched).toEqual(['viewport.peek-hide']);
+    });
+
+    it('show_all needs no target, and hide refuses without one', async () => {
+      const dispatched: string[] = [];
+      const registry = buildRegistry({
+        sceneManager: activeSceneManager(),
+        peek: peekStub([branch('hud', 'HUD', true)]),
+        dispatcher: {
+          execute: (command: CommandMeta) => {
+            dispatched.push(command.metadata.id);
+            return Promise.resolve(true);
+          },
+        },
+      });
+
+      expect(
+        ((await registry.execute('peek', { action: 'show_all' })) as Record<string, unknown>).ok
+      ).toBe(true);
+      const refused = (await registry.execute('peek', { action: 'hide' })) as Record<
+        string,
+        unknown
+      >;
+
+      expect(dispatched).toEqual(['viewport.peek-show-all']);
+      expect(refused.ok).toBe(false);
+      expect(String(refused.error)).toMatch(/needs at least one branch/);
+    });
+
+    it('says so when a name is not a branch, instead of silently doing nothing', async () => {
+      const registry = buildRegistry({
+        sceneManager: activeSceneManager(),
+        peek: peekStub([branch('hud', 'HUD')]),
+        dispatcher: { execute: () => Promise.resolve(true) },
+      });
+
+      const result = (await registry.execute('peek', {
+        action: 'hide',
+        nodeNames: ['ScoreLabel'],
+      })) as Record<string, unknown>;
+
+      expect(result.unresolved).toEqual(['ScoreLabel']);
+      expect(String(result.unresolvedHint)).toMatch(/mask its branch/);
+    });
+
+    it('warns on a screenshot while a branch is masked', async () => {
+      const registry = buildRegistry({
+        viewportRenderer: {
+          captureScreenshot: () => ({
+            dataBase64: 'QUJD',
+            mimeType: 'image/jpeg',
+            width: 64,
+            height: 64,
+          }),
+        },
+        peek: peekStub([branch('hud', 'HUD', true)]),
+      });
+
+      const result = (await registry.execute('viewport_screenshot')) as Record<string, unknown>;
+
+      expect(result.peekHidden).toEqual(['HUD']);
+      expect(String(result.peekWarning)).toMatch(/do not "fix" them/);
+    });
+
+    it('stays absent from a screenshot when nothing is masked', async () => {
+      const registry = buildRegistry({
+        viewportRenderer: {
+          captureScreenshot: () => ({
+            dataBase64: 'QUJD',
+            mimeType: 'image/jpeg',
+            width: 64,
+            height: 64,
+          }),
+        },
+        peek: peekStub([branch('hud', 'HUD')]),
+      });
+
+      const result = (await registry.execute('viewport_screenshot')) as Record<string, unknown>;
+
+      expect(result.peekHidden).toBeUndefined();
+      expect(result.peekWarning).toBeUndefined();
+    });
+
+    it('reports the branch in scene_tree, and the node carries hiddenByEditor', async () => {
+      const hud = new NodeBase({ id: 'hud', name: 'HUD' });
+      hud.hiddenByEditor = true;
+      const registry = buildRegistry({
+        sceneManager: {
+          getActiveSceneGraph: () => ({
+            nodeMap: new Map([['hud', hud]]),
+            rootNodes: [hud],
+            version: '1.0.0',
+          }),
+          resolvePendingComponents: () => 0,
+        },
+        peek: peekStub([branch('hud', 'HUD', true)]),
+      });
+
+      const tree = (await registry.execute('scene_tree', { maxDepth: 2 })) as Record<
+        string,
+        unknown
+      >;
+
+      expect(tree.peekHidden).toEqual(['HUD']);
+      const children = tree.children as { hiddenByEditor?: boolean; visible: boolean }[];
+      expect(children[0].hiddenByEditor).toBe(true);
+      // The AUTHORED flag, which the mask does not touch — the agent must not "restore" it.
+      expect(children[0].visible).toBe(true);
+    });
+  });
+
   describe('read_skill', () => {
     it('returns a bundled skill by id', async () => {
       const registry = buildRegistry();

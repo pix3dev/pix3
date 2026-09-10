@@ -51,6 +51,36 @@ export class NodeBase extends Object3D {
   readonly pendingComponents: ComponentDefinition[] = [];
   /** Groups associated with this node */
   readonly groups: Set<string> = new Set();
+
+  /**
+   * The node's OWN authored visibility — what `visible: …` in the `.pix3scene` says and what a
+   * script means when it writes `node.visible = false`. Read it through {@link authoredVisible};
+   * `visible` itself is an accessor that folds in the editor's Peek mask (see the
+   * `Object.defineProperty` block below the class).
+   *
+   * Public because that accessor lives on the prototype, outside the class body — a `private`
+   * field would be unreachable from there. Not part of the runtime's supported surface.
+   *
+   * @internal
+   */
+  _selfVisible = true;
+
+  /**
+   * Editor Peek mask: "the author does not want to look at this right now". Set by the editor's
+   * `PeekService` on branch ROOTS only (three.js already skips a hidden subtree at render time) and
+   * pushed into a play session via {@link import('../core/SceneRunner').SceneRunner.setEditorPeekMask}.
+   *
+   * **Never serialized.** It is per-user session state, not scene content: `SceneSaver` reads
+   * `properties.visible` / {@link authoredVisible}, both of which this flag leaves untouched, so a
+   * masked scene saves byte-for-byte identically to an unmasked one. It also does not survive
+   * serialize→parse, which is why a play clone has to be told the mask from outside.
+   *
+   * This is the ONLY Peek flag the runtime carries, and it is here for two reasons the editor
+   * cannot supply: the `visible` accessor below reads it, and a play clone has to honour it. Peek's
+   * other channel — the "solo" fade — is editor-viewport-only and lives editor-side in
+   * `src/services/viewport/peek-gating.ts`.
+   */
+  hiddenByEditor = false;
   private readonly _signals: Map<string, Set<SignalConnection>> = new Map();
   private _disposed = false;
 
@@ -376,6 +406,16 @@ export class NodeBase extends Object3D {
       node = node.parent;
     }
     return true;
+  }
+
+  /**
+   * The node's own authored visibility, with the editor's Peek mask factored OUT.
+   *
+   * This is the value that belongs in a scene file, a state snapshot, or an agent's report of what
+   * the author set — `visible` answers the different question "would this draw right now".
+   */
+  get authoredVisible(): boolean {
+    return this._selfVisible;
   }
 
   /**
@@ -746,10 +786,15 @@ export class NodeBase extends Object3D {
             description: 'Whether the node is visible in the viewport',
             group: 'Editor',
           },
-          getValue: (node: unknown) => (node as NodeBase).visible,
+          // Authored value, NOT the effective one: the Inspector must show (and round-trip) what
+          // the scene file says, never what the editor's Peek mask is currently doing to the view.
+          getValue: (node: unknown) => (node as NodeBase).authoredVisible,
           setValue: (node: unknown, value: unknown) => {
             const n = node as NodeBase;
             const v = !!value;
+            // The `visible` setter mirrors `properties.visible` itself; the explicit write stays so
+            // the intent is readable at the call site and so a node whose accessor was somehow not
+            // installed still records the authored value.
             n.visible = v;
             n.properties.visible = v;
           },
@@ -819,3 +864,56 @@ export class NodeBase extends Object3D {
     };
   }
 }
+
+/**
+ * `visible` as an accessor pair on the prototype: reads fold in the editor's Peek mask, writes go
+ * to the authored flag and mirror into `properties`.
+ *
+ * ## Why an accessor at all
+ *
+ * Peek needs one place where "would this draw" is computed, because everything downstream already
+ * reads `.visible`: three.js's own render walk (which skips a hidden subtree, so the flag only ever
+ * has to be stamped on a branch root), the editor's 2D proxy mirroring, viewport picking,
+ * {@link NodeBase.isVisibleInTree} — and through that, `UIControl2D`'s input gate, so a masked HUD
+ * stops eating taps instead of merely going invisible. The alternatives all leak: writing `visible`
+ * directly puts a session-local decision into the `.pix3scene` (Flow autosaves, so it would leave
+ * on its own) and clobbers the node's own flag, and `layers.mask = 0` has to be stamped on every
+ * descendant — async-GLTF meshes and `UIControl2D` labels included — while `isVisibleInTree` and
+ * picking would still read `.visible` and let the hidden thing take input.
+ *
+ * ## Why it is defined out here
+ *
+ * TypeScript refuses to override an inherited *property* (`Object3D.visible`) with an accessor
+ * inside a class body (TS2611). Defining it on the prototype is the same thing at runtime and
+ * type-checks, because the declared type is still the inherited `boolean`.
+ *
+ * ## The two sharp edges
+ *
+ * - **`Object3D`'s own constructor assigns `this.visible = true`** — a plain assignment, so it
+ *   reaches this setter *before* `NodeBase`'s constructor has created `this.properties`. Hence the
+ *   guard: at that point there is nothing to mirror into, and the authored value arrives moments
+ *   later from `properties.visible`.
+ * - **`Object3D.copy()` copies the EFFECTIVE value** (`this.visible = source.visible`), so cloning
+ *   a masked node would bake the mask into the clone's authored flag. Nothing in the runtime does
+ *   that today — `SceneRunner.startScene` clones by serialize→parse, which reads
+ *   `properties.visible` — and the play-mode mask is therefore handed to the clone from outside
+ *   (`SceneRunner.setEditorPeekMask`). New code that reaches for `clone()`/`copy()` on a live node
+ *   has to clear `hiddenByEditor` on the result.
+ */
+Object.defineProperty(NodeBase.prototype, 'visible', {
+  configurable: true,
+  enumerable: true,
+  get(this: NodeBase): boolean {
+    return this._selfVisible && !this.hiddenByEditor;
+  },
+  set(this: NodeBase, value: boolean) {
+    this._selfVisible = value;
+    // `reactive-schema-properties` cannot install its own `visible` accessor any more (there is no
+    // own data field left to replace), so this setter owns the mirroring the schema's `setValue`
+    // used to guarantee — that is what keeps `node.visible = false` from a game script landing in
+    // the saved scene.
+    if (this.properties !== undefined) {
+      this.properties.visible = value;
+    }
+  },
+});

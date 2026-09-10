@@ -108,6 +108,8 @@ import { CheckScriptsCommand } from '@/features/scripts/CheckScriptsCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
 import { SetTransformModeCommand } from '@/features/viewport/SetTransformModeCommand';
 import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
+import { PeekShowAllCommand } from '@/features/peek/PeekCommands';
+import { PeekService } from '@/services/viewport/PeekService';
 import { ToggleAxisGizmoCommand } from '@/features/viewport/ToggleAxisGizmoCommand';
 import { ToggleLayer2DCommand } from '@/features/viewport/ToggleLayer2DCommand';
 import { ToggleLayer3DCommand } from '@/features/viewport/ToggleLayer3DCommand';
@@ -175,6 +177,9 @@ import './pix3-editor-shell.ts.css';
 export class Pix3EditorShell extends ComponentBase {
   @inject(LayoutManagerService)
   private readonly layoutManager!: LayoutManagerService;
+
+  @inject(PeekService)
+  private readonly peekService!: PeekService;
 
   @inject(AuthService)
   private readonly authService!: AuthService;
@@ -479,6 +484,15 @@ export class Pix3EditorShell extends ComponentBase {
     const toggleCollisionShapesCommand = new ToggleCollisionShapesCommand();
     const toggleDirectionAxesCommand = new ToggleDirectionAxesCommand();
     const toggleNavigationModeCommand = new ToggleNavigationModeCommand();
+    // Only Show All goes into the menu: the other three Peek commands need a branch to act on and
+    // are driven from `pix3-peek-strip`. This one is the guaranteed way out of a masked state.
+    const peekShowAllCommand = new PeekShowAllCommand();
+    // Resolve PeekService here so its scene subscription and its localStorage restore happen at a
+    // known moment. `@inject` resolves lazily on first property access, and the first accessor was
+    // whatever happened to touch it — the View menu evaluating this command's preconditions, the
+    // Play button, an agent tool — so a persisted mask used to appear the instant the user opened a
+    // menu, which reads as the editor losing a branch by itself.
+    this.peekService.applyToActiveGraph();
 
     // Arrow-key nudge for selected 2D nodes (Shift = larger step).
     const nudgeCommands = (['up', 'down', 'left', 'right'] as const).flatMap(direction => [
@@ -549,6 +563,7 @@ export class Pix3EditorShell extends ComponentBase {
       toggleCollisionShapesCommand,
       toggleDirectionAxesCommand,
       toggleNavigationModeCommand,
+      peekShowAllCommand,
       ...nudgeCommands
     );
 

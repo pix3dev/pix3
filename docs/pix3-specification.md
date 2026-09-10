@@ -15,7 +15,7 @@ Date: 2026-09-10
 - Introduction · Key Features · Technology Stack · Architecture
 - Property Schema System · Script Component System
 - Group2D Sizing (Fit to Contents, Proportional Resize) · Project Templates, Target Platform and Agent Overlay
-- Autoload Scripts and Asset Browser Template Flow · Signals Engine · Groups Engine
+- Autoload Scripts and Asset Browser Template Flow · Signals Engine · Groups Engine · Editor Peek (View Mask)
 - Node Prefabs System · Keyframe Animation System · Localization (i18n) · UI Kit Assets
 - Scene File Format (\*.pix3scene) · MVP Plan · Non-Functional Requirements
 - Project Structure · Roadmap and Milestones · Change Log
@@ -763,6 +763,64 @@ root:
     name: Player
     groups: [actors, player]
 ```
+
+## 6.19a Editor Peek (View Mask)
+
+Peek is the editor's answer to "let me see what is UNDER this" — three stacked UI screens, a HUD over
+the world. It is a **per-user, non-serializable view mask**, and the only reason it needs a spec
+section is to say what it is *not*: **no part of it belongs to the scene file format.**
+
+### 6.19a.1 What it is not
+
+| Mechanism | Answers | Why Peek is not it |
+| --- | --- | --- |
+| `visible` / `initiallyVisible` | authored and starting visibility of a node | serialized — an author's "let me peek under this" would ship |
+| `editorOnly` | annotation nodes: authored, stripped from play and export | about scene CONTENT, not about this session |
+| `groups` (§6.19) | runtime querying and `callGroup` | logic and queries, no visibility semantics |
+| `CanvasLayer2D`, `zIndex` | draw band and paint order | Peek changes draw order **never** |
+| "Show 2D" / "Show 3D" | viewport dimension filter | a filter over the whole viewport, not per branch |
+
+### 6.19a.2 Mechanism
+
+`NodeBase.visible` is an accessor (defined on the prototype, below the class) returning
+`authoredVisible && !hiddenByEditor`. `hiddenByEditor` is stamped by the editor's `PeekService` on
+**branch roots only** — three.js already skips a hidden subtree at render time — and every existing
+reader follows for free: the render walk, the editor's 2D proxy mirroring, viewport picking, and
+`isVisibleInTree()`, which is what `UIControl2D` gates input on, so a masked HUD stops taking taps
+instead of merely going invisible. A second flag, `dimmedByEditor`, drives the *solo* fade
+(rendered, faded back, not pickable) and is inherited by a walk (`isDimmedInTree()`) because a
+material property has no three.js cascade to lean on.
+
+Writes to `visible` set the authored flag and mirror `properties.visible`, which is what keeps
+`node.visible = false` from a game script persisting the way it always has.
+
+### 6.19a.3 Where the state lives
+
+- **Not in `.pix3scene`.** With a mask active, `SceneSaver`'s output is byte-for-byte what it would
+  be without one (pinned by `packages/pix3-runtime/src/core/editor-peek.spec.ts`).
+- **Not in an export**, by construction: the mask lives in no file the build reads.
+- **Not shared in collaboration**: it is per-user. The price is that a collaborator's or the agent's
+  picture can differ from the author's, which is paid for by making the state visible — the
+  "N hidden · Show all" pill, `peekHidden`/`peekWarning` on every agent tool that reports what is on
+  screen, and a warning on Export / Download HTML.
+- **`appState.scenes.peekHiddenByScene` / `peekSoloByScene`**, mirrored to `localStorage` keyed by
+  the scene's file path so a reload does not force the author to re-hide everything.
+- **Outside undo.** The operation returns `didMutate` with no `commit`. Ctrl+Z after hiding the HUD
+  must undo the last *edit*, not restore the HUD; a chip is its own undo.
+
+### 6.19a.4 Play mode
+
+The mask stays live while the game runs — that is the headline use case. A play graph is a
+serialize→parse clone, so it cannot carry the flags: the editor pushes them in with
+`SceneRunner.setEditorPeekMask(ids)`, which the runner re-applies on every start and restart (in
+Flow the stage restarts after each agent turn).
+
+### 6.19a.5 Branches
+
+Phase 0 adds no taxonomy. The toggleable branches are derived from structure the scene already has:
+top-level nodes — one level deeper when there is a single root — plus any prefab instance root or
+`CanvasLayer2D` met on those levels. Identity is `node.id` (stable in the file), so a rename keeps
+the mask and a deletion silently drops it.
 
 ## 6.20 Node Prefabs System
 

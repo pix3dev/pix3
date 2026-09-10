@@ -32,6 +32,22 @@ The foundation class for all nodes in Pix3. Every node inherits from `NodeBase`,
 | `locked` | boolean | Lock for editing |
 | `instancePath` | string | Path to source file |
 
+**`visible` is an accessor, and it has a second input.** Reading it answers "would this draw right
+now" — `authoredVisible && !hiddenByEditor`, where `hiddenByEditor` is the editor's per-user Peek
+view mask (never serialized, never exported; see
+[pix3-specification.md](pix3-specification.md) → "Editor Peek (View Mask)"). Writing it sets the
+authored flag and mirrors `properties.visible`, so a script's `node.visible = false` persists exactly
+as it always has.
+
+| Member | Meaning |
+|--------|---------|
+| `node.visible` | Effective: authored AND not Peek-masked. What the renderer, picking and `isVisibleInTree()` use. |
+| `node.authoredVisible` | The author's own flag — the value that belongs in a scene file, a state snapshot, or a report of what was authored. |
+| `node.hiddenByEditor` | The Peek mask. Editor-owned; a play clone is told it via `SceneRunner.setEditorPeekMask(ids)`. |
+
+Reach for `authoredVisible` wherever the AUTHORED value is meant; `Object3D.clone()`/`copy()` copy
+the effective value, so a clone of a masked node needs `hiddenByEditor` cleared.
+
 ---
 
 ## 2D Nodes

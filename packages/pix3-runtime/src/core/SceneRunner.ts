@@ -445,6 +445,9 @@ export class SceneRunner {
 
     this.runtimeGraph.rootNodes = this.stripEditorOnly(this.runtimeGraph.rootNodes);
     this.applyInitialVisibility(this.runtimeGraph.rootNodes);
+    // After initial visibility, never before: `initiallyVisible` is authored game state and must be
+    // free to say `true` for a node the author is merely not looking at.
+    this.applyEditorPeekMask(this.runtimeGraph.rootNodes);
 
     // Attach InputService to renderer
     this.inputService.attach(this.renderer.domElement);
@@ -1993,6 +1996,51 @@ export class SceneRunner {
   private isEditorOnly(node: NodeBase): boolean {
     const properties = node.properties as Record<string, unknown> | undefined;
     return this.toBooleanLike(properties?.editorOnly) === true;
+  }
+
+  /**
+   * Node ids the editor's Peek mask hides, or null when nothing is masked.
+   *
+   * Handed in from outside because the mask lives nowhere a scene can carry it: `hiddenByEditor` is
+   * not serialized, and a play graph is a serialize→parse clone of the authored one, so the flags
+   * on the authored nodes cannot reach it. Kept on the runner (not applied once and forgotten) so
+   * every restart re-applies it — in Flow the stage restarts after each agent turn, and a mask that
+   * silently evaporated there would read as the agent un-hiding things.
+   */
+  private editorPeekMask: ReadonlySet<string> | null = null;
+
+  /**
+   * Tell this runner which nodes the author has Peek-hidden in the editor.
+   *
+   * Editor-only: exported games never call it (the mask does not live in any file), and it does not
+   * touch `visible` / `properties.visible`, so it cannot be mistaken for authored state.
+   * Applied immediately when a scene is already running, and on every subsequent start/restart.
+   */
+  setEditorPeekMask(nodeIds: Iterable<string> | null): void {
+    const ids = nodeIds ? new Set(nodeIds) : null;
+    this.editorPeekMask = ids && ids.size > 0 ? ids : null;
+    if (this.runtimeGraph) {
+      this.applyEditorPeekMask(this.runtimeGraph.rootNodes);
+    }
+  }
+
+  /**
+   * Stamp {@link editorPeekMask} onto a freshly built runtime graph.
+   *
+   * Every node is visited and assigned (rather than only the masked ones being set) so a mask that
+   * shrank clears the flags a previous mask left on a re-used graph.
+   */
+  private applyEditorPeekMask(nodes: readonly NodeBase[]): void {
+    const mask = this.editorPeekMask;
+    for (const node of nodes) {
+      node.hiddenByEditor = mask !== null && mask.has(node.nodeId);
+      const childNodes = node.children.filter(
+        (child): child is NodeBase => child instanceof NodeBase
+      );
+      if (childNodes.length > 0) {
+        this.applyEditorPeekMask(childNodes);
+      }
+    }
   }
 
   private applyInitialVisibility(nodes: NodeBase[]): void {

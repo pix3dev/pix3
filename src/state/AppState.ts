@@ -110,6 +110,22 @@ export interface ScenesState {
   navigation2DCameraStates: Record<string, CameraState>;
   /** Per-scene camera node used for the viewport preview inset. */
   previewCameraNodeIds: Record<string, string | null>;
+
+  /**
+   * Editor Peek: node ids the author has masked out of their own view, keyed by scene id.
+   *
+   * Per-user, non-serializable, outside undo. It never reaches the `.pix3scene` (that is the whole
+   * point — see `docs/pix3-specification.md`, "Editor Peek") and it is not shared in collab; it is
+   * mirrored to `localStorage` by `PeekService` so a reload does not force the author to re-hide
+   * everything. Ids rather than names, so renaming a node keeps the mask and deleting one drops it.
+   */
+  peekHiddenByScene: Record<string, string[]>;
+
+  /**
+   * Editor Peek solo: the branch ids currently soloed, keyed by scene id. Everything outside the
+   * set is faded, not hidden — an empty/absent entry means no solo is active.
+   */
+  peekSoloByScene: Record<string, string[]>;
 }
 
 export interface AnimationDescriptor {
@@ -586,6 +602,8 @@ export const createInitialAppState = (): AppState => ({
     editorCameraStates: {},
     navigation2DCameraStates: {},
     previewCameraNodeIds: {},
+    peekHiddenByScene: {},
+    peekSoloByScene: {},
   },
   animations: {
     activeAnimationId: null,

@@ -193,11 +193,12 @@ export class ViewportScreenshotter {
 
   /**
    * Run `fn` with every node OUTSIDE the keep-set (the targets, their descendants
-   * and their ancestors) hidden, then restore original visibility. Used to capture
-   * a node unobstructed by foreground content. 3D nodes are hidden by their own
-   * `visible` flag (hides the subtree); 2D nodes by hiding their proxy visual root
-   * (the editor draws proxies, not the runtime nodes). Ancestors stay visible so
-   * inherited transforms and nested 2D visual roots survive.
+   * and their ancestors) hidden, then restore. Used to capture a node unobstructed
+   * by foreground content. Nodes are hidden through the editor Peek flag
+   * (`hiddenByEditor`, which folds into `visible` and cascades to the subtree);
+   * 2D nodes also get their proxy visual root hidden, since the editor draws
+   * proxies rather than the runtime nodes. Ancestors stay visible so inherited
+   * transforms and nested 2D visual roots survive.
    */
   private withNodeIsolation<T>(keepNodes: readonly NodeBase[], fn: () => T): T {
     const sceneGraph = this.deps.getActiveSceneGraph();
@@ -220,29 +221,43 @@ export class ViewportScreenshotter {
       }
     }
 
-    const saved = new Map<THREE.Object3D, boolean>();
-    const hide = (obj: THREE.Object3D): void => {
-      if (!saved.has(obj)) saved.set(obj, obj.visible);
-      obj.visible = false;
-    };
+    // NODES are hidden through `hiddenByEditor` — the same non-destructive channel Peek uses.
+    // Writing `node.visible` here would write `properties.visible` too (the setter mirrors it), so
+    // a framed screenshot would quietly stamp `visible: true` onto every node that had no authored
+    // value and the next save would ship it. The nodes already masked by Peek are left alone, so
+    // the restore below cannot un-hide them either.
+    const maskedNodes: NodeBase[] = [];
+    // PROXY roots are plain three.js Groups with no authored flag to protect, so they keep the
+    // save/restore. They are hidden explicitly rather than left to the per-frame proxy sync, which
+    // may not run between here and the capture.
+    const savedProxyVisibility = new Map<THREE.Object3D, boolean>();
 
     for (const node of sceneGraph.nodeMap.values()) {
       if (!(node instanceof NodeBase) || keep.has(node) || ancestors.has(node)) {
         continue;
       }
-      // 3D subtree hides via inherited visibility on the node object itself.
-      hide(node);
-      // 2D nodes render as separate proxy visuals — hide the proxy root too.
+      if (!node.hiddenByEditor) {
+        node.hiddenByEditor = true;
+        maskedNodes.push(node);
+      }
       if (node instanceof Node2D) {
         const visualRoot = this.deps.get2DVisualRoot(node.nodeId);
-        if (visualRoot) hide(visualRoot);
+        if (visualRoot) {
+          if (!savedProxyVisibility.has(visualRoot)) {
+            savedProxyVisibility.set(visualRoot, visualRoot.visible);
+          }
+          visualRoot.visible = false;
+        }
       }
     }
 
     try {
       return fn();
     } finally {
-      for (const [obj, visible] of saved) {
+      for (const node of maskedNodes) {
+        node.hiddenByEditor = false;
+      }
+      for (const [obj, visible] of savedProxyVisibility) {
         obj.visible = visible;
       }
     }

@@ -19,6 +19,7 @@ import './pix3-flow-side-panel';
 import './pix3-flow-scene-view';
 import './pix3-idea-doc';
 import './pix3-flow-shell.ts.css';
+import '@/ui/shared/pix3-peek-strip';
 
 const EMPTY_PLAN: FlowPlan = { pitch: null, title: null, steps: [] };
 
@@ -751,6 +752,13 @@ export class Pix3FlowShell extends ComponentBase {
         ${this.renderStageBar()}
         <div class="flow-stage__frame">
           <div class="flow-stage__host"></div>
+          <!-- Peek's chips over the running game, bottom-left — the same corner and the same column
+               as the viewport overlay in the scene view, so switching stage views does not move
+               them. Property binding, not an attribute: Lit's Boolean converter reads ANY present
+               attribute as true, so a solo-enabled="false" attribute would enable it. Solo is off here
+               because it fades the EDITOR's proxy materials, which the running game does not
+               use — hiding works in both places, so the stage keeps the half it can deliver. -->
+          <pix3-peek-strip .soloEnabled=${false}></pix3-peek-strip>
           ${this.renderStageOverlay()}
         </div>
       </main>

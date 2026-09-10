@@ -4,6 +4,10 @@ import { appState, type EditorCameraProjection, type NavigationMode } from '@/st
 import styles from './editor-tab.ts.css?raw';
 import dropdownButtonStyles from '@/ui/shared/pix3-dropdown-button.ts.css?raw';
 import visibilityPopoverStyles from './viewport-visibility-popover.ts.css?raw';
+// This component is Shadow DOM, so the Light-DOM stylesheet `pix3-peek-strip` imports for itself
+// cannot reach the strip mounted inside our shadow root — its rules have to be composed in here,
+// the same way the dropdown button's and the visibility popover's are.
+import peekStripStyles from '@/ui/shared/pix3-peek-strip.ts.css?raw';
 import {
   ViewportRendererService,
   type TransformMode,
@@ -65,6 +69,7 @@ import {
 } from './viewport-toolbar';
 import '../shared/pix3-dropdown-button';
 import './viewport-visibility-popover';
+import '@/ui/shared/pix3-peek-strip';
 
 /** Max gap (ms) between two clicks on the same node to count as a double-click. */
 const DOUBLE_CLICK_MS = 300;
@@ -437,6 +442,12 @@ export class EditorTabComponent extends ComponentBase {
                 this.iconService
               )
             : null}
+          <!-- Peek's branch chips: a bottom-left column INSIDE the canvas, like the transform and
+               zoom overlays beside it, not toolbar chrome. Deliberately outside the standalone
+               guard above, so Vibe's scene view gets it from here rather than mounting its own
+               copy; Studio has to carry it too (not a later PR) because the mask persists per
+               scene FILE and is therefore shared between the two workspaces. -->
+          ${isSceneTab ? html`<pix3-peek-strip></pix3-peek-strip>` : null}
         </div>
       </section>
     `;
@@ -1746,6 +1757,7 @@ export class EditorTabComponent extends ComponentBase {
     ${unsafeCSS(styles)}
     ${unsafeCSS(dropdownButtonStyles)}
     ${unsafeCSS(visibilityPopoverStyles)}
+    ${unsafeCSS(peekStripStyles)}
   `;
 }
 

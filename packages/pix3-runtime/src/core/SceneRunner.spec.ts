@@ -843,3 +843,105 @@ describe('SceneRunner start/stop race', () => {
     runner.stop();
   });
 });
+
+/**
+ * The editor's Peek mask cannot travel with the graph: it is not serialized, and a play graph is a
+ * serialize→parse clone of the authored one. So it is handed to the runner from outside and has to
+ * be re-applied by the runner itself on every start — in Flow the stage restarts after each agent
+ * turn, and a mask that quietly evaporated there would read as the agent un-hiding things.
+ */
+describe('SceneRunner editor Peek mask', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const buildRunner = (): SceneRunner => {
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1 as unknown as number);
+    return new SceneRunner(
+      createSceneManagerStub(),
+      createRendererStub(320, 160),
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'), new AudioService())
+    );
+  };
+
+  const buildGraph = (): { graph: SceneGraph; root: NodeBase; hud: NodeBase; label: NodeBase } => {
+    const root = new NodeBase({ id: 'root', name: 'Root' });
+    const hud = new NodeBase({ id: 'hud', name: 'HUD' });
+    const label = new NodeBase({ id: 'label', name: 'Score' });
+    hud.adoptChild(label);
+    root.adoptChild(hud);
+    return {
+      root,
+      hud,
+      label,
+      graph: {
+        version: '1.0.0',
+        metadata: {},
+        rootNodes: [root],
+        nodeMap: new Map([
+          [root.nodeId, root],
+          [hud.nodeId, hud],
+          [label.nodeId, label],
+        ]),
+      },
+    };
+  };
+
+  const run = (runner: SceneRunner, graph: SceneGraph): Promise<void> =>
+    (runner as unknown as { runGraph: (g: SceneGraph) => Promise<void> }).runGraph(graph);
+
+  it('applies the mask to a graph started after it was set, and again after a restart', async () => {
+    const runner = buildRunner();
+    runner.setEditorPeekMask(['hud']);
+
+    const first = buildGraph();
+    await run(runner, first.graph);
+    expect(first.hud.hiddenByEditor).toBe(true);
+    expect(first.label.hiddenByEditor).toBe(false);
+    expect(first.label.isVisibleInTree()).toBe(false);
+    // The mask must not be mistaken for authored state even inside the running clone.
+    expect(first.hud.authoredVisible).toBe(true);
+    expect(first.hud.properties.visible).toBeUndefined();
+
+    // A restart builds a brand-new clone; the runner re-applies the mask to it.
+    const second = buildGraph();
+    await run(runner, second.graph);
+    expect(second.hud.hiddenByEditor).toBe(true);
+
+    runner.stop();
+  });
+
+  it('applies a mask set while a scene is already running, and clears it again', async () => {
+    const runner = buildRunner();
+    const { graph, hud } = buildGraph();
+    await run(runner, graph);
+    expect(hud.hiddenByEditor).toBe(false);
+
+    runner.setEditorPeekMask(['hud']);
+    expect(hud.hiddenByEditor).toBe(true);
+
+    // Shrinking the mask has to clear the flags a previous one left behind.
+    runner.setEditorPeekMask(null);
+    expect(hud.hiddenByEditor).toBe(false);
+
+    runner.stop();
+  });
+
+  it('leaves initiallyVisible in charge of authored visibility', async () => {
+    const runner = buildRunner();
+    const { graph, hud } = buildGraph();
+    hud.properties.initiallyVisible = true;
+    hud.visible = false;
+    runner.setEditorPeekMask(['hud']);
+
+    await run(runner, graph);
+
+    // `initiallyVisible: true` won the authored flag back; the mask is still hiding the view.
+    expect(hud.authoredVisible).toBe(true);
+    expect(hud.hiddenByEditor).toBe(true);
+    expect(hud.visible).toBe(false);
+
+    runner.stop();
+  });
+});
