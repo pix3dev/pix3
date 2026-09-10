@@ -106,6 +106,13 @@ root:
             horizontalAlign: center
             verticalAlign: center
         children: []
+      # Settings modal — authored in scenes/ui/settings-window.pix3scene so this
+      # scene opens on the MENU, not on the modal. `visible: false` hides it in
+      # the EDITOR only; `initiallyVisible` (in the overlay file) is what play
+      # mode reads, and user:MenuFlow opens it at run time on SETTINGS. Tick the
+      # eye to preview it over the menu.
       - id: settings-window
         name: Settings Window
-        instance: res://scenes/settings-window.pix3scene
+        instance: res://scenes/ui/settings-window.pix3scene
+        properties:
+          visible: false

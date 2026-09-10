@@ -1,7 +1,14 @@
 # Pix3 Scene File (YAML)
 # Grid 3D — the carving board. The cubes are NOT authored here: GridBoard builds
 # them under `board-anchor` at start, so the board size is a tunable, not a
-# hand-edited tree. Everything else (camera, lights, HUD, end screen) is authored.
+# hand-edited tree. Everything else (camera, lights, HUD) is authored here; the
+# end screen lives in scenes/ui/result.pix3scene and is instanced in hidden
+# (`visible: false` = editor only), so this scene opens on the board.
+#
+# Stable node ids (design/recipe.md is the contract — do not rename these):
+#   game-root, main-camera, key-light, fill-light, board-anchor,
+#   hud-root, score-label, lives-bar,
+#   result-overlay, result-label, retry-button, menu-button (scenes/ui/result.pix3scene)
 version: 1.0.0
 metadata:
   author: Pix3 Template
@@ -150,91 +157,13 @@ root:
             horizontalAlign: center
             verticalAlign: top
         children: []
+      # Win/lose screen — authored in scenes/ui/result.pix3scene so this scene
+      # opens on the BOARD, not on an end card. `visible: false` hides it in the
+      # EDITOR only; `initiallyVisible` (in the overlay file) is what play mode
+      # reads, and GridRules reveals it on the win/lose transition. Tick the eye
+      # to preview it composited over the board.
       - id: result-overlay
-        type: Group2D
         name: Result Overlay
+        instance: res://scenes/ui/result.pix3scene
         properties:
-          width: 1080
-          height: 1920
-          initiallyVisible: false
-          layout:
-            enabled: true
-            horizontalAlign: stretch
-            verticalAlign: stretch
-        children:
-          - id: result-dim
-            type: ColorRect2D
-            name: Result Dim
-            properties:
-              width: 1080
-              height: 1920
-              color: "#0b0e14"
-              opacity: 0.78
-              transform:
-                position: [0, 0]
-                scale: [1, 1]
-                rotation: 0
-              layout:
-                enabled: true
-                horizontalAlign: stretch
-                verticalAlign: stretch
-            children: []
-          - id: result-label
-            type: Label2D
-            name: Result Label
-            properties:
-              label: "SHAPE REVEALED"
-              labelFontSize: 76
-              labelColor: "#3ee6c1"
-              labelAlign: center
-              transform:
-                position: [0, 220]
-                scale: [1, 1]
-                rotation: 0
-              layout:
-                enabled: true
-                horizontalAlign: center
-                verticalAlign: center
-            children: []
-          - id: retry-button
-            type: Button2D
-            name: Retry Button
-            properties:
-              width: 420
-              height: 130
-              label: "RETRY"
-              labelFontSize: 52
-              labelColor: "#0b0e14"
-              backgroundColor: "#3ee6c1"
-              hoverColor: "#63f0d3"
-              pressedColor: "#2bbfa0"
-              transform:
-                position: [0, -60]
-                scale: [1, 1]
-                rotation: 0
-              layout:
-                enabled: true
-                horizontalAlign: center
-                verticalAlign: center
-            children: []
-          - id: menu-button
-            type: Button2D
-            name: Menu Button
-            properties:
-              width: 420
-              height: 110
-              label: "MENU"
-              labelFontSize: 44
-              labelColor: "#f2f2f2"
-              backgroundColor: "#1b1f2a"
-              hoverColor: "#2a3040"
-              pressedColor: "#141821"
-              transform:
-                position: [0, -220]
-                scale: [1, 1]
-                rotation: 0
-              layout:
-                enabled: true
-                horizontalAlign: center
-                verticalAlign: center
-            children: []
+          visible: false

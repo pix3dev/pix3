@@ -14,6 +14,7 @@ Read it first; tools and agents grep it.
 ```
 scenes/menu.pix3scene       entry / export scene — PLAY transitions to the game
 scenes/main.pix3scene       the GAME (editor startup scene — iterate here)
+scenes/ui/result.pix3scene  win/lose overlay — instanced into main hidden
 scenes/prefabs/*.pix3scene  what the spawners instantiate
 scripts/PlayerController.ts how the avatar moves          (swap this file whole)
 scripts/Spawner.ts          timed instantiate + drift + despawn
@@ -23,6 +24,14 @@ scripts/GameRules.ts        score / lives / timer / win / lose / end flow
 scripts/MenuFlow.ts         menu PLAY button
 sprites/ph-*.png            near-white placeholders (tinted via core:tint)
 ```
+
+Full-screen UI lives in its own scene file, never inline in the game scene.
+`main.pix3scene` carries the end screen as a one-line `instance:` marked
+`visible: false` — that hides it in the **editor** only, so opening the project
+shows the game instead of a GAME OVER card. What play mode reads is
+`initiallyVisible`, authored in `scenes/ui/result.pix3scene`. Edit the overlay
+full-screen in its own tab (right-click → Open Prefab); tick the eye in
+`main.pix3scene` to preview it composited, and untick it before saving.
 
 ## The rule that keeps it workable
 

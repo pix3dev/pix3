@@ -1,0 +1,65 @@
+# Pix3 Scene File (YAML)
+# Playable 2D — the tap-to-start INTRO overlay, in its own file so the
+# game scene opens clean. `main.pix3scene` carries it as a one-line `instance:`
+# reference marked `visible: false`, which hides it in the EDITOR only.
+# `initiallyVisible: true` below is what play mode reads, so the gate is UP at
+# t=0 — in an ad container that first tap is what unlocks browser audio.
+# `user:GameFlow` hides it on the first tap.
+#
+# Edit it here, full-screen, in its own tab. To preview it composited over the
+# game, tick the eye on `intro-overlay` in main.pix3scene — just do not commit
+# that tick, or every iteration starts behind the dim again.
+#
+# Stable node ids (design/recipe.md is the contract — do not rename these):
+#   intro-overlay, intro-dim, intro-label
+version: 1.0.0
+metadata:
+  author: Pix3 Template
+  description: Intro overlay — dim plus a TAP TO START label
+root:
+  - id: intro-overlay
+    type: Group2D
+    name: Intro Overlay
+    properties:
+      width: 1080
+      height: 1920
+      initiallyVisible: true
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    children:
+      - id: intro-dim
+        type: ColorRect2D
+        name: Intro Dim
+        properties:
+          width: 1080
+          height: 1920
+          color: "#000000"
+          opacity: 0.65
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []
+      - id: intro-label
+        type: Label2D
+        name: Tap To Start
+        properties:
+          label: "TAP TO START"
+          labelFontSize: 72
+          labelColor: "#ffffff"
+          labelAlign: center
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        children: []

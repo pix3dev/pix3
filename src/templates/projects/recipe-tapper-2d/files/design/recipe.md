@@ -21,7 +21,7 @@ Same script names and roles as the other recipes — `Spawner`, `TouchRules`,
 | `spawner-hazards` | spawn band for the bad type; hosts `Spawner` |
 | `hud` | `CanvasLayer2D` overlay, hosts `ScoreHud` |
 | `score-label` / `time-label` / `lives-bar` / `menu-button` | HUD |
-| `result-overlay` / `result-label` / `retry-button` | end screen, hidden until the run ends |
+| `result-overlay` / `result-label` / `retry-button` | end screen in `scenes/ui/result.pix3scene`, instanced into main hidden (`visible: false` is editor-only) |
 
 Signals: `TouchRules` emits `touch-scored` / `touch-damaged` on `game-root`;
 `GameRules` answers `score-changed`, `lives-changed`, `time-changed`,

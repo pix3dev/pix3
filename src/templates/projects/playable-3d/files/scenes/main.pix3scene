@@ -3,6 +3,15 @@
 # layer with a tap-to-start intro overlay, a score/lives/time HUD, and an end
 # screen with a CTA button. `hud-root` carries all three components: GameFlow
 # (phases), GameRules (score/lives/win-lose) and ScoreHud (display only).
+#
+# Full-screen UI lives in its own file under scenes/ui/ and is instanced into
+# `hud-root` hidden (`visible: false` = editor only; `initiallyVisible` in the
+# overlay file is what play mode reads), so opening this scene shows the stage
+# rather than a dim or a CTA card:
+#   intro-overlay (intro-dim, intro-label)       scenes/ui/intro.pix3scene
+#   end-screen (end-dim, end-label, cta-button)  scenes/ui/end-screen.pix3scene
+# Instance children keep their ids, so `GameFlow`'s introNode/endNode,
+# `GameRules`' resultLabel and every `findNode` still resolve.
 version: 1.0.0
 metadata:
   author: Pix3 Template
@@ -201,121 +210,21 @@ root:
             horizontalAlign: right
             verticalAlign: top
         children: []
+      # Tap gate — authored in scenes/ui/intro.pix3scene so this scene opens on
+      # the GAME. `visible: false` hides it in the EDITOR only; `initiallyVisible`
+      # (in the overlay file) is what play mode reads. Tick the eye to preview it
+      # composited over the stage.
       - id: intro-overlay
-        type: Group2D
         name: Intro Overlay
+        instance: res://scenes/ui/intro.pix3scene
         properties:
-          width: 1080
-          height: 1920
-          layout:
-            enabled: true
-            horizontalAlign: stretch
-            verticalAlign: stretch
-        children:
-          - id: intro-dim
-            type: ColorRect2D
-            name: Intro Dim
-            properties:
-              width: 1080
-              height: 1920
-              color: "#000000"
-              opacity: 0.65
-              transform:
-                position: [0, 0]
-                scale: [1, 1]
-                rotation: 0
-              layout:
-                enabled: true
-                horizontalAlign: stretch
-                verticalAlign: stretch
-            children: []
-          - id: intro-label
-            type: Label2D
-            name: Tap To Start
-            properties:
-              label: "TAP TO START"
-              labelFontSize: 72
-              labelColor: "#ffffff"
-              labelAlign: center
-              transform:
-                position: [0, 0]
-                scale: [1, 1]
-                rotation: 0
-              layout:
-                enabled: true
-                horizontalAlign: center
-                verticalAlign: center
-            children: []
+          visible: false
+      # End screen — authored in scenes/ui/end-screen.pix3scene so this scene opens
+      # on the GAME. `visible: false` hides it in the EDITOR only; `initiallyVisible`
+      # (in the overlay file) is what play mode reads. Tick the eye to preview it
+      # composited over the stage.
       - id: end-screen
-        type: Group2D
         name: End Screen
+        instance: res://scenes/ui/end-screen.pix3scene
         properties:
-          width: 1080
-          height: 1920
-          initiallyVisible: false
-          layout:
-            enabled: true
-            horizontalAlign: stretch
-            verticalAlign: stretch
-        children:
-          - id: end-dim
-            type: ColorRect2D
-            name: End Dim
-            properties:
-              width: 1080
-              height: 1920
-              color: "#000000"
-              opacity: 0.75
-              transform:
-                position: [0, 0]
-                scale: [1, 1]
-                rotation: 0
-              layout:
-                enabled: true
-                horizontalAlign: stretch
-                verticalAlign: stretch
-            children: []
-          - id: end-label
-            type: Label2D
-            name: End Label
-            properties:
-              label: "GREAT RUN!"
-              labelFontSize: 84
-              labelColor: "#ffcf33"
-              labelAlign: center
-              transform:
-                position: [0, 220]
-                scale: [1, 1]
-                rotation: 0
-              layout:
-                enabled: true
-                horizontalAlign: center
-                verticalAlign: center
-            children: []
-          - id: cta-button
-            type: Button2D
-            name: CTA Button
-            properties:
-              width: 480
-              height: 140
-              label: "PLAY NOW"
-              labelFontSize: 56
-              labelColor: "#1a1a2e"
-              backgroundColor: "#ffcf33"
-              hoverColor: "#ffe066"
-              pressedColor: "#e6b800"
-              buttonAction: cta
-              transform:
-                position: [0, -120]
-                scale: [1, 1]
-                rotation: 0
-              layout:
-                enabled: true
-                horizontalAlign: center
-                verticalAlign: center
-            components:
-              - id: cta-action
-                type: user:CtaButton
-                enabled: true
-                config: {}
-            children: []
+          visible: false

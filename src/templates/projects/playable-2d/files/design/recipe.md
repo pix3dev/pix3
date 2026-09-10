@@ -21,8 +21,8 @@ build the middle. If the brief needs real mechanics, start from `recipe-arena-2d
 | `background` | full-screen `ColorRect2D` (palette background) |
 | `hero-sprite` | placeholder gameplay object, bobbing on a `core:Sine` |
 | `hud-label` | in-game text line |
-| `intro-overlay` → `intro-dim`, `intro-label` | the tap gate; the first tap hides it, starts the game, and unlocks browser audio |
-| `end-screen` → `end-dim`, `end-label`, `cta-button` | end screen, `initiallyVisible: false` |
+| `intro-overlay` → `intro-dim`, `intro-label` | the tap gate (`scenes/ui/intro.pix3scene`, instanced into main); the first tap hides it, starts the game, and unlocks browser audio |
+| `end-screen` → `end-dim`, `end-label`, `cta-button` | end screen (`scenes/ui/end-screen.pix3scene`, instanced into main), `initiallyVisible: false` |
 | `cta-button` | hosts `CtaButton` — `playable.gameEnd()` + a `[CtaButton] CTA clicked` log; the store call belongs to the ad network SDK, not to the template |
 
 `GameFlow.finish()` reveals the end screen; call it from your gameplay code for
@@ -66,9 +66,13 @@ before shipping: in an ad container that first tap is what unlocks browser audio
 ## Do not touch
 
 - The node ids above (rename `name`, never `id`).
-- `intro-overlay` must exist and be visible at start: the first tap is what
-  unlocks browser audio, so a playable without a gate ships silent.
-- `end-screen` must keep `initiallyVisible: false`.
+- `intro-overlay` must exist and be visible at start (`initiallyVisible: true` in
+  `scenes/ui/intro.pix3scene`): the first tap is what unlocks browser audio, so a
+  playable without a gate ships silent.
+- `end-screen` must keep `initiallyVisible: false` (in `scenes/ui/end-screen.pix3scene`).
+- The `visible: false` on both `instance:` nodes in `main.pix3scene` is an
+  editor-only hide so the scene opens on the game — keep it, and author
+  `initiallyVisible` in the overlay file, never as an instance override.
 - Do not import rapier — it would put a ~2 MB wasm payload in an ad bundle.
 
 ## Verify

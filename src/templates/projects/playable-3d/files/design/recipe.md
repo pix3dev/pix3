@@ -46,8 +46,8 @@ still and the one family that cannot render black for want of a light.
 | `score-label` | `SCORE n`, driven by the `score-changed` signal |
 | `time-label` | seconds — counts up with no time limit, down with one |
 | `lives-bar` | `Bar2D` fed by `lives-changed` |
-| `intro-overlay` → `intro-dim`, `intro-label` | the tap gate; the first tap hides it, starts the game, unlocks browser audio |
-| `end-screen` → `end-dim`, `end-label`, `cta-button` | end screen, hidden at start |
+| `intro-overlay` → `intro-dim`, `intro-label` | the tap gate (`scenes/ui/intro.pix3scene`, instanced into `hud-root`); the first tap hides it, starts the game, unlocks browser audio |
+| `end-screen` → `end-dim`, `end-label`, `cta-button` | end screen (`scenes/ui/end-screen.pix3scene`, instanced into `hud-root`), `initiallyVisible: false` |
 | `cta-button` | hosts `CtaButton` — `playable.gameEnd()` + a `[CtaButton] CTA clicked` log; the store call belongs to the ad network SDK, not to the template |
 
 End a run with `GameRules.finish(won)` — it writes the outcome text and dispatches
@@ -107,6 +107,10 @@ tunable — it lives under `material.color` and is edited with
 - **`GameFlow`'s `introNode` / `endNode` ids.** They address nodes by id: renaming a
   node without updating them breaks the phase machine silently. Same for `ScoreHud`'s
   `sourceNode` / label ids.
+- **The overlay instances.** `intro-overlay` / `end-screen` in `main.pix3scene` are
+  `instance:` nodes marked `visible: false` — an editor-only hide so the scene opens
+  on the stage. Keep it; `initiallyVisible` lives in the overlay file (`true` for
+  the gate, `false` for the end screen), never as an instance override.
 - **A second `registerGameDebug`.** `GameFlow` publishes the only one (rules' numbers
   merged in); a second silently replaces it. Add fields to that snapshot.
 

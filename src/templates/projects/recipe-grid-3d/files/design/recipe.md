@@ -40,7 +40,7 @@ Past ~8³ move to an `InstancedMesh3D` before you reach for prettier materials.
 | `hud-root` | 2D UI layer; hosts `ScoreHud` |
 | `score-label` | cleared-cube counter |
 | `lives-bar` | `Bar2D` driven by `lives-changed` |
-| `result-overlay` → `result-dim`, `result-label`, `retry-button`, `menu-button` | end screen, hidden at start |
+| `result-overlay` → `result-dim`, `result-label`, `retry-button`, `menu-button` | end screen; own file `scenes/ui/result.pix3scene`, instanced into main with `visible: false` (editor-only hide — `GridRules` shows it) |
 
 Signals, all emitted on `game-root` by `GridBoard` and consumed by `GridRules`:
 `board-built` (clearable, cores) · `cell-cleared` (remaining) · `core-hit`

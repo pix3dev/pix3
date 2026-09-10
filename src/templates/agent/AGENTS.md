@@ -23,6 +23,7 @@ as an exported single-file HTML.
 | `design/` | The game design document and reference images — **read these first** |
 | `pix3project.yaml` | Project manifest (viewport size, platform, quality, autoloads) — don't edit unless asked |
 | `scenes/*.pix3scene` | Scenes (YAML). `main.pix3scene` is the editor's startup scene (opened first, and what you iterate on). A build boots the **entry scene** = Project Settings → Default Export Scene Path, which may be a separate menu scene |
+| `scenes/ui/*.pix3scene` | Full-screen UI — end screens, pause/result cards, modals. One file each, instanced into its host scene (see rule 3) |
 | `scripts/*.ts` | Game scripts: `export class X extends Script` → referenced in scenes as `type: user:X` |
 | `sprites/`, `audio/` | Art and sound assets, referenced as `res://sprites/...` / `res://audio/...`. Other asset-type folders (`models/`, `fonts/`, `spine/`, `locales/`, …) are created as you add those assets |
 | `.claude/skills/` | Your skills: `pix3-game-dev` (engine capabilities, how to write scenes/scripts), `pix3-remote-preview` (running and debugging the game) |
@@ -38,22 +39,31 @@ as an exported single-file HTML.
 2. **Scenes are YAML** (`.pix3scene`): a `root:` list of nodes with `id`, `type`,
    `name`, `properties`, optional `components` (script components) and `children`.
    Prefabs are referenced with `instance: res://path.pix3scene` instead of `type`.
-3. **Scripts** live in `scripts/`, extend `Script` from `@pix3/runtime`, expose
+3. **Full-screen UI never goes inline in the gameplay scene.** A pause card, a
+   result screen, a shop modal gets its own file in `scenes/ui/`, and the host
+   scene references it as
+   `{ id: <id>, name: <Name>, instance: res://scenes/ui/<file>.pix3scene, properties: { visible: false } }`.
+   `visible: false` hides it in the **editor** only, so `main.pix3scene` keeps
+   opening on the game; what play mode reads is `initiallyVisible`, authored on
+   the overlay file's root node, and a script flips `visible` to reveal it. Do
+   not hide an overlay with `initiallyVisible` alone — that is a play-mode flag,
+   and the editor will still draw the thing over everything the user is editing.
+4. **Scripts** live in `scripts/`, extend `Script` from `@pix3/runtime`, expose
    config via `static getPropertySchema()`, and reach the engine through
    `this.scene` / `this.input` / `this.node`. Attach them in scene YAML under
    `components:` as `type: user:<ClassName>`. To move between scenes at runtime
    (menu → game → results), call
    `this.scene.changeScene('res://scenes/<name>.pix3scene', { transition: 'fade' })`.
-4. **Asset paths** always use the `res://` scheme relative to the project root. New
+5. **Asset paths** always use the `res://` scheme relative to the project root. New
    files go into the folder for their **asset type at the project root** — an image
    into `sprites/`, a model into `models/`, a sound into `audio/`, a Spine export
    (`.json`/`.skel` + `.atlas` + pages, kept together) into `spine/`. Subfolders inside
    those are fine (`sprites/ui/…`). Never introduce a wrapper folder such as
    `assets/` or `src/assets/`, and never leave an asset loose in the project root.
-5. **Missing art?** Use colored primitives (`ColorRect2D`, `GeometryMesh` with a
+6. **Missing art?** Use colored primitives (`ColorRect2D`, `GeometryMesh` with a
    material color) or the bundled logo as placeholders the user can swap later;
    note every placeholder you leave in your summary.
-6. **To run/verify the game**, follow `.claude/skills/pix3-remote-preview/` —
+7. **To run/verify the game**, follow `.claude/skills/pix3-remote-preview/` —
    if no preview session is available, ask the user to open the project in the
    Pix3 editor and press Play, then report what to check. **Stop the game when
    you're done** — after gathering the debug data/verification you need, stop

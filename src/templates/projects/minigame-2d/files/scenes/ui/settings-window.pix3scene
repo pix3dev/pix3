@@ -1,8 +1,20 @@
 # Pix3 Scene File (YAML)
-# Settings window prefab: a centered modal panel with Music/SFX checkboxes
-# (wired to the audio buses by user:SettingsWindow) and a CLOSE button.
+# Minigame 2D — the SETTINGS modal: a centered panel with Music/SFX checkboxes
+# (wired to the audio buses by user:SettingsWindow) and a CLOSE button. It lives
+# in its own file under scenes/ui/ so the menu scene opens clean. Host scenes
+# carry it as a one-line `instance:` reference marked `visible: false`, which
+# hides it in the EDITOR only; `initiallyVisible: false` on `settings-root`
+# below is what play mode reads, and `user:MenuFlow` shows it at run time.
+#
+# Edit it here, full-screen, in its own tab. To preview it composited over the
+# menu, tick the eye on `settings-window` in menu.pix3scene — just do not commit
+# that tick, or every iteration starts behind the settings modal again.
+#
 # Instance it from any scene:
-#   { id: settings-window, instance: res://scenes/settings-window.pix3scene }
+#   - id: settings-window
+#     instance: res://scenes/ui/settings-window.pix3scene
+#     properties:
+#       visible: false
 version: 1.0.0
 metadata:
   author: Pix3 Template

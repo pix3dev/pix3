@@ -9,6 +9,8 @@ anything, so you know what "working" looked like.
 
 - `scenes/menu.pix3scene` — entry scene; PLAY transitions to the board.
 - `scenes/main.pix3scene` — the board: camera, lights, `board-anchor`, HUD.
+- `scenes/ui/result.pix3scene` — the end screen (RETRY / MENU), instanced into
+  main hidden (`visible: false` is editor-only; `GridRules` shows it at run time).
 - `scripts/GridBoard.ts` — builds the cubes and turns a tap into a removal.
 - `scripts/GridRules.ts` — score, lives, win/lose, the debug provider.
 - `scripts/ScoreHud.ts`, `scripts/MenuFlow.ts` — display and menu, shared with

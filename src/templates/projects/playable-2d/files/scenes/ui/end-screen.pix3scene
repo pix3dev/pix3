@@ -1,0 +1,91 @@
+# Pix3 Scene File (YAML)
+# Playable 2D — the END screen (result + CTA), in its own file so the game
+# scene opens clean. `main.pix3scene` carries it as a one-line `instance:`
+# reference marked `visible: false`, which hides it in the EDITOR only;
+# `initiallyVisible: false` below is what play mode reads, and `user:GameFlow`
+# reveals it on `finish()`.
+#
+# Edit it here, full-screen, in its own tab. To preview it composited over the
+# game, tick the eye on `end-screen` in main.pix3scene — just do not commit
+# that tick, or every iteration starts behind a CTA card again.
+#
+# Stable node ids (design/recipe.md is the contract — do not rename these):
+#   end-screen, end-dim, end-label, cta-button
+version: 1.0.0
+metadata:
+  author: Pix3 Template
+  description: End screen — dim, result headline and a PLAY NOW CTA button
+root:
+  - id: end-screen
+    type: Group2D
+    name: End Screen
+    properties:
+      width: 1080
+      height: 1920
+      initiallyVisible: false
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+    children:
+      - id: end-dim
+        type: ColorRect2D
+        name: End Dim
+        properties:
+          width: 1080
+          height: 1920
+          color: "#000000"
+          opacity: 0.75
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []
+      - id: end-label
+        type: Label2D
+        name: End Label
+        properties:
+          label: "GREAT RUN!"
+          labelFontSize: 84
+          labelColor: "#ffcf33"
+          labelAlign: center
+          transform:
+            position: [0, 220]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        children: []
+      - id: cta-button
+        type: Button2D
+        name: CTA Button
+        properties:
+          width: 480
+          height: 140
+          label: "PLAY NOW"
+          labelFontSize: 56
+          labelColor: "#1a1a2e"
+          backgroundColor: "#ffcf33"
+          hoverColor: "#ffe066"
+          pressedColor: "#e6b800"
+          buttonAction: cta
+          transform:
+            position: [0, -120]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: center
+            verticalAlign: center
+        components:
+          - id: cta-action
+            type: user:CtaButton
+            enabled: true
+            config: {}
+        children: []

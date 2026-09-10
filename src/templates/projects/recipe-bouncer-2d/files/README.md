@@ -53,6 +53,7 @@ un-bloomed overlay band.
 ```
 scenes/menu.pix3scene         entry / export scene   (menu-post-fx, glowing title)
 scenes/main.pix3scene         the GAME (editor startup scene — iterate here)
+scenes/ui/result.pix3scene    win/lose overlay, instanced into main hidden (editor-only)
 scripts/ball-collision.ts     pure swept-collision math (unit-tested)
 scripts/BallBody.ts           ball motion; colliders from marker world transforms
 scripts/PaddleController.ts   input → paddle             (swap this for flippers)

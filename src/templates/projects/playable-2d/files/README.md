@@ -4,9 +4,9 @@ A Pix3 project created from the **Playable 2D** template — a portrait playable
 
 ## What's included
 
-- **Tap-to-start intro** (`intro-overlay`) — the first tap unlocks browser audio and starts the game (`scripts/GameFlow.ts`).
+- **Tap-to-start intro** (`intro-overlay`, `scenes/ui/intro.pix3scene`) — the first tap unlocks browser audio and starts the game (`scripts/GameFlow.ts`).
 - **Gameplay placeholder** — replace the animated logo sprite in `main.pix3scene` with your game.
-- **End screen with CTA** (`end-screen`) — the PLAY NOW button reports game end (`playable.gameEnd()`) and logs the click. It opens nothing: the ad network decides the store target at delivery time (`mraid.open` / `dapi.openStoreUrl`), so wire its SDK in `CtaButton.ctaClick()` when you package the ad.
+- **End screen with CTA** (`end-screen`, `scenes/ui/end-screen.pix3scene`) — the PLAY NOW button reports game end (`playable.gameEnd()`) and logs the click. It opens nothing: the ad network decides the store target at delivery time (`mraid.open` / `dapi.openStoreUrl`), so wire its SDK in `CtaButton.ctaClick()` when you package the ad.
 - `GameFlow` shows the end screen automatically after `autoWinAfterSec` seconds — replace that with your real win/lose condition.
 - **Readable state** — `GameFlow` publishes a `registerGameDebug` snapshot (phase, timer, overlay visibility, session end), so tooling reads the run's state instead of judging it from a screenshot. Add your own fields as you add state.
 - **Intent-first handlers** — every reaction to the player is a named method (`GameFlow.start/finish/restart`, `CtaButton.ctaClick`) that the event handler merely calls; keep that shape and the game stays drivable by intent.
@@ -19,6 +19,11 @@ A Pix3 project created from the **Playable 2D** template — a portrait playable
   `reachability.json` (controls proven reachable on a live run). The harness
   that runs them is still in development; format and location are fixed now.
 - `scenes/` — scene files; `main.pix3scene` is the startup scene
+- `scenes/ui/` — the full-screen overlays (`intro.pix3scene`, `end-screen.pix3scene`),
+  instanced into `main.pix3scene` with `visible: false` so the editor opens on the
+  game. That flag is editor-only; `initiallyVisible` on each overlay's root is what
+  play mode reads. Edit an overlay in its own tab, or tick the eye on its instance
+  node to preview it composited — just don't save that tick.
 - `sprites/` — images and textures
 - `scripts/` — game scripts (`export class X extends Script`, used as `user:X`)
 - `audio/` — music and sound effects

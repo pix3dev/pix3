@@ -30,7 +30,7 @@ canvas, never blooms).
 | `drain` | trigger box, kind `drain` — entering it loses a ball |
 | `ball` | hosts `BallBody` |
 | `hud` | `CanvasLayer2D` + `ScoreHud`: `score-label`, `time-label`, `lives-bar`, `menu-button` |
-| `result-overlay` / `result-label` / `retry-button` | end screen, hidden until a run ends |
+| `result-overlay` / `result-label` / `retry-button` | end screen in `scenes/ui/result.pix3scene`, instanced into main hidden (`visible: false` is editor-only) |
 
 `menu.pix3scene`: `menu-post-fx`, `menu-root`, `menu-background`, `menu-bg-glow`,
 `title-label` (title patched in), `title-rule`, `subtitle-label`, `play-button`.

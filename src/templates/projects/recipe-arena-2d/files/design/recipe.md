@@ -21,7 +21,7 @@ around a space while stuff comes at you" starts here.
 | `hud` | `CanvasLayer2D` overlay, hosts `ScoreHud` |
 | `score-label` / `time-label` / `lives-bar` | HUD widgets, signal-driven only |
 | `menu-button` | back to the menu scene |
-| `result-overlay` / `result-label` / `retry-button` | end screen, hidden until the run ends |
+| `result-overlay` / `result-label` / `retry-button` | end screen — authored in `scenes/ui/result.pix3scene`, instanced into `hud` with `visible: false` so the editor opens on the game; `initiallyVisible` and `GameRules` own it at run time |
 
 Signals: `TouchRules` emits `touch-scored` / `touch-damaged` on `game-root`;
 `GameRules` answers `score-changed`, `lives-changed`, `time-changed`,
@@ -98,6 +98,10 @@ and `enabled: false`, i.e. a button that can never be pressed (`game_observe` re
 ## Do not touch
 
 - The node ids above (rename `name`, never `id`), and the signal names.
+- `visible: false` on the `result-overlay` instance in `main.pix3scene`. Tick the
+  eye to preview the end screen over the field, but never save it on: it is what
+  keeps every iteration from starting behind a GAME OVER card. Run-time
+  visibility is `initiallyVisible` in `scenes/ui/result.pix3scene`, not this.
 - Component config on a **prefab instance** — the editor locks it. Prefabs carry
   fixed defaults only (their hitbox group); tunables live on plain nodes in
   `main.pix3scene`.

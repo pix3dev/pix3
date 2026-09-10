@@ -17,7 +17,8 @@ Read it first; tools and agents grep it.
 ## Layout
 
 ```
-scenes/main.pix3scene    the ONLY scene — the game. There is no menu on purpose.
+scenes/main.pix3scene    the game — open and build here. There is no menu on purpose.
+scenes/ui/result.pix3scene  win/lose overlay, instanced into main hidden (editor-only)
 scripts/GameRules.ts     score / lives / timer / win / lose / end flow / restart
 scripts/ScoreHud.ts      signals → HUD widgets (display only)
 design/recipe.md         the contract

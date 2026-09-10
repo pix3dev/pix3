@@ -12,6 +12,7 @@ extension points and what must not be renamed. Read it first.
 ```
 scenes/menu.pix3scene       entry / export scene — PLAY transitions to the game
 scenes/main.pix3scene       the GAME (editor startup scene — iterate here)
+scenes/ui/result.pix3scene  win/lose overlay, instanced into main hidden (editor-only)
 scenes/prefabs/*.pix3scene  what the spawners instantiate
 scripts/Spawner.ts          timed instantiate + drift + despawn
 scripts/TouchRules.ts       a tap → semantic signals

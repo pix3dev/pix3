@@ -16,10 +16,12 @@ while iterating and still ship the full menu → game flow in a build:
   Scene Path): a build and *Start Game* boot here so you can debug the whole flow.
   Driven by `scripts/MenuFlow.ts`: PLAY transitions to the game scene, SETTINGS
   opens the settings window.
-- **Settings window prefab** (`scenes/settings-window.pix3scene`) —
-  instanced into the menu; Music/SFX checkboxes mute the engine audio buses, wired
-  by `scripts/SettingsWindow.ts`. Reuse it from any scene via
-  `instance: res://scenes/settings-window.pix3scene`.
+- **Settings window** (`scenes/ui/settings-window.pix3scene`) — the modal,
+  in its own file so the menu opens clean. The menu carries it as a one-line
+  `instance: res://scenes/ui/settings-window.pix3scene` marked `visible: false`
+  (an editor-only hide; `MenuFlow` shows it at run time). Music/SFX checkboxes
+  mute the engine audio buses, wired by `scripts/SettingsWindow.ts`. Reuse it
+  from any scene the same way.
 
 Scenes switch at runtime with a fade transition:
 `this.scene.changeScene('res://scenes/main.pix3scene', { transition: 'fade' })`.
@@ -34,6 +36,8 @@ Scenes switch at runtime with a fade transition:
   fixed now so a routine written today keeps working.
 - `scenes/` — scene files; `main.pix3scene` (game) is the startup scene,
   `menu.pix3scene` is the build entry point
+- `scenes/ui/` — full-screen / modal overlays (`settings-window.pix3scene`),
+  instanced into host scenes with `visible: false`
 - `sprites/` — images and textures
 - `scripts/` — game scripts (`export class X extends Script`, used as `user:X`)
 - `audio/` — music and sound effects

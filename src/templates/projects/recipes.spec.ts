@@ -591,3 +591,119 @@ describe('idea-stage files a recipe may not ship', () => {
     }
   });
 });
+/**
+ * Where full-screen UI is allowed to live.
+ *
+ * The editor opens `scenes/main.pix3scene` for every project it creates or reopens
+ * (`ProjectService.STARTUP_SCENE_PATH`), so whatever that scene draws is the first thing anyone
+ * ever sees of their own game. Overlays used to be authored inline there carrying only
+ * `initiallyVisible: false` — but that is a PLAY-MODE flag (`SceneRunner.applyInitialVisibility`),
+ * not an editor one, so the editor still drew them: every new project opened onto a TAP TO START
+ * dim or a GAME OVER card, and the first thing anyone did was hunt through the tree switching
+ * nodes off by hand.
+ *
+ * The convention this enforces: an overlay is its own scene file under `scenes/ui/`, and a host
+ * scene carries it as an `instance:` marked `visible: false` — an editor-only hide, because
+ * `NodeBase` applies `properties.visible` at load while `applyInitialVisibility` overrides it from
+ * `initiallyVisible` the moment play starts. Both halves are asserted, because either one alone
+ * fails silently: an overlay left inline is invisible to the path check, and an instance without
+ * the flag is back to covering the game.
+ */
+describe('UI overlays live in their own scene file', () => {
+  interface RawNode {
+    id?: unknown;
+    type?: unknown;
+    instance?: unknown;
+    properties?: Record<string, unknown>;
+    children?: RawNode[];
+  }
+
+  /** `res://scenes/ui/result.pix3scene` → true; `res://scenes/prefabs/pickup.pix3scene` → false. */
+  const isOverlayPath = (value: unknown): boolean =>
+    typeof value === 'string' && value.replace(/^res:\/\//i, '').startsWith('scenes/ui/');
+
+  const readScene = (path: string): RawNode[] => {
+    const text = readFileSync(path, 'utf8').replaceAll('{{PROJECT_NAME}}', 'Test Project');
+    return ((parseYaml(text) as { root?: RawNode[] } | null)?.root ?? []) as RawNode[];
+  };
+
+  function* walkScene(roots: readonly RawNode[]): Generator<RawNode> {
+    for (const node of roots) {
+      yield node;
+      yield* walkScene(node.children ?? []);
+    }
+  }
+
+  const viewportOf = (templateDir: string): { width: number; height: number } => {
+    const meta = parseYaml(readFileSync(join(templateDir, 'template.yaml'), 'utf8')) as {
+      viewport?: { width?: number; height?: number };
+    } | null;
+    return { width: meta?.viewport?.width ?? 1080, height: meta?.viewport?.height ?? 1920 };
+  };
+
+  for (const templateId of GAMEPLAY_TEMPLATES) {
+    const templateDir = join(TEMPLATES_ROOT, templateId);
+
+    it(`${templateId}: every scenes/ui/ instance is hidden in the editor`, () => {
+      for (const scenePath of listSceneFiles(join(templateDir, 'files', 'scenes'))) {
+        for (const node of walkScene(readScene(scenePath))) {
+          if (!isOverlayPath(node.instance)) {
+            continue;
+          }
+          expect(
+            node.properties?.visible,
+            `${scenePath}: instance "${String(node.id)}" of ${String(node.instance)} does not ` +
+              'author `visible: false`, so the overlay covers this scene in the editor. That flag ' +
+              'is an editor-only hide — run-time visibility is `initiallyVisible`, in the overlay file.'
+          ).toBe(false);
+        }
+      }
+    });
+
+    it(`${templateId}: main.pix3scene authors no inline full-screen dimmer`, () => {
+      const mainPath = join(templateDir, 'files', 'scenes', 'main.pix3scene');
+      const { width, height } = viewportOf(templateDir);
+
+      for (const node of walkScene(readScene(mainPath))) {
+        if (node.type !== 'ColorRect2D' || typeof node.instance === 'string') {
+          continue;
+        }
+        const properties = node.properties ?? {};
+        const coversViewport =
+          Number(properties.width) >= width && Number(properties.height) >= height;
+        const opacity = properties.opacity === undefined ? 1 : Number(properties.opacity);
+        // A full-canvas rect at opacity 1 is the background; below 1 it is a scrim, and a scrim
+        // exists to sit over the game — which is exactly the thing this scene must not open on.
+        expect(
+          coversViewport && opacity < 1,
+          `${mainPath}: "${String(node.id)}" is a translucent full-screen ColorRect2D. A dimmer ` +
+            'belongs to an overlay scene under scenes/ui/, instanced back here with `visible: false`.'
+        ).toBe(false);
+      }
+    });
+
+    it(`${templateId}: every scenes/ui/ file is instanced by some scene`, () => {
+      const uiDir = join(templateDir, 'files', 'scenes', 'ui');
+      if (!existsSync(uiDir)) {
+        return;
+      }
+      const referenced = new Set<string>();
+      for (const scenePath of listSceneFiles(join(templateDir, 'files', 'scenes'))) {
+        for (const node of walkScene(readScene(scenePath))) {
+          if (typeof node.instance === 'string') {
+            referenced.add(node.instance.replace(/^res:\/\//i, ''));
+          }
+        }
+      }
+      for (const fileName of readdirSync(uiDir)) {
+        if (!fileName.endsWith('.pix3scene')) continue;
+        // An overlay nothing instances is dead weight the user still has to reason about — and
+        // the usual cause is a path that moved while its reference did not.
+        expect(
+          referenced,
+          `${templateId}: scenes/ui/${fileName} is instanced by no scene in the template`
+        ).toContain(`scenes/ui/${fileName}`);
+      }
+    });
+  }
+});

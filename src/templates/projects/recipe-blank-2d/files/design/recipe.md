@@ -25,14 +25,14 @@ lives bar, a timer, an end screen or a retry.
 | `board-floor` | the field's visible plate; its rect is the field's extent |
 | `hud` | `CanvasLayer2D` overlay, hosts `ScoreHud` |
 | `score-label` / `time-label` / `lives-bar` | HUD widgets, signal-driven only |
-| `result-overlay` / `result-dim` / `result-label` / `retry-button` | end screen, hidden until the run ends |
+| `result-overlay` / `result-dim` / `result-label` / `retry-button` | end screen, own file `scenes/ui/result.pix3scene`; instanced into main with `visible: false` (editor-only hide — `GameRules` shows it) |
 
 Signals on `game-root`: your mechanic emits `score-added` (amount) and
 `life-lost` (amount); `GameRules` answers `score-changed`, `lives-changed`,
 `time-changed`, and `game-won` / `game-lost`.
 
-There is **one scene** (`scenes/main.pix3scene`) and no menu — see Extension
-points if the game eventually needs one.
+There is **one gameplay scene** (`scenes/main.pix3scene`) and no menu — see
+Extension points if the game eventually needs one.
 
 ## Placeholders
 

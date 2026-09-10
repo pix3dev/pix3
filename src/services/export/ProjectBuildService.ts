@@ -671,8 +671,20 @@ export class ProjectBuildService {
     return /\.(pix3scene|prefab|pix3anim)$/i.test(path);
   }
 
+  /**
+   * A `.pix3scene` that is instantiated rather than navigated to.
+   *
+   * Two folder conventions say so, and pix3 has no formal scene/prefab marker to say it any other
+   * way: `prefabs/` (spawned by scripts) and `scenes/ui/` (full-screen overlays — an end screen, a
+   * pause card — which a host scene carries as a hidden `instance:` and a script reveals). Booting
+   * a build INTO one is never what anyone means, so they stay out of the navigable manifest and
+   * the entry-scene picker. `collectAssetPaths` still embeds them, which is what makes the
+   * `instance:` resolve at run time.
+   */
   private isPrefabPath(path: string): boolean {
-    return /(^|\/)prefabs\//i.test(path) || /\.prefab$/i.test(path);
+    return (
+      /(^|\/)prefabs\//i.test(path) || /\.prefab$/i.test(path) || /(^|\/)scenes\/ui\//i.test(path)
+    );
   }
 
   /**
