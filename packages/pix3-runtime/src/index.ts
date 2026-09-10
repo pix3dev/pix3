@@ -33,6 +33,7 @@ export * from './core/CutsceneApi';
 export * from './core/raycast';
 export * from './core/render-order-2d';
 export * from './core/configure-2d-texture';
+export * from './core/blend-mode-2d';
 export * from './core/project-texture-filtering';
 export * from './core/localization/localization-types';
 export * from './core/localization/LocalizationService';

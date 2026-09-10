@@ -8,6 +8,12 @@ import {
   setNodePropertyValue,
 } from '../fw/property-schema-utils';
 import { LAYER_2D } from '../constants';
+import {
+  applyBlendMode2DToMaterial,
+  normalizeBlendMode2D,
+  BLEND_MODE_2D_OPTIONS,
+  type BlendMode2D,
+} from '../core/blend-mode-2d';
 
 export type Node2DHorizontalAlign = 'left' | 'center' | 'right' | 'stretch';
 export type Node2DVerticalAlign = 'top' | 'center' | 'bottom' | 'stretch';
@@ -68,6 +74,7 @@ export interface Node2DProps extends Omit<NodeBaseProps, 'type'> {
   scale?: Vector2;
   rotation?: number; // degrees
   opacity?: number;
+  blendMode?: BlendMode2D;
   layout?: Node2DLayoutConfig;
   flow?: Node2DFlowConfig;
   zIndex?: number;
@@ -88,6 +95,7 @@ export class Node2D extends NodeBase {
   isCanvasLayer = false;
   private _opacity: number;
   private _computedOpacity: number;
+  private _blendMode: BlendMode2D;
   private _zIndex: number;
   private _zAsRelative: boolean;
   private _layoutEnabled: boolean;
@@ -144,6 +152,11 @@ export class Node2D extends NodeBase {
       this.properties.opacity = this._opacity;
     }
 
+    // Authored values arrive in `properties` (the loader hands the raw YAML bag
+    // to every node type), so reading them here covers every Node2D subclass.
+    this._blendMode = normalizeBlendMode2D(props.blendMode ?? this.properties.blendMode);
+    this.syncBlendModeProperty();
+
     // Draw-order override. Authored values arrive in `properties` (the loader
     // hands the raw YAML bag to every node type), so reading them here covers
     // every Node2D subclass without touching SceneLoader.
@@ -179,6 +192,47 @@ export class Node2D extends NodeBase {
 
   get computedOpacity(): number {
     return this._computedOpacity;
+  }
+
+  /**
+   * How this node's own visuals combine with what is already on screen
+   * (Godot `CanvasItem.blend_mode`). Applies to the materials this node owns —
+   * it is NOT inherited by child 2D nodes the way {@link opacity} is, so an
+   * additive glow on a sprite leaves its children alone.
+   *
+   * A non-normal mode opts the node's meshes out of the 2D quad batcher
+   * (`Batch2D` only merges runs that share the default blend).
+   */
+  get blendMode(): BlendMode2D {
+    return this._blendMode;
+  }
+
+  set blendMode(value: BlendMode2D) {
+    const next = normalizeBlendMode2D(value);
+    if (this._blendMode === next) {
+      return;
+    }
+    this._blendMode = next;
+    this.syncBlendModeProperty();
+    this.refreshBlendMode();
+  }
+
+  /** Re-applies the current blend mode to every managed material. */
+  public refreshBlendMode(): void {
+    for (const material of this.opacityMaterials) {
+      applyBlendMode2DToMaterial(material, this._blendMode);
+      // Keep `transparent` consistent with both inputs — the opacity pass owns
+      // that flag too, and the two must not fight over it.
+      this.applyOpacityToMaterial(material);
+    }
+  }
+
+  private syncBlendModeProperty(): void {
+    if (this._blendMode !== 'normal') {
+      this.properties.blendMode = this._blendMode;
+    } else {
+      delete this.properties.blendMode;
+    }
   }
 
   /**
@@ -690,6 +744,7 @@ export class Node2D extends NodeBase {
     }
 
     this.opacityMaterials.add(material);
+    applyBlendMode2DToMaterial(material, this._blendMode);
     this.applyOpacityToMaterial(material);
   }
 
@@ -701,6 +756,7 @@ export class Node2D extends NodeBase {
     }
 
     this.opacityMaterials.add(material);
+    applyBlendMode2DToMaterial(material, this._blendMode);
     this.applyOpacityToMaterial(material);
   }
 
@@ -713,7 +769,10 @@ export class Node2D extends NodeBase {
     material.opacity = baseOpacity * this._computedOpacity;
 
     const originalTransparent = material.userData.__pix3OriginalTransparent;
-    material.transparent = originalTransparent || material.opacity < 1;
+    // A non-normal blend needs `transparent`: three.js disables blending for an
+    // opaque material, so an additive sprite at full opacity would draw normal.
+    material.transparent =
+      originalTransparent || material.opacity < 1 || this._blendMode !== 'normal';
     material.needsUpdate = true;
   }
 
@@ -1124,6 +1183,22 @@ export class Node2D extends NodeBase {
           getValue: (node: unknown) => (node as Node2D).opacity,
           setValue: (node: unknown, value: unknown) => {
             (node as Node2D).opacity = Number(value);
+          },
+        },
+        {
+          name: 'blendMode',
+          type: 'select',
+          ui: {
+            label: 'Blend Mode',
+            description:
+              "How this node's own visuals combine with what is behind them. " +
+              'Not inherited by child nodes; a non-normal mode opts the node out of 2D batching',
+            group: 'Style',
+            options: BLEND_MODE_2D_OPTIONS,
+          },
+          getValue: (node: unknown) => (node as Node2D).blendMode,
+          setValue: (node: unknown, value: unknown) => {
+            (node as Node2D).blendMode = normalizeBlendMode2D(value);
           },
         },
         {

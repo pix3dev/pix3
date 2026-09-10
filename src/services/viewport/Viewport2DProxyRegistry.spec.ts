@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import * as THREE from 'three';
-import { AnimatedSprite2D, AssetLoader, type ResourceManager } from '@pix3/runtime';
+import { AnimatedSprite2D, AssetLoader, Sprite2D, type ResourceManager } from '@pix3/runtime';
 import { Viewport2DProxyRegistry } from '@/services/viewport/Viewport2DProxyRegistry';
 
 const RESOURCE_PATH = 'res://sprites/walk/walk.pix3anim';
@@ -187,5 +187,27 @@ describe('Viewport2DProxyRegistry — AnimatedSprite2D frame textures (§9.10)',
     expect(visualRoot.userData.animationTexturePath).toBe(FRAME_1);
     expect(materialOf(visualRoot).map?.name).toBe(`${FRAME_1}#v2`);
     expect(requestRender).toHaveBeenCalled();
+  });
+});
+
+describe('Viewport2DProxyRegistry — 2D blend mode', () => {
+  it('mirrors the node blend mode onto the proxy materials', () => {
+    const { registry } = createRegistry(sequenceResource());
+    const node = new Sprite2D({ id: 'glow', name: 'Glow' });
+    const visualRoot = registry.createSprite2DVisual(node);
+
+    registry.apply2DVisualMaterialState(node, visualRoot);
+    expect(materialOf(visualRoot).blending).toBe(THREE.NormalBlending);
+
+    node.blendMode = 'additive';
+    registry.apply2DVisualMaterialState(node, visualRoot);
+    const material = materialOf(visualRoot);
+    expect(material.blending).toBe(THREE.AdditiveBlending);
+    // three.js disables blending for an opaque material.
+    expect(material.transparent).toBe(true);
+
+    node.blendMode = 'normal';
+    registry.apply2DVisualMaterialState(node, visualRoot);
+    expect(materialOf(visualRoot).blending).toBe(THREE.NormalBlending);
   });
 });

@@ -385,7 +385,7 @@ describe('InspectorPanel compact object layout', () => {
     expect(panel.querySelector('.groups-popover')).not.toBeNull();
   });
 
-  it('orders object sections with Transform before Anchor and hides the standalone Style title', async () => {
+  it('orders object sections with Transform before Anchor and renames Anchor to Align', async () => {
     const { panel } = await setupInspectorForNode(
       new Group2D({
         id: 'group-root',
@@ -402,9 +402,12 @@ describe('InspectorPanel compact object layout', () => {
     expect(titles).toContain('Transform');
     expect(titles).toContain('Align');
     expect(titles).not.toContain('Anchor');
-    expect(titles).not.toContain('Style');
+    // Style holds two rows (Opacity + Blend Mode), so it keeps its heading; the
+    // titleless treatment is only for a group that renders a single control.
+    expect(titles).toContain('Style');
     expect(titles.indexOf('Transform')).toBeLessThan(titles.indexOf('Align'));
     expect(panel.textContent).toContain('Opacity');
+    expect(panel.textContent).toContain('Blend Mode');
     expect(panel.querySelector('.property-group--opacity')).not.toBeNull();
   });
 

@@ -52,6 +52,7 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
 | `rotation` | number | 0 | Rotation in degrees |
 | `scale` | Vector2 | (1, 1) | X and Y scale factors |
 | `opacity` | number | 1 | Local opacity multiplier, inherited by child 2D nodes |
+| `blendMode` | enum | normal | How the node's own visuals combine with the backdrop: `normal`, `additive`, `multiply`, `subtract`. NOT inherited by children |
 | `zIndex` | number | 0 | Draw-order override, `-4096..4096` (integer). Higher draws on top |
 | `zAsRelative` | boolean | true | Add `zIndex` to the parent's effective z instead of treating it as absolute |
 | `flow.enabled` | boolean | false | Stack this container's children in tree order instead of leaving them where they were authored |
@@ -76,6 +77,16 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
   `zAsRelative` (the default) a subtree keeps its internal layering wherever it is reparented; set
   it to `false` for an "always on top" overlay that must not inherit an ancestor's offset. Both
   fields serialize only when non-default, so scenes that never touch z-order are unchanged.
+- **Blend mode:** `blendMode` applies to the materials the node itself owns (a sprite's quad, a
+  control's skin + label) and is *not* inherited the way `opacity` is — set it on each node that
+  should glow, not on a wrapping `Group2D`. `additive` is the glow/VFX mode; `multiply` and
+  `subtract` darken, and because a transparent PNG's cutout pixels are usually black they will
+  darken through the cutout too. A non-normal mode forces `material.transparent` on (three.js
+  disables blending for opaque materials) and opts the node's meshes out of the 2D quad batcher,
+  so use it for the handful of nodes that need it rather than across a whole scene. `screen` is
+  intentionally not offered: it needs `CustomBlending`, and no factor pair reproduces it without
+  either ignoring `opacity` or darkening the backdrop as the node fades. Spine skeletons are
+  unaffected — their blend modes come per-slot from the spine runtime.
 
 ---
 
@@ -972,7 +983,7 @@ filter).
 | Node Type | Key Properties |
 |-----------|----------------|
 | NodeBase | id, name, type, visible, locked |
-| Node2D | position (Vector2), rotation, scale (Vector2) |
+| Node2D | position (Vector2), rotation, scale (Vector2), opacity, blendMode, zIndex |
 | Node3D | position (Vector3), rotation (Euler), scale (Vector3) |
 | Sprite2D | texturePath, width, height, color |
 | SpineSkeleton2D | skeletonPath, atlasPath, animation, loop, skin, timeScale, defaultMix (optional Spine runtime) |

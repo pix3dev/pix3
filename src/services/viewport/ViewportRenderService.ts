@@ -2542,7 +2542,7 @@ export class ViewportRendererService {
             if (sizeGroup) {
               sizeGroup.scale.set(node.width, node.height, 1);
             }
-            this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
+            this.proxyRegistry.apply2DVisualMaterialState(node, visualRoot);
           }
         } else if (node instanceof AnimatedSprite2D) {
           const visualRoot = this.proxyRegistry.animatedSprite2DVisuals.get(node.nodeId);
@@ -2567,7 +2567,7 @@ export class ViewportRendererService {
             if (sizeGroup) {
               sizeGroup.scale.set(node.width ?? 64, node.height ?? 64, 1);
             }
-            this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
+            this.proxyRegistry.apply2DVisualMaterialState(node, visualRoot);
           }
         } else if (node instanceof ColorRect2D) {
           const visualRoot = this.proxyRegistry.colorRect2DVisuals.get(node.nodeId);
@@ -2578,14 +2578,14 @@ export class ViewportRendererService {
               sizeGroup.scale.set(node.width, node.height, 1);
             }
             this.proxyRegistry.applyColorRect2DColor(node, visualRoot);
-            this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
+            this.proxyRegistry.apply2DVisualMaterialState(node, visualRoot);
           }
         } else if (node instanceof UIControl2D) {
           const visualRoot = this.proxyRegistry.uiControl2DVisuals.get(node.nodeId);
           if (visualRoot) {
             this.proxyRegistry.apply2DVisualTransform(node, visualRoot);
             this.proxyRegistry.applyUIControlSkinGeometry(node, visualRoot);
-            this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
+            this.proxyRegistry.apply2DVisualMaterialState(node, visualRoot);
           }
         }
         updateNode2DVisuals(node.children);
@@ -2926,7 +2926,7 @@ export class ViewportRendererService {
           sizeGroup.scale.set(node.width, node.height, 1);
         }
         visualRoot.visible = node.visible;
-        this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
+        this.proxyRegistry.apply2DVisualMaterialState(node, visualRoot);
       }
     } else if (node instanceof AnimatedSprite2D) {
       const visualRoot = this.proxyRegistry.animatedSprite2DVisuals.get(node.nodeId);
@@ -2998,7 +2998,7 @@ export class ViewportRendererService {
           }
         }
 
-        this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
+        this.proxyRegistry.apply2DVisualMaterialState(node, visualRoot);
       }
     } else if (node instanceof ColorRect2D) {
       const visualRoot = this.proxyRegistry.colorRect2DVisuals.get(node.nodeId);
@@ -3010,7 +3010,7 @@ export class ViewportRendererService {
         }
         visualRoot.visible = node.visible;
         this.proxyRegistry.applyColorRect2DColor(node, visualRoot);
-        this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
+        this.proxyRegistry.apply2DVisualMaterialState(node, visualRoot);
       }
     } else if (node instanceof UIControl2D) {
       const visualRoot = this.proxyRegistry.uiControl2DVisuals.get(node.nodeId);
@@ -3047,7 +3047,7 @@ export class ViewportRendererService {
         // editor shows an empty trough where play mode shows a filled bar.
         this.proxyRegistry.syncUIControlOverlays(node, visualRoot);
         this.proxyRegistry.updateUIControlLabelVisual(visualRoot, node);
-        this.proxyRegistry.apply2DVisualOpacity(node, visualRoot);
+        this.proxyRegistry.apply2DVisualMaterialState(node, visualRoot);
       }
     }
 

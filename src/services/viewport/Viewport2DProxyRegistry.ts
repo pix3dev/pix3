@@ -3,6 +3,7 @@ import type { AnimationFrame, AnimationResource } from '@pix3/runtime';
 import { AnimatedSprite2D, resolveAnimatedSpriteFrameLayout } from '@pix3/runtime';
 import { NodeBase } from '@pix3/runtime';
 import { Node2D } from '@pix3/runtime';
+import { blendingForMode2D, normalizeBlendMode2D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
 import {
   findAnimationClip,
@@ -520,7 +521,7 @@ export class Viewport2DProxyRegistry {
     root.userData.isGroup2DVisualRoot = true;
     root.userData.nodeId = node.nodeId;
     root.userData.sizeGroup = sizeGroup;
-    this.apply2DVisualOpacity(node, root);
+    this.apply2DVisualMaterialState(node, root);
 
     return root;
   }
@@ -631,7 +632,7 @@ export class Viewport2DProxyRegistry {
     root.userData.spriteMesh = mesh;
     root.userData.anchorMarker = anchorMarker;
     root.userData.texturePath = node.getEffectiveTexturePath() ?? null;
-    this.apply2DVisualOpacity(node, root);
+    this.apply2DVisualMaterialState(node, root);
 
     return root;
   }
@@ -681,7 +682,7 @@ export class Viewport2DProxyRegistry {
     root.userData.nodeId = node.nodeId;
     root.userData.sizeGroup = sizeGroup;
     root.userData.colorRectMesh = mesh;
-    this.apply2DVisualOpacity(node, root);
+    this.apply2DVisualMaterialState(node, root);
 
     return root;
   }
@@ -951,7 +952,7 @@ export class Viewport2DProxyRegistry {
     root.userData.geometrySignature = this.tiledSprite2DSignature(node, texWidth, texHeight);
 
     this.applyTextureToTiledSprite2DVisual(node, root);
-    this.apply2DVisualOpacity(node, root);
+    this.apply2DVisualMaterialState(node, root);
 
     return root;
   }
@@ -1127,7 +1128,7 @@ export class Viewport2DProxyRegistry {
       mesh.position.set((0.5 - node.anchor.x) * node.width, (0.5 - node.anchor.y) * node.height, 0);
     }
 
-    this.apply2DVisualOpacity(node, visualRoot);
+    this.apply2DVisualMaterialState(node, visualRoot);
   }
 
   syncAnimatedSprite2DVisual(node: AnimatedSprite2D, visualRoot: THREE.Group): void {
@@ -1138,7 +1139,7 @@ export class Viewport2DProxyRegistry {
     // before sizing the quad.
     this.syncAnimatedSprite2DMaterial(node, visualRoot);
     this.applyAnimatedSprite2DFrameLayout(node, visualRoot);
-    this.apply2DVisualOpacity(node, visualRoot);
+    this.apply2DVisualMaterialState(node, visualRoot);
   }
 
   /**
@@ -1795,7 +1796,7 @@ export class Viewport2DProxyRegistry {
     // After the root exists: the load callback needs it to record the skin's
     // natural size and re-cut a 9-slice patch.
     this.applyTextureTo2DMaterial(node, material, root);
-    this.apply2DVisualOpacity(node, root);
+    this.apply2DVisualMaterialState(node, root);
 
     return root;
   }
@@ -2430,8 +2431,15 @@ export class Viewport2DProxyRegistry {
     return Math.max(0, Math.min(1, effective));
   }
 
-  apply2DVisualOpacity(node: Node2D, visualRoot: THREE.Object3D): void {
+  /**
+   * Mirrors the runtime's per-node material state (opacity + blend mode) onto
+   * the editor's proxy visuals. The viewport does NOT render the runtime nodes,
+   * so anything `Node2D` applies to its own materials has to be reproduced here
+   * or the canvas disagrees with play mode.
+   */
+  apply2DVisualMaterialState(node: Node2D, visualRoot: THREE.Object3D): void {
     const nodeOpacity = this.getEffective2DOpacity(node);
+    const blendMode = normalizeBlendMode2D(node.blendMode);
 
     visualRoot.traverse(obj => {
       const applyToMaterial = (material: THREE.Material): void => {
@@ -2454,7 +2462,17 @@ export class Viewport2DProxyRegistry {
 
         material.opacity = baseOpacity * nodeOpacity;
         material.transparent =
-          material.userData.originalTransparent || material.opacity < 1 || baseOpacity < 1;
+          material.userData.originalTransparent ||
+          material.opacity < 1 ||
+          baseOpacity < 1 ||
+          blendMode !== 'normal';
+        // Only touch `blending` for a material this pass owns. Spine's batch
+        // meshes carry per-slot blend modes assigned by the spine runtime, and
+        // stamping NormalBlending over them would flatten an additive slot.
+        if (blendMode !== 'normal' || material.userData.pix3BlendModeApplied === true) {
+          material.userData.pix3BlendModeApplied = blendMode !== 'normal';
+          material.blending = blendingForMode2D(blendMode);
+        }
         material.needsUpdate = true;
       };
 
