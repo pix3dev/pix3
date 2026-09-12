@@ -6,7 +6,11 @@ import type {
   PreviewPlayModeStatus,
 } from '@/core/remote-preview/protocol';
 import { LoggingService, type LogLevel } from '@/services/core/LoggingService';
-import type { ProfilerSessionSnapshot } from '@/services/play/ProfilerSessionService';
+import {
+  createEmptyFrameStabilitySnapshot,
+  createEmptyOverheadComparison,
+  type ProfilerSessionSnapshot,
+} from '@/services/play/ProfilerSessionService';
 
 export interface RemotePlayerTelemetry {
   readonly clientId: string;
@@ -95,15 +99,27 @@ export class RemotePreviewTelemetryService {
     const running = entry.connected && sample !== null;
     return {
       status: running ? 'running' : entry.playModeStatus === 'loading' ? 'starting' : 'idle',
+      // A remote device is driven by its own player, not by this editor's Profiler
+      // panel, so there is no local work to pause and no A/B to run against it.
+      paused: false,
+      overhead: createEmptyOverheadComparison(),
       performance: {
         fps: sample?.fps ?? null,
         frameTimeMs: sample?.frameMs ?? null,
         logicMs: sample?.logicMs ?? null,
         renderMs: sample?.renderMs ?? null,
+        // The remote telemetry protocol carries 1 Hz aggregates only; the honest
+        // per-frame diagnostics (unaccounted time, rAF lateness, program count)
+        // are local-session fields, so they stay null rather than being faked
+        // from an average. The Device section shows what the remote does report.
+        unaccountedMs: null,
+        rafLatenessMs: null,
         drawCalls: sample?.drawCalls ?? null,
         triangles: sample?.triangles ?? null,
         geometries: sample?.geometries ?? null,
         textures: sample?.textures ?? null,
+        shaderPrograms: null,
+        shaderProgramsAdded: null,
         jsHeapUsedMb: sample?.jsHeapUsedMb ?? null,
       },
       counters: {
@@ -116,6 +132,14 @@ export class RemotePreviewTelemetryService {
         frameTimeMs: [...entry.frameTimeHistory],
         logicMs: [...entry.logicHistory],
         renderMs: [...entry.renderHistory],
+        unaccountedMs: [],
+      },
+      frameStability: createEmptyFrameStabilitySnapshot(),
+      longFrames: {
+        supported: false,
+        count: 0,
+        worstDurationMs: null,
+        worst: [],
       },
       frameImpact: {
         activities: [],

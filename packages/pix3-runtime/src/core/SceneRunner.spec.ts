@@ -35,6 +35,7 @@ function createRendererStub(width: number, height: number): RuntimeRenderer {
       lines: 0,
       geometries: 0,
       textures: 0,
+      programs: 0,
     })),
   } as unknown as RuntimeRenderer;
 }
@@ -184,24 +185,32 @@ describe('SceneRunner camera projection updates', () => {
     expect(camera.aspect).toBe(2);
   });
 
-  it('includes per-frame profiler activities in frame samples and resets missing reports', () => {
+  it('includes per-frame profiler activities in frame samples, resets missing reports and reuses unchanged heavy payloads', () => {
     const renderer = createRendererStub(320, 160);
+    const getActivePlaybackSnapshot = vi
+      .fn()
+      .mockReturnValueOnce([
+        {
+          id: 'playback-17',
+          label: 'hitStone',
+          startedAtMs: 1000,
+          elapsedMs: 125,
+          loop: false,
+          volume: 0.35,
+          playbackRate: 1.05,
+          pan: -0.1,
+        },
+      ])
+      .mockReturnValueOnce([]);
     const audioService = {
-      getActivePlaybackSnapshot: vi
+      getActivePlaybackSnapshot,
+      // The runner re-snapshots audio only when this changes (or on its 10 Hz
+      // refresh, frozen below): tick 2 sees no change, tick 3 does.
+      getActivePlaybackRevision: vi
         .fn()
-        .mockReturnValueOnce([
-          {
-            id: 'playback-17',
-            label: 'hitStone',
-            startedAtMs: 1000,
-            elapsedMs: 125,
-            loop: false,
-            volume: 0.35,
-            playbackRate: 1.05,
-            pan: -0.1,
-          },
-        ])
-        .mockReturnValueOnce([]),
+        .mockReturnValueOnce(1)
+        .mockReturnValueOnce(1)
+        .mockReturnValue(2),
       stopAll: vi.fn(),
       resetBuses: vi.fn(),
       applySnapshot: vi.fn(),
@@ -239,17 +248,25 @@ describe('SceneRunner camera projection updates', () => {
 
     vi.spyOn(runnerInternals.clock, 'getDelta').mockReturnValue(1 / 60);
     vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1);
+    // Freeze the wall clock so the heavy-payload refresh (100 ms cadence) fires
+    // on the first sample only; later samples must rely on the revision counter.
+    const nowSpy = vi.spyOn(performance, 'now').mockReturnValue(5000);
 
     const samples: import('./SceneRunner').SceneRunnerFrameSample[] = [];
     runner.subscribeFrameStats(sample => {
       samples.push(sample);
     });
 
-    runnerInternals.tick();
-    cameraNode.removeComponent(reporter);
-    runnerInternals.tick();
+    try {
+      runnerInternals.tick();
+      cameraNode.removeComponent(reporter);
+      runnerInternals.tick();
+      runnerInternals.tick();
+    } finally {
+      nowSpy.mockRestore();
+    }
 
-    expect(samples).toHaveLength(2);
+    expect(samples).toHaveLength(3);
     expect(samples[0]?.profilerActivities).toEqual([
       { label: 'Physics', selfTimeMs: 1.5, totalTimeMs: 2.25 },
       { label: 'Audio', selfTimeMs: 0.25 },
@@ -266,8 +283,142 @@ describe('SceneRunner camera projection updates', () => {
         pan: -0.1,
       },
     ]);
+    // Reports are per frame: the reporter is gone, so the list is too.
     expect(samples[1]?.profilerActivities).toBeUndefined();
-    expect(samples[1]?.activeAudioPlaybacks).toBeUndefined();
+    // Unchanged active set + no cadence refresh ⇒ the SAME array is reused, not rebuilt.
+    expect(samples[1]?.activeAudioPlaybacks).toBe(samples[0]?.activeAudioPlaybacks);
+    expect(samples[1]?.rendererStats).toBe(samples[0]?.rendererStats);
+    // A revision bump forces a rebuild the very frame it happens: nothing plays now.
+    expect(samples[2]?.activeAudioPlaybacks).toBeUndefined();
+    expect(getActivePlaybackSnapshot).toHaveBeenCalledTimes(2);
+  });
+
+  /**
+   * The Profiler used to read `FPS 60 / Frame 16.7 ms / Logic 0.3 / Render 1.1`
+   * while ~7 % of frames blew past 20 ms, because nothing in the sample could
+   * say that the missing ~15 ms was not the game's work. These two scalars are
+   * that missing statement, so they are pinned here.
+   */
+  it('reports how late the frame was delivered and how much of it was neither logic nor render', () => {
+    const renderer = createRendererStub(320, 160);
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      renderer,
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'))
+    );
+    const cameraNode = new Camera3D({
+      id: 'runtime-frame-accounting',
+      name: 'Camera',
+      projection: 'perspective',
+    });
+
+    // A fake monotonic clock that ONLY advances where this test says so: the
+    // script below burns 6 ms of "logic", everything else is instantaneous.
+    let nowMs = 1_000;
+    const advanceMs = 6;
+    class BurnLogicScript extends Script {
+      constructor() {
+        super('burn-logic-script', 'BurnLogicScript');
+      }
+
+      override onUpdate(): void {
+        nowMs += advanceMs;
+      }
+    }
+    cameraNode.addComponent(new BurnLogicScript());
+
+    const runnerInternals = runner as unknown as {
+      activeCamera: Camera3D;
+      runtimeGraph: SceneGraph;
+      sceneService: import('./SceneService').SceneService;
+      isRunning: boolean;
+      tick: (rafTimestampMs?: number) => void;
+      clock: { getDelta: () => number };
+    };
+    cameraNode.scene = runnerInternals.sceneService;
+    runnerInternals.activeCamera = cameraNode;
+    runnerInternals.runtimeGraph = createGraph(cameraNode);
+    runnerInternals.isRunning = true;
+
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1);
+    vi.spyOn(performance, 'now').mockImplementation(() => nowMs);
+    const deltaSpy = vi.spyOn(runnerInternals.clock, 'getDelta');
+
+    const samples: import('./SceneRunner').SceneRunnerFrameSample[] = [];
+    runner.subscribeFrameStats(sample => {
+      samples.push(sample);
+    });
+
+    // Frame 1 — a 50 ms frame that only spent 6 ms doing work. 44 ms of it was
+    // somebody else's; the browser also handed us the callback 18 ms late.
+    deltaSpy.mockReturnValue(0.05);
+    runnerInternals.tick(nowMs - 18);
+    // Frame 2 — a normal 16.7 ms frame delivered on time.
+    deltaSpy.mockReturnValue(1 / 60);
+    runnerInternals.tick(nowMs);
+    // Frame 3 — work outstripped the reported delta, so there is nothing
+    // unaccounted for: the value clamps at zero rather than going negative.
+    deltaSpy.mockReturnValue(0.004);
+    runnerInternals.tick(nowMs);
+
+    expect(samples).toHaveLength(3);
+
+    expect(samples[0]?.logicMs).toBeCloseTo(advanceMs, 5);
+    expect(samples[0]?.renderMs).toBe(0);
+    expect(samples[0]?.totalFrameMs).toBeCloseTo(advanceMs, 5);
+    expect(samples[0]?.unaccountedMs).toBeCloseTo(50 - advanceMs, 5);
+    expect(samples[0]?.rafLatenessMs).toBeCloseTo(18, 5);
+    // The whole point: work time and frame duration are different numbers.
+    expect(samples[0]?.totalFrameMs).not.toBeCloseTo((samples[0]?.dt ?? 0) * 1000, 1);
+
+    expect(samples[1]?.unaccountedMs).toBeCloseTo(1000 / 60 - advanceMs, 5);
+    expect(samples[1]?.rafLatenessMs).toBe(0);
+
+    expect(samples[2]?.unaccountedMs).toBe(0);
+  });
+
+  it('reports zero frame-delivery lateness for ticks that no animation frame drove', () => {
+    const renderer = createRendererStub(320, 160);
+    const runner = new SceneRunner(
+      createSceneManagerStub(),
+      renderer,
+      new AudioService(),
+      new AssetLoader(new ResourceManager('/'))
+    );
+    const cameraNode = new Camera3D({
+      id: 'runtime-frame-accounting-manual',
+      name: 'Camera',
+      projection: 'perspective',
+    });
+
+    const runnerInternals = runner as unknown as {
+      activeCamera: Camera3D;
+      runtimeGraph: SceneGraph;
+      sceneService: import('./SceneService').SceneService;
+      isRunning: boolean;
+      tick: (rafTimestampMs?: number) => void;
+      clock: { getDelta: () => number };
+    };
+    cameraNode.scene = runnerInternals.sceneService;
+    runnerInternals.activeCamera = cameraNode;
+    runnerInternals.runtimeGraph = createGraph(cameraNode);
+    runnerInternals.isRunning = true;
+
+    vi.spyOn(runnerInternals.clock, 'getDelta').mockReturnValue(1 / 60);
+    vi.spyOn(globalThis, 'requestAnimationFrame').mockReturnValue(1);
+    vi.spyOn(performance, 'now').mockReturnValue(5_000);
+
+    const samples: import('./SceneRunner').SceneRunnerFrameSample[] = [];
+    runner.subscribeFrameStats(sample => {
+      samples.push(sample);
+    });
+
+    // start()/resume() call tick() directly, with no rAF timestamp to compare
+    // against — reporting a bogus lateness there would be worse than reporting none.
+    runnerInternals.tick();
+
+    expect(samples[0]?.rafLatenessMs).toBe(0);
   });
 
   it('hot-reloads a property edit onto the running clone by nodeId', () => {

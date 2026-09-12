@@ -32,7 +32,7 @@ import { PostProcess } from '../nodes/PostProcess';
 import { GeometryMesh } from '../nodes/3D/GeometryMesh';
 import { PostProcessingPipeline } from './PostProcessingPipeline';
 import { LAYER_3D, LAYER_2D, LAYER_2D_OVERLAY } from '../constants';
-import { assign2DRenderOrder } from './render-order-2d';
+import { assign2DRenderOrder, type RenderOrder2DSink } from './render-order-2d';
 import { assign2DLayers } from './assign-2d-layers';
 import { Batch2DSystem, type Batch2DStats, type OrderedMesh2D } from './batch-2d';
 import { LocalizationService } from './localization/LocalizationService';
@@ -70,15 +70,80 @@ import { playable } from './PlayableSdk';
  */
 const SLOWMO_MUFFLE_THRESHOLD = 0.999;
 
+/**
+ * Refresh period for the frame sample's heavy payloads (renderer stats, the
+ * audio playback list). 100 ms = 10 Hz, matching the editor Profiler's UI push
+ * cadence (`ProfilerSessionService.LIVE_NOTIFY_INTERVAL_MS`) — nothing reads
+ * these payloads more often than that.
+ *
+ * Measured motivation: with the Profiler open, SkyDefender in play allocated
+ * ~190 KB per frame and 5-9 % of frames stalled 20-70 ms in GC pauses; dropping
+ * the frame listener alone removed ~40 % of those stalls. The audio snapshot in
+ * particular copied and sorted every active playback on every frame.
+ */
+const FRAME_SAMPLE_HEAVY_REFRESH_MS = 100;
+
+/** Shared empty list so the per-frame activity reset allocates nothing. */
+const NO_FRAME_PROFILER_ACTIVITIES: readonly FrameProfilerActivity[] = Object.freeze([]);
+
+/**
+ * Per-frame stats handed to `subscribeFrameStats` listeners.
+ *
+ * Two payload tiers. The timing fields (`dt`, `logicMs`, `renderMs`, ...) are
+ * exact for the frame they describe — FPS / frame-time history is the whole
+ * point of the Profiler. The heavier payloads are refreshed on a cadence
+ * instead (see {@link FRAME_SAMPLE_HEAVY_REFRESH_MS}): between refreshes a
+ * sample carries the SAME object / array reference as the previous one, so a
+ * consumer may compare references to skip work that cannot have changed.
+ */
 export interface SceneRunnerFrameSample {
   readonly dt: number;
   readonly elapsedTime: number;
   readonly frameNumber: number;
   readonly logicMs: number;
   readonly renderMs: number;
+  /**
+   * WORK time only — literally `logicMs + renderMs`. **This is NOT the frame
+   * duration**; `dt` is. Conflating the two is the bug this field's doc comment
+   * exists to prevent: a Profiler that showed `Frame 16.7 ms` next to a
+   * `logic 0.3 + render 1.1` breakdown made hours of a real 50-90 ms hitch hunt
+   * useless, because it never said that the other ~15 ms was not the game's
+   * work at all (the main thread was idle; frames were simply delivered late).
+   * Kept under its original name for compatibility — read {@link unaccountedMs}
+   * and {@link rafLatenessMs} to find out where a frame actually went.
+   */
   readonly totalFrameMs: number;
+  /**
+   * `max(0, dt*1000 - (logicMs + renderMs))` — wall-clock time inside this frame
+   * that the runner did not spend on its own logic or paint: browser compositing,
+   * GC, another tab's work, a synchronous shader-program link, or just an idle
+   * main thread waiting on a late vsync. When this dominates a long frame, the
+   * honest readout is "the game was not the bottleneck".
+   *
+   * In non-realtime time modes `dt` is the *authored* `fixedDeltaSec` rather than
+   * wall clock, so this number describes the simulated frame, not the real one.
+   */
+  readonly unaccountedMs: number;
+  /**
+   * `performance.now()` at the rAF callback's entry minus the rAF timestamp the
+   * browser handed that callback: how late the frame was delivered, before the
+   * runner did anything at all. A large value next to small `logicMs`/`renderMs`
+   * is the signature of "not us" — the frame was already late when we got it.
+   *
+   * `0` for ticks not driven by rAF (manual `stepFrames`, the paint-once call
+   * after `startScene`), and identical for every tick of one animation frame in
+   * `fixed` mode, since the whole batch shares one callback.
+   */
+  readonly rafLatenessMs: number;
+  /** Draw-call / memory counters; refreshed on the heavy cadence, shared between refreshes. */
   readonly rendererStats: RuntimeRendererStatsSnapshot;
+  /** This frame's `FrameProfiler` reports (exact per frame); absent when nothing reported. */
   readonly profilerActivities?: readonly FrameProfilerActivity[];
+  /**
+   * Active audio playbacks; absent when nothing is playing. Rebuilt the frame the
+   * active set changes (so even a one-frame sound is seen) and on the heavy
+   * cadence (to advance `elapsedMs`); otherwise the previous array is reused.
+   */
   readonly activeAudioPlaybacks?: readonly ActiveAudioPlaybackSnapshot[];
 }
 
@@ -153,7 +218,19 @@ export class SceneRunner {
   private logicalCameraSize = { width: 1, height: 1 };
   private readonly rootLayoutAuthoredSize: { width: number; height: number };
   private readonly frameListeners = new Set<SceneRunnerFrameListener>();
-  private currentFrameProfilerActivities: FrameProfilerActivity[] = [];
+  /**
+   * How late the browser delivered the animation frame currently being run —
+   * see {@link SceneRunnerFrameSample.rafLatenessMs}. Sampled once in
+   * {@link tick} (before any frame work) and read by every tick of that frame.
+   */
+  private currentRafLatenessMs = 0;
+  private currentFrameProfilerActivities: readonly FrameProfilerActivity[] =
+    NO_FRAME_PROFILER_ACTIVITIES;
+  /** Heavy-payload cache for frame samples; see {@link SceneRunnerFrameSample}. */
+  private lastHeavySampleAtMs = Number.NEGATIVE_INFINITY;
+  private cachedRendererStats: RuntimeRendererStatsSnapshot | null = null;
+  private cachedAudioPlaybacks: readonly ActiveAudioPlaybackSnapshot[] | undefined = undefined;
+  private cachedAudioRevision = -1;
   /** Lazily created collider wireframe overlay (only while physics debug is on). */
   private physicsDebugOverlay: PhysicsDebugOverlay | null = null;
   /** Separate instance: the 2D solver's wireframe uses the orthographic camera. */
@@ -183,8 +260,32 @@ export class SceneRunner {
   /** Locale to seed the play instance with (editor's current preview locale), so
    *  "preview ru → Play" starts in ru; null ⇒ config's `defaultLocale`. */
   private seedLocale: string | null = null;
-  /** Reused per-frame collector for the render-order walk → batcher input. */
+  /**
+   * Reused per-frame collector for the render-order walk → batcher input. The
+   * entries are pooled too (overwritten in place, truncated only when the mesh
+   * count shrinks): `Batch2DSystem.update` reads them synchronously and retains
+   * only `entry.mesh`, never the entry object, so recycling is safe. Before
+   * this, a fresh `{mesh, order, overlay, visible}` was allocated per 2D mesh
+   * per frame — several hundred objects a frame in SkyDefender.
+   */
   private readonly ordered2DBuffer: OrderedMesh2D[] = [];
+  private ordered2DCount = 0;
+  /** Sink for `assign2DRenderOrder`; a field so the closure is not re-created per frame. */
+  private readonly collectOrdered2D: RenderOrder2DSink = (mesh, order, overlay, visible) => {
+    if (!(mesh as { isMesh?: boolean }).isMesh) {
+      return;
+    }
+    const entry = this.ordered2DBuffer[this.ordered2DCount];
+    if (entry) {
+      entry.mesh = mesh as OrderedMesh2D['mesh'];
+      entry.order = order;
+      entry.overlay = overlay;
+      entry.visible = visible;
+    } else {
+      this.ordered2DBuffer.push({ mesh: mesh as OrderedMesh2D['mesh'], order, overlay, visible });
+    }
+    this.ordered2DCount++;
+  };
 
   constructor(
     sceneManager: SceneManager,
@@ -617,6 +718,10 @@ export class SceneRunner {
       this.batch2D.dispose();
       this.batch2D = null;
     }
+    // The pooled batcher entries pin their meshes; drop them so a stopped
+    // scene's meshes can be collected.
+    this.ordered2DBuffer.length = 0;
+    this.ordered2DCount = 0;
     this.clock.stop();
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
@@ -637,7 +742,11 @@ export class SceneRunner {
     this.ticksSinceRender = 0;
     this.isPaused = false;
     this.gameTime.reset();
-    this.currentFrameProfilerActivities = [];
+    this.currentFrameProfilerActivities = NO_FRAME_PROFILER_ACTIVITIES;
+    this.lastHeavySampleAtMs = Number.NEGATIVE_INFINITY;
+    this.cachedRendererStats = null;
+    this.cachedAudioPlaybacks = undefined;
+    this.cachedAudioRevision = -1;
     // Reset the AO-suppression memo so the NEXT scene always re-applies its
     // resolved suppression to its GeometryMesh nodes. Without this, a scene that
     // resolves the same suppress value as the previous one would skip the walk
@@ -997,8 +1106,23 @@ export class SceneRunner {
   /**
    * The rAF driver. Decides *how many* ticks this animation frame is worth and
    * with what dt; {@link runOneTick} is the frame body itself.
+   *
+   * `rafTimestampMs` is the timestamp `requestAnimationFrame` passes its callback
+   * (the frame's nominal start). It is absent on the direct calls this class makes
+   * itself (start / resume), which is exactly why those report zero lateness.
    */
-  private tick = (): void => {
+  private tick = (rafTimestampMs?: number): void => {
+    // Sampled FIRST, before a single line of frame work, because the question it
+    // answers is "how late were we called" — anything measured after the frame
+    // body would fold the game's own cost back into it. One `performance.now()`
+    // per animation frame, and only while something is actually listening, so a
+    // player build keeps paying nothing for observation.
+    this.currentRafLatenessMs =
+      this.frameListeners.size > 0 &&
+      typeof rafTimestampMs === 'number' &&
+      Number.isFinite(rafTimestampMs)
+        ? Math.max(0, performance.now() - rafTimestampMs)
+        : 0;
     this.animationFrameId = null;
     if (!this.isRunning || this.isPaused) return;
 
@@ -1059,7 +1183,7 @@ export class SceneRunner {
 
     const dt = rawDt * this.gameTime.scale;
     const logicStart = performance.now();
-    this.currentFrameProfilerActivities = [];
+    this.currentFrameProfilerActivities = NO_FRAME_PROFILER_ACTIVITIES;
 
     this.inputService.beginFrame();
     this.frameNumber += 1;
@@ -1096,11 +1220,19 @@ export class SceneRunner {
       renderMs = performance.now() - renderStart;
     }
 
-    // Assembling the sample is not free — it copies the activity list, snapshots active audio
-    // playbacks and reads renderer stats — so it is skipped entirely when nobody is listening
-    // (a player build, or an editor whose Profiler is off screen).
+    // Assembling the sample is not free, so it is skipped entirely when nobody is listening
+    // (a player build, or an editor whose Profiler is off screen). With a listener, only the
+    // timing fields are fresh every frame; the heavy payloads (renderer stats, audio list) are
+    // refreshed on the 10 Hz cadence and otherwise reused by reference — see the
+    // SceneRunnerFrameSample contract. Per frame this now costs one small sample object.
     if (this.frameListeners.size === 0) {
       return;
+    }
+
+    const sampleNowMs = performance.now();
+    const refreshHeavy = sampleNowMs - this.lastHeavySampleAtMs >= FRAME_SAMPLE_HEAVY_REFRESH_MS;
+    if (refreshHeavy) {
+      this.lastHeavySampleAtMs = sampleNowMs;
     }
 
     this.notifyFrameListeners({
@@ -1112,9 +1244,14 @@ export class SceneRunner {
       logicMs,
       renderMs,
       totalFrameMs: logicMs + renderMs,
-      rendererStats: this.renderer.getStatsSnapshot(),
+      // Cheap scalars, computed every frame with no cadence throttling: they ARE
+      // the per-frame signal. An averaged or sampled version of "where did this
+      // frame go" would smooth away precisely the spikes being hunted.
+      unaccountedMs: Math.max(0, rawDt * 1000 - (logicMs + renderMs)),
+      rafLatenessMs: this.currentRafLatenessMs,
+      rendererStats: this.getRendererStatsSample(refreshHeavy),
       profilerActivities: this.getFrameProfilerActivitiesSnapshot(),
-      activeAudioPlaybacks: this.getActiveAudioPlaybackSnapshot(),
+      activeAudioPlaybacks: this.getActiveAudioPlaybackSnapshot(refreshHeavy),
     });
   }
 
@@ -1743,17 +1880,42 @@ export class SceneRunner {
     this.currentFrameProfilerActivities = this.normalizeFrameProfilerActivities(activities);
   }
 
+  /**
+   * The runner's own normalized copy of this frame's reports — built fresh by
+   * {@link normalizeFrameProfilerActivities} on every report and replaced (never
+   * mutated) afterwards, so the reporter cannot reach into it and no defensive
+   * per-entry copy is needed. The `.map(spread)` that used to live here doubled
+   * the allocation for nothing.
+   */
   private getFrameProfilerActivitiesSnapshot(): readonly FrameProfilerActivity[] | undefined {
-    if (this.currentFrameProfilerActivities.length === 0) {
-      return undefined;
-    }
-
-    return this.currentFrameProfilerActivities.map(activity => ({ ...activity }));
+    return this.currentFrameProfilerActivities.length === 0
+      ? undefined
+      : this.currentFrameProfilerActivities;
   }
 
-  private getActiveAudioPlaybackSnapshot(): readonly ActiveAudioPlaybackSnapshot[] | undefined {
-    const snapshot = this.audioService.getActivePlaybackSnapshot();
-    return snapshot.length > 0 ? snapshot : undefined;
+  private getRendererStatsSample(refresh: boolean): RuntimeRendererStatsSnapshot {
+    if (refresh || !this.cachedRendererStats) {
+      this.cachedRendererStats = this.renderer.getStatsSnapshot();
+    }
+    return this.cachedRendererStats;
+  }
+
+  /**
+   * Rebuilt when the active set changed since the last sample (revision bump —
+   * so a sound that lives a single frame still reaches the Profiler's audio
+   * registry) or on the heavy cadence (to advance `elapsedMs`); otherwise the
+   * cached list is handed out again by reference.
+   */
+  private getActiveAudioPlaybackSnapshot(
+    refresh: boolean
+  ): readonly ActiveAudioPlaybackSnapshot[] | undefined {
+    const revision = this.audioService.getActivePlaybackRevision();
+    if (refresh || revision !== this.cachedAudioRevision) {
+      this.cachedAudioRevision = revision;
+      const snapshot = this.audioService.getActivePlaybackSnapshot();
+      this.cachedAudioPlaybacks = snapshot.length > 0 ? snapshot : undefined;
+    }
+    return this.cachedAudioPlaybacks;
   }
 
   private normalizeFrameProfilerActivities(
@@ -2119,14 +2281,13 @@ export class SceneRunner {
       if (!this.batch2D) {
         this.batch2D = new Batch2DSystem(this.scene);
       }
+      // Single DFS: stamp renderOrder AND collect the ordered mesh list into the
+      // pooled buffer (entries overwritten in place; see `ordered2DBuffer`).
+      this.ordered2DCount = 0;
+      assign2DRenderOrder(this.runtimeGraph.rootNodes, this.collectOrdered2D);
       const ordered = this.ordered2DBuffer;
-      ordered.length = 0;
-      // Single DFS: stamp renderOrder AND collect the ordered mesh list.
-      assign2DRenderOrder(this.runtimeGraph.rootNodes, (mesh, order, overlay, visible) => {
-        if ((mesh as { isMesh?: boolean }).isMesh) {
-          ordered.push({ mesh: mesh as OrderedMesh2D['mesh'], order, overlay, visible });
-        }
-      });
+      // The batcher reads `length`, so truncate — a no-op unless the mesh count shrank.
+      ordered.length = this.ordered2DCount;
       // World matrices must be current before the batcher reads matrixWorld to
       // stamp quad corners (the render pass would otherwise be the first update).
       this.scene.updateMatrixWorld(true);

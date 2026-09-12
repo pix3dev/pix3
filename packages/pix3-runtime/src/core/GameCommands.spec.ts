@@ -402,6 +402,7 @@ function createRendererStub(): RuntimeRenderer {
       lines: 0,
       geometries: 0,
       textures: 0,
+      programs: 0,
     })),
   } as unknown as RuntimeRenderer;
 }

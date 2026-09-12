@@ -14,6 +14,15 @@ export interface RuntimeRendererStatsSnapshot {
   readonly lines: number;
   readonly geometries: number;
   readonly textures: number;
+  /**
+   * Linked WebGL programs (`renderer.info.programs.length`). Tracked because
+   * linking a *new* program blocks the main thread synchronously — measured at
+   * 50-76 ms inside `gl.getProgramInfoLog` the first time a material is drawn —
+   * so a count that grows mid-gameplay predicts a stall the frame-time series
+   * can only show after the fact. Read via three's own `info`; nothing here
+   * patches the WebGL prototypes.
+   */
+  readonly programs: number;
 }
 
 export class RuntimeRenderer {
@@ -110,6 +119,9 @@ export class RuntimeRenderer {
       lines: this.renderer.info.render.lines,
       geometries: this.renderer.info.memory.geometries,
       textures: this.renderer.info.memory.textures,
+      // `info.programs` is nullable in three's typings (null before the first
+      // render), hence the guard rather than a bare `.length`.
+      programs: this.renderer.info.programs?.length ?? 0,
     };
   }
 

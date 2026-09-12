@@ -78,13 +78,53 @@ class MockAudioContextBase {
     return new MockStereoPannerNode() as unknown as StereoPannerNode;
   }
 
-  resume = vi.fn(async () => {
-    this.state = 'running';
-  });
+  /**
+   * Transitions requested but not yet applied.
+   *
+   * A real `suspend()`/`resume()` does NOT flip `state` at the call site — it flips when the
+   * operation lands, and only then fires `statechange`. Modelling that is the whole point of this
+   * mock: code that reads `state` right after requesting a change sees the OLD value, which is
+   * exactly the window the focus handling used to deadlock in.
+   */
+  private readonly pending: Array<() => void> = [];
+  private readonly listeners = new Map<string, Set<() => void>>();
 
-  suspend = vi.fn(async () => {
-    this.state = 'suspended';
-  });
+  addEventListener(type: string, listener: () => void): void {
+    let set = this.listeners.get(type);
+    if (!set) {
+      set = new Set();
+      this.listeners.set(type, set);
+    }
+    set.add(listener);
+  }
+
+  removeEventListener(type: string, listener: () => void): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  /** Apply every transition the service has requested so far, firing `statechange` for each. */
+  settle(): void {
+    const queued = this.pending.splice(0, this.pending.length);
+    for (const apply of queued) {
+      apply();
+    }
+  }
+
+  private transitionTo(next: AudioContextState): Promise<void> {
+    return new Promise<void>(resolve => {
+      this.pending.push(() => {
+        this.state = next;
+        for (const listener of this.listeners.get('statechange') ?? []) {
+          listener();
+        }
+        resolve();
+      });
+    });
+  }
+
+  resume = vi.fn(() => this.transitionTo('running'));
+
+  suspend = vi.fn(() => this.transitionTo('suspended'));
 
   close = vi.fn(async () => {
     this.state = 'closed';
@@ -109,11 +149,15 @@ function context(): MockAudioContextBase {
   return lastContext;
 }
 
+/** Drives `document.hasFocus()`, so a test can blur and refocus the window. */
+let documentFocused = true;
+
 describe('AudioService', () => {
   beforeEach(() => {
     lastContext = null;
+    documentFocused = true;
     vi.stubGlobal('AudioContext', MockAudioContext as unknown as typeof AudioContext);
-    vi.spyOn(document, 'hasFocus').mockReturnValue(true);
+    vi.spyOn(document, 'hasFocus').mockImplementation(() => documentFocused);
   });
 
   afterEach(() => {
@@ -346,6 +390,101 @@ describe('AudioService', () => {
 
     service.dispose();
   });
+describe('page focus', () => {
+  /** Take the window away; the suspend this requests is left deliberately in flight. */
+  const blur = (): void => {
+    documentFocused = false;
+    window.dispatchEvent(new Event('blur'));
+  };
+
+  const focus = (): void => {
+    documentFocused = true;
+    window.dispatchEvent(new Event('focus'));
+  };
+
+  it('stays audible when focus returns before the suspend it triggered has landed', async () => {
+    const service = new AudioService();
+    const ctx = context();
+    expect(ctx.state).toBe('running');
+
+    blur();
+    expect(ctx.suspend).toHaveBeenCalledTimes(1);
+    // The trap: the browser has not applied it yet, so `state` still reads 'running'.
+    expect(ctx.state).toBe('running');
+
+    focus();
+
+    // Now the suspend lands. The statechange it fires must drive the context back to where the
+    // (already restored) focus says it belongs, instead of leaving the game silent for good.
+    ctx.settle();
+    expect(ctx.state).toBe('suspended');
+    ctx.settle();
+
+    expect(ctx.state).toBe('running');
+    service.dispose();
+  });
+
+  it('resumes on a later focus even after a missed transition, without needing a click', () => {
+    const service = new AudioService();
+    const ctx = context();
+
+    blur();
+    focus();
+    ctx.settle();
+    ctx.settle();
+    expect(ctx.state).toBe('running');
+
+    // And the ordinary cycle still works afterwards — the recovery must not have latched anything
+    // that stops audio from being suspended again.
+    blur();
+    ctx.settle();
+    expect(ctx.state).toBe('suspended');
+
+    focus();
+    ctx.settle();
+    expect(ctx.state).toBe('running');
+    service.dispose();
+  });
+
+  it('drops one-shots fired while the page is away instead of leaking them forever', async () => {
+    const service = new AudioService();
+    const ctx = context();
+
+    blur();
+    ctx.settle();
+    expect(ctx.state).toBe('suspended');
+
+    const playback = service.play(
+      createAudioBufferMock({ duration: 1, channels: 2, sampleRate: 48000 }),
+      { resourcePath: 'res://audio/explosion.mp3' }
+    );
+
+    // Nothing tracked: a suspended context has a frozen clock, so `onended` would never fire and
+    // this entry — and its source/gain nodes — would live until the page reloaded.
+    expect(service.getActivePlaybackSnapshot(0)).toEqual([]);
+    // And an awaiting script is released rather than hung.
+    await expect(playback.ended).resolves.toBeUndefined();
+
+    service.dispose();
+  });
+
+  it('still starts loops while the page is away, so music is there on return', () => {
+    const service = new AudioService();
+    const ctx = context();
+
+    blur();
+    ctx.settle();
+
+    service.play(createAudioBufferMock({ duration: 30, channels: 2, sampleRate: 48000 }), {
+      resourcePath: 'res://audio/theme.mp3',
+      loop: true,
+      bus: 'music',
+    });
+
+    expect(service.getActivePlaybackSnapshot(0)).toHaveLength(1);
+    service.dispose();
+  });
+});
 });
 
 function createAudioBufferMock(options: {

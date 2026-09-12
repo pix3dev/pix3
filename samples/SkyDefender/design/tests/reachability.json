@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "proven": [
+    {
+      "nodeId": "shop-fight-button",
+      "name": "Fight Button",
+      "sceneId": "src-assets-scenes-main",
+      "hash": "209c9f0a",
+      "context": {
+        "ancestors": "game-root>shop-overlay",
+        "hiddenAncestors": "",
+        "visible": true,
+        "enabled": true,
+        "collapsed": false,
+        "frame": "in",
+        "world": [
+          368,
+          -282,
+          0
+        ],
+        "size": [
+          244,
+          100
+        ],
+        "scroll": []
+      },
+      "provenAt": "2026-09-11T20:24:14.802Z"
+    }
+  ]
+}

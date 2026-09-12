@@ -422,6 +422,12 @@ pix3-profiler-panel .chart-legend-swatch-render {
   background: var(--presence-5);
 }
 
+/* Deliberately a neutral grey, not a third hue: this band is the time that was
+   NOT the game's work, and it should not read as another activity of its own. */
+pix3-profiler-panel .chart-legend-swatch-unaccounted {
+  background: var(--line-strong);
+}
+
 pix3-profiler-panel .chart-svg {
   display: block;
   width: 100%;
@@ -458,6 +464,67 @@ pix3-profiler-panel .chart-bar-render {
 
 pix3-profiler-panel .chart-bar-logic {
   fill: var(--accent);
+}
+
+pix3-profiler-panel .chart-bar-unaccounted {
+  fill: var(--line-strong);
+}
+
+pix3-profiler-panel .metric-value-warn {
+  color: var(--warn);
+}
+
+pix3-profiler-panel .metric-note {
+  margin-left: 0.35rem;
+  font-weight: 500;
+  color: var(--fg-2);
+}
+
+pix3-profiler-panel .long-frame-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+pix3-profiler-panel .long-frame-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.28rem 0.4rem;
+  border-radius: var(--radius-2);
+  background: var(--bg-0);
+  font-size: 11.5px;
+}
+
+pix3-profiler-panel .long-frame-duration {
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  color: var(--warn);
+  white-space: nowrap;
+}
+
+pix3-profiler-panel .long-frame-attribution {
+  color: var(--fg-1);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The "no long script" case is information, not an absence — keep it legible
+   rather than dimming it into a placeholder. */
+pix3-profiler-panel .long-frame-attribution-none {
+  color: var(--fg-2);
+  font-style: italic;
+}
+
+pix3-profiler-panel .long-frame-blocking {
+  color: var(--fg-3);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 pix3-profiler-panel .chart-empty {
@@ -574,4 +641,240 @@ pix3-profiler-panel .frame-impact-activity-meta {
   font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
   flex: 0 0 auto;
+}
+
+/* --- Pause control + paused state + overhead A/B ------------------------- */
+
+pix3-profiler-panel .profiler-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+pix3-profiler-panel .profiler-state-pill {
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+/* Green means OK: the profiler is doing its job. */
+pix3-profiler-panel .profiler-state-pill-live {
+  background: var(--ok-soft);
+  border-color: var(--ok-line);
+  color: var(--ok);
+}
+
+/* Amber means "deliberately degraded" — data is not being collected right now. */
+pix3-profiler-panel .profiler-state-pill-paused {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+pix3-profiler-panel .profiler-pause-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 3px 10px;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+pix3-profiler-panel .profiler-pause-button:hover {
+  border-color: var(--line-2);
+  color: var(--fg-0);
+}
+
+pix3-profiler-panel .profiler-pause-button[aria-pressed='true'] {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+pix3-profiler-panel .profiler-pause-icon {
+  display: inline-flex;
+  align-items: center;
+  line-height: 0;
+}
+
+pix3-profiler-panel .profiler-paused-state {
+  padding: 0.7rem;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-2);
+  background: var(--warn-soft);
+}
+
+pix3-profiler-panel .profiler-paused-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+pix3-profiler-panel .profiler-paused-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+pix3-profiler-panel .profiler-paused-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-top: 2px;
+  line-height: 0;
+}
+
+pix3-profiler-panel .profiler-paused-item-on {
+  color: var(--fg-1);
+}
+
+pix3-profiler-panel .profiler-paused-item-on .profiler-paused-icon {
+  color: var(--ok);
+}
+
+pix3-profiler-panel .profiler-paused-item-off {
+  color: var(--fg-2);
+}
+
+pix3-profiler-panel .profiler-paused-item-off .profiler-paused-icon {
+  color: var(--fg-3);
+}
+
+pix3-profiler-panel .overhead-table {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+pix3-profiler-panel .overhead-row {
+  display: grid;
+  grid-template-columns: minmax(7rem, 9rem) minmax(0, 1fr) minmax(0, 1fr) minmax(5rem, auto);
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+}
+
+pix3-profiler-panel .overhead-row-current {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+pix3-profiler-panel .overhead-arm-label {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--fg-1);
+  font-size: 12.5px;
+}
+
+pix3-profiler-panel .overhead-arm-now {
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-size: 9.5px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+pix3-profiler-panel .overhead-arm-metric {
+  display: flex;
+  align-items: baseline;
+  gap: 0.3rem;
+  min-width: 0;
+}
+
+pix3-profiler-panel .overhead-arm-metric-name {
+  color: var(--fg-2);
+  font-size: 11px;
+}
+
+pix3-profiler-panel .overhead-arm-metric-value {
+  color: var(--fg-0);
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Always visible, never truncated: the count is how the reader judges the p95. */
+pix3-profiler-panel .overhead-arm-frames {
+  color: var(--fg-2);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  white-space: nowrap;
+}
+
+pix3-profiler-panel .overhead-verdict {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0.45rem 0.55rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-1);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+pix3-profiler-panel .overhead-verdict-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  margin-top: 2px;
+  line-height: 0;
+}
+
+/* Amber = warning: this is the "do not read a result here yet" state. */
+pix3-profiler-panel .overhead-verdict-pending {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--fg-1);
+}
+
+pix3-profiler-panel .overhead-verdict-pending .overhead-verdict-icon {
+  color: var(--warn);
+}
+
+pix3-profiler-panel .overhead-verdict-cost {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--fg-0);
+}
+
+pix3-profiler-panel .overhead-verdict-cost .overhead-verdict-icon {
+  color: var(--warn);
+}
+
+/* Green = OK: the panel is cleared, the jank is somewhere else. */
+pix3-profiler-panel .overhead-verdict-clear {
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+  color: var(--fg-0);
+}
+
+pix3-profiler-panel .overhead-verdict-clear .overhead-verdict-icon {
+  color: var(--ok);
 }

@@ -82,12 +82,31 @@ export class AudioService {
   private readonly activePlaybacks = new Set<AudioPlayback>();
   private readonly activePlaybackEntries = new Map<AudioPlayback, ActiveAudioPlaybackEntry>();
   private nextPlaybackId = 0;
-  private suspendedByFocusLoss = false;
+  /**
+   * Bumped whenever the active-playback set changes (a playback starts, ends or
+   * is stopped). `SceneRunner` compares it frame to frame to decide whether
+   * {@link getActivePlaybackSnapshot} — which copies and sorts every entry —
+   * needs to run at all; in steady state (music looping, no new SFX) it does
+   * not, and the frame sample reuses the previous list by reference.
+   */
+  private activePlaybackRevision = 0;
+  /**
+   * Whether audio *should* be audible right now — i.e. the page is visible and focused.
+   *
+   * Intent, not observation: {@link reconcileContextState} drives the context towards it. Keeping
+   * the two apart is what makes the focus handling survive the asynchrony of `suspend()`/`resume()`.
+   */
+  private wantsAudible = true;
+  /** Whether the browser has ever permitted this context to run (autoplay unlock has happened). */
+  private unlockedByGesture = false;
   private readonly unlockFromPointerDown = (): void => {
     this.unlock();
   };
   private readonly unlockFromKeydown = (): void => {
     this.unlock();
+  };
+  private readonly handleContextStateChange = (): void => {
+    this.reconcileContextState();
   };
 
   constructor() {
@@ -125,9 +144,12 @@ export class AudioService {
       volumeScale: { master: 0.85 },
     });
 
-    // iOS Safari / Web Audio requirement: context must be resumed by user interaction
-    window.addEventListener('pointerdown', this.unlockFromPointerDown, { once: true });
-    window.addEventListener('keydown', this.unlockFromKeydown, { once: true });
+    // iOS Safari / Web Audio requirement: context must be resumed by user interaction.
+    // Deliberately NOT `{ once: true }`: `resume()` can reject (the gesture was not one the browser
+    // counts, the context was still being constructed), and a one-shot listener spends the only
+    // retry the service has on that failure. `unlock()` is idempotent and costs nothing per event.
+    window.addEventListener('pointerdown', this.unlockFromPointerDown);
+    window.addEventListener('keydown', this.unlockFromKeydown);
 
     // Auto-mute on focus loss
     window.addEventListener('blur', this.handleActivityChange);
@@ -135,6 +157,9 @@ export class AudioService {
     window.addEventListener('pageshow', this.handleActivityChange);
     window.addEventListener('pagehide', this.handleActivityChange);
     document.addEventListener('visibilitychange', this.handleActivityChange);
+    // The reconciler's feedback edge: every completed suspend/resume re-runs it, so a transition
+    // that landed after the intent behind it had already changed is corrected instead of sticking.
+    this.context.addEventListener?.('statechange', this.handleContextStateChange);
     this.handleActivityChange();
   }
 
@@ -261,32 +286,70 @@ export class AudioService {
   private handleActivityChange = (): void => {
     const isVisible = document.visibilityState === 'visible';
     const hasFocus = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
-    const isActive = isVisible && hasFocus;
+    this.wantsAudible = isVisible && hasFocus;
+    this.reconcileContextState();
+  };
 
-    if (!isActive) {
-      if (this.context?.state === 'running') {
-        this.suspendedByFocusLoss = true;
-        void this.context.suspend();
+  /**
+   * Drive the context towards {@link wantsAudible}.
+   *
+   * Deliberately a *reconciler* rather than a transition handler, and idempotent, because
+   * `suspend()` / `resume()` are asynchronous: `state` does not flip when the call is made, it flips
+   * when the operation lands. The previous version decided what to do from `state` at the moment an
+   * event arrived and recorded the verdict in a `suspendedByFocusLoss` flag, which deadlocks on a
+   * fast blur→focus: `focus` sees a context still reading `'running'` (the `suspend()` from `blur`
+   * is in flight), so it neither resumes nor clears the flag — and then the flag it left set is the
+   * very thing that made `unlock()` refuse to resume, so no amount of clicking recovered it. The
+   * game stayed silent while everything still reported itself as playing.
+   *
+   * Reading intent instead of history makes the fast path a no-op and the slow path self-healing:
+   * whatever the state turns out to be, this is re-run on every `statechange` until it matches.
+   */
+  private reconcileContextState(): void {
+    const context = this.context;
+    if (!context) {
+      return;
+    }
+
+    // A running context is proof the browser has let us out of autoplay jail — whether that came
+    // from a gesture, or because the context was constructed after one and started running. Latching
+    // it here (not only in `unlock`) is what lets focus loss suspend/resume a context nobody ever
+    // had to click to start.
+    if (context.state === 'running') {
+      this.unlockedByGesture = true;
+    }
+
+    if (!this.wantsAudible) {
+      if (context.state === 'running') {
+        void context.suspend().catch(() => {
+          // A context closed underneath us is not an error worth surfacing.
+        });
       }
       return;
     }
 
-    if (this.suspendedByFocusLoss && this.context?.state === 'suspended') {
-      this.suspendedByFocusLoss = false;
-      void this.context.resume();
+    // Only resume a context the browser has already let us out of autoplay jail for. Before the
+    // first gesture `resume()` rejects, and retrying it on every focus event would spam the console.
+    if (context.state === 'suspended' && this.unlockedByGesture) {
+      void context.resume().catch(err => {
+        console.warn('[AudioService] Failed to resume AudioContext:', err);
+      });
     }
-  };
+  }
 
+  /**
+   * Resume after a user gesture (the Web Audio autoplay unlock).
+   *
+   * Also the point where {@link unlockedByGesture} latches: from here on the reconciler is allowed
+   * to resume on its own, so a context suspended by focus loss comes back without a click.
+   */
   unlock(): void {
     if (!this.context) {
       return;
     }
 
-    if (this.context.state === 'suspended' && !this.suspendedByFocusLoss) {
-      this.context.resume().catch(err => {
-        console.warn('[AudioService] Failed to resume AudioContext:', err);
-      });
-    }
+    this.unlockedByGesture = true;
+    this.reconcileContextState();
   }
 
   /**
@@ -296,6 +359,7 @@ export class AudioService {
     const playbacks = Array.from(this.activePlaybacks);
     this.activePlaybacks.clear();
     this.activePlaybackEntries.clear();
+    this.activePlaybackRevision++;
     for (const playback of playbacks) {
       try {
         playback.stop();
@@ -316,15 +380,41 @@ export class AudioService {
       };
     }
 
-    if (this.context.state === 'suspended' && !this.suspendedByFocusLoss) {
+    // Only worth warning about when we are not the ones holding the context down: a page the user
+    // has tabbed away from is *supposed* to be silent, and a game that keeps firing SFX there would
+    // otherwise flood the console.
+    if (this.context.state === 'suspended' && this.wantsAudible) {
       console.warn(
         '[AudioService] Attempting to play audio while context is suspended. It might not be audible until user interaction.'
       );
     }
 
+    // One-shots fired while the page is away are dropped rather than queued.
+    //
+    // Every playback this service tracks is cleaned up by `source.onended`, and a suspended context
+    // has a frozen `currentTime` — so nothing started against it ever ends. A game that keeps
+    // running while the user is in another window (the default: `pauseRenderingOnUnfocus` is a
+    // setting, not a guarantee) therefore piles up an unbounded number of live source/gain nodes,
+    // all still wired into the bus graph, plus their diagnostics entries — and on resume they would
+    // all fire at once, replaying every explosion the player missed as a single blast.
+    //
+    // Loops are exempt: music and ambience are meant to still be there on return, and there is a
+    // bounded number of them.
+    const isLoop = options?.loop ?? false;
+    if (!isLoop && !this.wantsAudible && this.context.state !== 'running') {
+      return {
+        stop: () => {
+          // Nothing was started.
+        },
+        // Resolved, not pending — a script awaiting `ended` to sequence the next step must not hang
+        // just because the window lost focus.
+        ended: Promise.resolve(),
+      };
+    }
+
     const source = this.context.createBufferSource();
     source.buffer = buffer;
-    source.loop = options?.loop ?? false;
+    source.loop = isLoop;
 
     // Per-shot randomization: linear fraction spread, clamped to audible ranges.
     // random() is only sampled when a variation is set, so a zero spread stays
@@ -370,6 +460,7 @@ export class AudioService {
       finished = true;
       this.activePlaybacks.delete(playback);
       this.activePlaybackEntries.delete(playback);
+      this.activePlaybackRevision++;
       source.disconnect();
       gainNode.disconnect();
       pannerNode?.disconnect();
@@ -412,9 +503,15 @@ export class AudioService {
       sampleRate,
       bitrateKbps: this.computeBitrateKbps(durationSeconds, options?.sizeBytes),
     });
+    this.activePlaybackRevision++;
     source.start();
 
     return playback;
+  }
+
+  /** Monotonic count of active-playback set changes; see {@link activePlaybackRevision}. */
+  getActivePlaybackRevision(): number {
+    return this.activePlaybackRevision;
   }
 
   getActivePlaybackSnapshot(nowMs: number = this.readNowMs()): ActiveAudioPlaybackSnapshot[] {
@@ -479,12 +576,14 @@ export class AudioService {
     window.removeEventListener('pageshow', this.handleActivityChange);
     window.removeEventListener('pagehide', this.handleActivityChange);
     document.removeEventListener('visibilitychange', this.handleActivityChange);
+    this.context?.removeEventListener?.('statechange', this.handleContextStateChange);
 
     this.stopAll();
     void this.context?.close();
     this.context = null;
     this.buses.clear();
-    this.suspendedByFocusLoss = false;
+    this.wantsAudible = true;
+    this.unlockedByGesture = false;
   }
 
   private createPlaybackId(): string {
