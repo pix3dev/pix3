@@ -31,6 +31,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | System-overview diagrams / menu system / nav modes                      | `docs/architecture.md` (diagrams only — the spec is authoritative for prose)                                                      |
 | Build a game feature (entry point)                                      | `pix3-game-dev` skill                                                                                                             |
 | Debug the _running_ editor                                              | `debug-running-game` skill                                                                                                        |
+| Run / open / launch the editor for the user                             | this file → "Launch the editor" — always probe port 8123 first                                                                  |
 
 **Version of record** is the `## N. Change Log` / title of `docs/pix3-specification.md` — never hardcode a spec version number in other docs.
 
@@ -63,6 +64,15 @@ npx vitest src/services/play/ScriptExecutionService.spec.ts        # watch mode
 ```
 
 Node 24 is required (`engines: >=24.15.0 <25`). `npm install` runs a `postinstall` that copies `esbuild.wasm` into `public/` — needed for in-editor script compilation.
+
+### "Launch the editor" — always probe port 8123 first
+
+When asked to run/open/launch the editor (or anything that needs the editor open in a browser — debugging, MCP-driven verification, asset generation):
+
+1. **Probe first, don't start blindly.** `netstat -ano | grep LISTENING | grep :8123`. A dev server is often already up from an earlier session; a second `npm run dev` just picks another port (8124...) and everything that assumes 8123 then talks to the wrong instance.
+2. **If nothing is listening**, start it in the background: `npm run dev` (`run_in_background: true`), then wait for the "Local: http://localhost:8123/" line before continuing. Use `npm run dev:prod` only when the user explicitly asks for the production backend — it touches LIVE data.
+3. **Then open Chrome through the chrome-devtools MCP** — `list_pages` first (a page on :8123 may already be attached; select it instead of opening a duplicate), otherwise `new_page` on `http://localhost:8123/`. That Chrome profile persists the user's loaded project and API keys, so reuse it rather than launching a separate browser.
+4. Leave the dev server running when done unless asked to stop it; if you must stop it, kill the child `node` pid, not the `npm` wrapper (see below).
 
 **Stopping a background dev process needs the CHILD pid, not the `npm` wrapper.** Killing the job you started (`npm run dev`, or `npm start` in `tools/pix3-agent-bridge`) reaps `npm` and leaves the `node` process it spawned running and still holding the port — so the next `npm run dev` silently attaches to a _stale_ server, or the port probe says "already up" when nothing you control is serving it. Find the real listener and kill that:
 
