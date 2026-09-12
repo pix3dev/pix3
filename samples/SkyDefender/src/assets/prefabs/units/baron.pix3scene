@@ -1,5 +1,31 @@
-# Baron — enemy ground vehicle. Body art includes its wheels; separate
-# bouncing wheel sprites + gun (original CorsetCar) are a later increment.
+# Baron — enemy ground vehicle, id 53 (`GBaron`), the LEVEL-1 truck (`t=7`).
+# The cannon truck: orange box body, two bouncing wheels and a fat mortar barrel
+# riding above the deck. Rig transcribed verbatim from the decompiled
+# `com.enemy.GBaron.init()` (session export of design/noAds.swf):
+#
+#   B_body (84x38):  x = -42;  y = -23           → centre (0, -4)
+#   TypGunMob:       x =  12;  y = -23;  scaleY = -1;  rld_max = 25
+#     └ B_gun (24x9):  x = 23;  y = -4;  scaleX = -1   → centre (23, -23.5)
+#   B_Wheel (11x11): x =  10.5; y = 6.5           → centre (16, 12)
+#   B_Wheel (11x11): x = -33.5; y = 6.5           → centre (-28, 12)
+#
+# (Bitmap x/y is the TOP-LEFT in Flash, so each is centred by + half the size.)
+# This prefab's ROOT is the body, so the children below are rebased onto the body
+# centre (Flash y + 4) and flipped to pix3 y-up.
+#
+# BARREL ORIENTATION: the sprite is drawn UNFLIPPED (scale [1, 1]). `B_gun`
+# already points LEFT in its raw pixels (narrow ringed muzzle on the left, thick
+# breech on the right, highlight along the top), so reproducing Flash's
+# `mobTG.scaleX = -1` turned the muzzle backwards on a leftbound truck — that
+# flip belongs to `TypGunMob`'s AIM frame (the mount is shared with air units,
+# where `scaleY = -1` re-points the elevation arc upward), not to the art. This
+# prefab's mount is static, so only the art orientation matters here.
+# `GBaron_B_body` is pixel-identical to `ground/baron/baron.png` and DOES have
+# wheels painted into it; the two `B_Wheel` bitmaps are a hub/tyre overlay that
+# registers exactly on top of the painted ones (that is what bobs while the
+# truck drives — `Car.update()` moves only the overlay, never the body).
+# `ground/gun1.png` is the pixel match for the SWF `B_gun` (gun2 is a different
+# livery); `GroundVehicle` recoils the child named `Truck Gun` on every shot.
 # Per-id stats are applied by WaveSpawner from SdBalance.
 version: 1.0.0
 metadata:
@@ -51,6 +77,63 @@ root:
           labelAlign: center
           transform:
             position: [0, 35]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      # TypGunMob pivot: Flash (12, -23) from the unit origin → (12, -19) from the
+      # body centre → pix3 (12, 19). The barrel's place INSIDE the mount has to go
+      # through the mount's own transform: `MainTimeline.moveTGMob` poses a
+      # `grad = 11` mount at a fixed rotation 180, and `_tpg.scaleY = -1`, so the
+      # mount's linear map is diag(1,-1)·diag(-1,-1) = diag(-1,1). The barrel is
+      # placed top-left (23,-4) with `scaleX = -1`, i.e. it spans x [-1,23] →
+      # centre (11, 0.5) pre-transform, which the mount maps to (-11, -0.5) →
+      # (1, 18.5) from the body centre: the barrel juts FORWARD over the cab, not
+      # backward over the box. (The two flips and the 180 cancel out on the art
+      # itself, which is why the sprite below is unflipped.)
+      - id: truck-gun
+        type: Group2D
+        name: Truck Gun
+        properties:
+          width: 24
+          height: 9
+          transform:
+            position: [12, 19]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: truck-gun-barrel
+            type: Sprite2D
+            name: Gun Barrel
+            properties:
+              texture: { type: 'texture', url: 'res://src/assets/textures/enemy/ground/gun1.png' }
+              width: 24
+              height: 9
+              transform:
+                position: [-11, -0.5]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: wheel-front
+        type: Sprite2D
+        name: Wheel Front
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/ground/wheel.png' }
+          width: 11
+          height: 11
+          transform:
+            position: [16, -16]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: wheel-rear
+        type: Sprite2D
+        name: Wheel Rear
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/ground/wheel.png' }
+          width: 11
+          height: 11
+          transform:
+            position: [-28, -16]
             scale: [1, 1]
             rotation: 0
         children: []

@@ -57,6 +57,10 @@ export class GameViewTab extends ComponentBase {
   @state()
   private isPlaying = appState.ui.isPlaying;
 
+  /** True while the run is frozen by the Pause button (or by `play_pause`), not by focus loss. */
+  @state()
+  private isPaused = appState.ui.playModeStatus === 'paused';
+
   @state()
   private isRunning = false;
 
@@ -152,6 +156,7 @@ export class GameViewTab extends ComponentBase {
     this.disposeSubscription = subscribe(appState.ui, () => {
       this.aspectRatio = appState.ui.gameAspectRatio;
       this.isPlaying = appState.ui.isPlaying;
+      this.isPaused = appState.ui.playModeStatus === 'paused';
       this.isGamePopoutOpen = appState.ui.isGamePopoutOpen;
       this.showColliders = appState.ui.showPhysicsColliders;
       this.showDirectionAxes = appState.ui.showDirectionAxes;
@@ -243,6 +248,10 @@ export class GameViewTab extends ComponentBase {
 
   private handleRestartClick() {
     void this.commandDispatcher.executeById('game.restart');
+  }
+
+  private handlePauseClick() {
+    void this.commandDispatcher.executeById('game.pause');
   }
 
   private handlePopoutClick() {
@@ -396,6 +405,29 @@ export class GameViewTab extends ComponentBase {
             </svg>
           </button>
 
+          ${this.isPlaying
+            ? html`
+                <button
+                  class="toolbar-button toolbar-icon-button ${this.isPaused ? 'active' : ''}"
+                  @click=${this.handlePauseClick}
+                  title=${this.isPaused ? 'Resume Game (F7)' : 'Pause Game (F7)'}
+                  aria-label=${this.isPaused ? 'Resume Game' : 'Pause Game'}
+                  aria-pressed=${String(this.isPaused)}
+                >
+                  <svg
+                    class="toolbar-svg-icon"
+                    viewBox="0 0 24 24"
+                    preserveAspectRatio="xMidYMid meet"
+                    aria-hidden="true"
+                  >
+                    <g fill="currentColor">
+                      <rect x="6.5" y="5" width="3.6" height="14" rx="1"></rect>
+                      <rect x="13.9" y="5" width="3.6" height="14" rx="1"></rect>
+                    </g>
+                  </svg>
+                </button>
+              `
+            : null}
           ${this.isPlaying
             ? html`
                 <button

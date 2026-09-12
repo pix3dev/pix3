@@ -741,6 +741,9 @@ export class SceneRunner {
     this.frameNumber = 0;
     this.ticksSinceRender = 0;
     this.isPaused = false;
+    // Stopping while paused must not leave the shared AudioService singleton suspended: it also
+    // serves the editor's own audio previews.
+    this.audioService.setPaused(false);
     this.gameTime.reset();
     this.currentFrameProfilerActivities = NO_FRAME_PROFILER_ACTIVITIES;
     this.lastHeavySampleAtMs = Number.NEGATIVE_INFINITY;
@@ -816,6 +819,9 @@ export class SceneRunner {
   pause(): void {
     if (!this.isRunning || this.isPaused) return;
     this.isPaused = true;
+    // A frozen scene playing on over its own music reads as a hang. Suspending the context (rather
+    // than stopping the playbacks) means resume picks every buffer up where the pause caught it.
+    this.audioService.setPaused(true);
     if (this.animationFrameId !== null) {
       cancelAnimationFrame(this.animationFrameId);
       this.animationFrameId = null;
@@ -825,6 +831,7 @@ export class SceneRunner {
   resume(): void {
     if (!this.isRunning || !this.isPaused) return;
     this.isPaused = false;
+    this.audioService.setPaused(false);
     // Consume the time elapsed during pause so the next tick gets a fresh delta.
     this.clock.getDelta();
     // Pause/resume are orthogonal to the time mode: resuming a manual runner

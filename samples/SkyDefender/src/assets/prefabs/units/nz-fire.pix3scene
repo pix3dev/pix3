@@ -1,0 +1,147 @@
+# NZ Fire Raider — enemy air unit, id 25 (`NZ_5`). The ONE variant of the NZ
+# family with no basket and no gun: it hangs a BURNING STONE BOMB under the
+# gasbag. Composition transcribed verbatim from the decompiled
+# `com.enemy.NZ_5.init()` (session export of design/noAds.swf):
+#
+#   d1 = new Sprite(); d1.x += 45; d1.y = 2;
+#   Burn1:    y += 26; x -= 29; rotation = 90;
+#   Stoneb:   x -= (w>>1) + 45;  y -= (h>>1) - 21;   → centre d1-local (-44.5, +21.5)
+#   Littlebg: x -= (w>>1) + 45;  y -= (h>>1) - 26;   → centre d1-local (-44.5, +26.5)
+#   B_NZ:     x -= w>>1;         y -= (h>>1) + 5;    → centre (0, -5)
+#
+# Resolved to unit-origin coords (Flash, y-down): bomb centre (0.5, +23.5), glow
+# centre (0.5, +28.5), flame origin (+16, +28), gasbag centre (0, -5). This
+# prefab's ROOT is the gasbag, so every child offset below is rebased onto the
+# gasbag centre (Flash y + 5) and flipped to pix3 y-up.
+#
+# Art: `Stoneb` is 13x25 — the ball is only the lower 13 px, the upper 12 are the
+# two dark straps DRAWN INTO the bitmap. That is the "two thin ropes" under the
+# level-1 zeppelin; `weapons/stone.png` is the same ball cropped to 13x13 and is
+# kept for the bare-stone racks, so this rig uses `weapons/stoneb.png`
+# (SWF `282_Stoneb.png`). `weapons/littlebg.png` is already pixel-identical to
+# the SWF `476_Littlebg.png` (23x23).
+#
+# Behaviour: `NZ_5.update()` is `if(this.x < this.xx && this.att) goAttack();`
+# and `goAttack()` calls `FN_addBomb(...)` + `dropBombL(d1)` + `att = false` —
+# ONE drop at the `a` mark, then it flies on. That is EnemyBalloon's `bomber`
+# path (the remaster's bomber climbs away afterwards instead of accelerating on).
+# No gun: no `Mount A`/`Nose Gun` child and `gunType: ''`.
+# Per-id stats (hp/speed/score/attack) are applied by WaveSpawner from SdBalance.
+version: 1.0.0
+metadata:
+  author: Sky Defender Remaster
+  description: "NZ Fire Raider (unit prefab)"
+root:
+  - id: unit
+    type: Sprite2D
+    name: NZ Fire Raider
+    properties:
+      texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/typical_bloon/Nazi_typical.png' }
+      width: 66
+      height: 38
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: unit-hitbox
+        type: core:Hitbox2D
+        enabled: true
+        config:
+          shape: rect
+          width: 60
+          height: 34
+          offsetX: 0
+          offsetY: 0
+          group: enemy
+          debugDraw: false
+      - id: unit-logic
+        type: user:EnemyBalloon
+        enabled: true
+        config:
+          hp: 150
+          speed: 60
+          score: 50
+          castleDamage: 0
+          stopX: 0
+          linkHp: 25
+          mineHp: 25
+          bomber: true
+          gunType: ''
+          spritePath: 'res://src/assets/textures/enemy/air/typical_bloon/Nazi_typical.png'
+    children:
+      - id: dev-label
+        type: Label2D
+        name: Dev Label
+        properties:
+          editorOnly: true
+          label: "NZ Fire Raider · L1,6,12,14,26"
+          labelFontSize: 12
+          labelColor: "#ffd75e"
+          labelAlign: center
+          transform:
+            position: [0, 35]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      # Burn1, rotation 90 (Flash, clockwise) = -90 in pix3's y-up degrees, so the
+      # flame's "up" points along +x and it streams BACKWARD off the leftbound
+      # unit. Size/anchor are approximate: Burn1 is a MovieClip and FFDec cannot
+      # recover its registration point, only its 35x65 bounds at 1x.
+      - id: bomb-flame
+        type: AnimatedSprite2D
+        name: Bomb Flame
+        properties:
+          animationResourcePath: res://src/assets/textures/sfx/fire/fire.pix3anim
+          currentClip: burn
+          isPlaying: true
+          freeOnFinish: false
+          width: 20
+          height: 34
+          opacity: 1
+          transform:
+            position: [16, -33]
+            scale: [1, 1]
+            rotation: -90
+        children: []
+      # Flash (0.5, +23.5) from the unit origin → (0.5, +28.5) from the gasbag
+      # centre → pix3 (0.5, -28.5). Named `Carried Mine` so EnemyBalloon picks it
+      # up as the shootable bomb and drops it at the `a` mark.
+      - id: carried-mine
+        type: Sprite2D
+        name: Carried Mine
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/stoneb.png' }
+          width: 13
+          height: 25
+          transform:
+            position: [0.5, -28.5]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: mine-hitbox
+            type: core:Hitbox2D
+            enabled: true
+            config:
+              shape: rect
+              width: 13
+              height: 13
+              offsetX: 0
+              offsetY: -6.5
+              group: enemy
+              debugDraw: false
+        children: []
+      # Littlebg sits 5 px below the bomb centre, i.e. centred on the BALL half of
+      # the Stoneb bitmap. Added after Stoneb in the original, so it paints over it.
+      - id: bomb-glow
+        type: Sprite2D
+        name: Bomb Glow
+        properties:
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/littlebg.png' }
+          width: 23
+          height: 23
+          transform:
+            position: [0.5, -33.5]
+            scale: [1, 1]
+            rotation: 0
+        children: []

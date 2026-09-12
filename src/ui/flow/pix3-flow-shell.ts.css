@@ -497,6 +497,15 @@ pix3-flow-shell .flow-stage__button:hover {
   color: var(--fg-0);
 }
 
+/* Held pause. The icon stays a pause glyph rather than flipping to a play triangle — beside Play
+   and Restart a second triangle reads as a second way to start the game, not as "resume". */
+pix3-flow-shell .flow-stage__button--active,
+pix3-flow-shell .flow-stage__button--active:hover {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 /* The entry-scene run is the rarer of the two: present, but never competing with Play/Restart. */
 pix3-flow-shell .flow-stage__button--secondary {
   border-color: transparent;

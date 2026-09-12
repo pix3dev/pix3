@@ -28,6 +28,7 @@ import { isAtlas2DEnabled, isBatch2DEnabled } from '@/services/atlas/rendering-2
 import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSettingsOperation';
 import { SetGamePopoutWindowOpenOperation } from '@/features/scripts/SetGamePopoutWindowOpenOperation';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
+import { SetPlayPausedOperation } from '@/features/scripts/SetPlayPausedOperation';
 import { isDocumentActive } from '@/services/core/page-activity';
 import { PeekService } from '@/services/viewport/PeekService';
 
@@ -47,6 +48,7 @@ interface PopoutShellElements {
   statusValue: HTMLElement;
   aspectSelect: HTMLSelectElement;
   restartButton: HTMLButtonElement;
+  pauseButton: HTMLButtonElement;
 }
 
 @injectable()
@@ -136,6 +138,10 @@ export class GamePlaySessionService {
 
   private readonly onPopoutRestartClick = (): void => {
     void this.restart();
+  };
+
+  private readonly onPopoutPauseClick = (): void => {
+    void this.togglePaused();
   };
 
   initialize(): void {
@@ -388,6 +394,40 @@ export class GamePlaySessionService {
   setPauseRequested(paused: boolean): void {
     this.hostPauseRequested = paused;
     this.handleFocusPause();
+    // Fire-and-forget: `playModeStatus` is UI-only and the operation carries no undo entry, while
+    // every caller of this method (the agent's `game_time`, `game_run`'s outcome pause, the input
+    // service releasing one) is synchronous. Doing it here rather than in `setPaused` alone is what
+    // keeps the Pause buttons honest when something *else* pauses or releases the game.
+    void this.syncPauseStatus();
+  }
+
+  /**
+   * The user-facing pause: hold the game frozen (or let it run) *and* move `playModeStatus` with it,
+   * so the Game tab, the Flow stage bar, the popout window, `play_status` and the debug bridge all
+   * read the same thing. Every surface with a Pause button goes through here rather than through
+   * {@link setPauseRequested}, which is the plumbing underneath and leaves the UI unaware.
+   */
+  async setPaused(paused: boolean): Promise<void> {
+    if (!appState.ui.isPlaying) {
+      return;
+    }
+    this.hostPauseRequested = paused;
+    this.handleFocusPause();
+    await this.syncPauseStatus();
+  }
+
+  /** Flip the running game between paused and running. No-op while nothing is playing. */
+  async togglePaused(): Promise<void> {
+    await this.setPaused(!this.hostPauseRequested);
+  }
+
+  /** Move `playModeStatus` onto whatever the host pause flag now says. No-op while stopped. */
+  private async syncPauseStatus(): Promise<void> {
+    const paused = this.hostPauseRequested;
+    if (!appState.ui.isPlaying || appState.ui.playModeStatus === (paused ? 'paused' : 'playing')) {
+      return;
+    }
+    await this.operationService.invoke(new SetPlayPausedOperation({ paused }));
   }
 
   /** True while a host-requested pause is being held. */
@@ -592,6 +632,9 @@ export class GamePlaySessionService {
       }
       this.updateHostRunningState(true);
       this.handleFocusPause();
+      // `detachRuntime` dropped the host pause with the runner it belonged to (a restart must not
+      // hand the next scene a game that starts frozen), so the status has to follow it back.
+      await this.syncPauseStatus();
       // The scene is live: check whether it can actually draw anything. A 3D scene with lit
       // materials and no light starts perfectly and renders black, so the only moment this is
       // catchable is right here, against the running graph.
@@ -866,6 +909,7 @@ export class GamePlaySessionService {
       <div class="toolbar">
         <div class="toolbar-group">
           <strong>Game Window</strong>
+          <button id="pix3-game-window-pause" type="button">Pause</button>
           <button id="pix3-game-window-restart" type="button">Restart</button>
           <select id="pix3-game-window-aspect" aria-label="Game aspect ratio">
             <option value="free">Free Aspect</option>
@@ -898,8 +942,17 @@ export class GamePlaySessionService {
     const statusValue = documentRef.getElementById('pix3-game-window-status');
     const aspectSelect = documentRef.getElementById('pix3-game-window-aspect');
     const restartButton = documentRef.getElementById('pix3-game-window-restart');
+    const pauseButton = documentRef.getElementById('pix3-game-window-pause');
 
-    if (!host || !viewport || !placeholder || !statusValue || !aspectSelect || !restartButton) {
+    if (
+      !host ||
+      !viewport ||
+      !placeholder ||
+      !statusValue ||
+      !aspectSelect ||
+      !restartButton ||
+      !pauseButton
+    ) {
       throw new Error('Failed to initialize the game popout window shell.');
     }
 
@@ -910,10 +963,12 @@ export class GamePlaySessionService {
       statusValue: statusValue as HTMLElement,
       aspectSelect: aspectSelect as HTMLSelectElement,
       restartButton: restartButton as HTMLButtonElement,
+      pauseButton: pauseButton as HTMLButtonElement,
     };
 
     this.popoutShell.aspectSelect.addEventListener('change', this.onPopoutAspectChange);
     this.popoutShell.restartButton.addEventListener('click', this.onPopoutRestartClick);
+    this.popoutShell.pauseButton.addEventListener('click', this.onPopoutPauseClick);
 
     this.popoutHost = {
       kind: 'popout',
@@ -945,9 +1000,16 @@ export class GamePlaySessionService {
     const aspectRatio = appState.ui.gameAspectRatio;
     const isRunning =
       forcedRunningState ?? (appState.ui.isPlaying && this.activeHostKind === 'popout');
+    const isPaused = appState.ui.playModeStatus === 'paused';
     this.popoutShell.aspectSelect.value = aspectRatio;
-    this.popoutShell.statusValue.textContent = isRunning ? 'Playing' : 'Stopped';
+    this.popoutShell.statusValue.textContent = isRunning
+      ? isPaused
+        ? 'Paused'
+        : 'Playing'
+      : 'Stopped';
     this.popoutShell.restartButton.disabled = !appState.ui.isPlaying;
+    this.popoutShell.pauseButton.disabled = !appState.ui.isPlaying;
+    this.popoutShell.pauseButton.textContent = isPaused ? 'Resume' : 'Pause';
     this.popoutShell.placeholder.style.display = isRunning ? 'none' : 'flex';
     this.applyAspectRatioToElement(this.popoutShell.host, this.popoutShell.viewport, aspectRatio);
   }
@@ -1044,6 +1106,7 @@ export class GamePlaySessionService {
     if (this.popoutShell) {
       this.popoutShell.aspectSelect.removeEventListener('change', this.onPopoutAspectChange);
       this.popoutShell.restartButton.removeEventListener('click', this.onPopoutRestartClick);
+      this.popoutShell.pauseButton.removeEventListener('click', this.onPopoutPauseClick);
     }
 
     if (this.popoutWindow && this.popoutWindowUnloadHandler) {

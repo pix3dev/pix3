@@ -31,8 +31,11 @@ const crumpleSteps = (dm: number): number => (dm >= 11 ? 9 : dm >= 3 ? dm - 2 : 
  * the original (decompiled v10.18): four transporter aerostats launch one by
  * one (~1.7 s apart), fly in from the right and park at the segment slots,
  * building the bridge from the castle outward. When the last one docks the
- * bridge is "ready" (`bridge-ready` on `game-root`) and the ground assault may
- * begin. Also owns the Crazy Mineman shop effect: while the bridge stands, a
+ * bridge is "ready" (`bridge-ready` on `game-root`). That signal GATES NOTHING:
+ * the original's carriers run on their own `t_enTP` timer alongside the one
+ * wave clock, so ground units spawn on their `<t>` whether or not the span is
+ * finished (see WaveSpawner.onUpdate). Also owns the Crazy Mineman shop
+ * effect: while the bridge stands, a
  * mine waits on the deck and blows up the first vehicle that rolls over it
  * (respawns after a pause).
  *

@@ -1,6 +1,19 @@
 # Lucky II — enemy air unit (bomber, stone bomb (tpb 2)). Composition transcribed from the
-# decompiled com.enemy.* init() (see design/original-data/release-v15/air-composition.md).
+# decompiled com.enemy.* init(). (design/original-data/release-v15/air-composition.md
+# transcribed only the `_1` variant of each family and is wrong here — see
+# .plans/enemy-fidelity-audit.md §3 and the rig quoted below.)
 # Per-id stats (hp/speed/score/attack) are applied by WaveSpawner from SdBalance.
+# RIG (verbatim from the decompiled `com.enemy.Lucky_2.init()`, session export of
+# design/noAds.swf) — Flash offsets are y-DOWN, relative to the unit origin, and
+# bitmaps are placed by top-left then centred:
+#   Stoneb : x -= w>>1;  y -= (h>>1) - 25;  -> centre (0, +25)
+#   B_Lucky: x -= w>>1;  y -= (h>>1) + 5;   -> centre (0, -5)
+# The body is this prefab's ROOT, so each child is rebased onto the body centre
+# (Flash y + 5) and flipped to pix3 y-up:  pix3 = (fx, -(fy + 5)).
+# There is no `B_Korzina`/weapon-support bitmap anywhere in `init()`: the two
+# thin straps under the bomb are drawn INTO its bitmap (`Mine` is 19x21 and
+# `Stoneb` 13x25 for a 13 px ball), so the separate `Weapon Mount` basket this
+# prefab used to carry was a remaster invention and has been removed.
 version: 1.0.0
 metadata:
   author: Sky Defender Remaster
@@ -58,39 +71,15 @@ root:
             scale: [1, 1]
             rotation: 0
         children: []
-      - id: weapon-mount
-        type: Sprite2D
-        name: Weapon Mount
-        properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/air/typical_bloon/typical_weapon_support.png' }
-          width: 20
-          height: 13
-          transform:
-            position: [0, -26]
-            scale: [1, 1]
-            rotation: 0
-        components:
-          - id: mount-hitbox
-            type: core:Hitbox2D
-            enabled: true
-            config:
-              shape: rect
-              width: 18
-              height: 12
-              offsetX: 0
-              offsetY: 0
-              group: enemy
-              debugDraw: false
-        children: []
       - id: carried-mine
         type: Sprite2D
         name: Carried Mine
         properties:
-          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/stone.png' }
+          texture: { type: 'texture', url: 'res://src/assets/textures/enemy/weapons/stoneb.png' }
           width: 13
-          height: 13
+          height: 25
           transform:
-            position: [0, -39]
+            position: [0, -30]
             scale: [1, 1]
             rotation: 0
         components:
@@ -102,7 +91,7 @@ root:
               width: 13
               height: 13
               offsetX: 0
-              offsetY: 0
+              offsetY: -6.5
               group: enemy
               debugDraw: false
         children: []

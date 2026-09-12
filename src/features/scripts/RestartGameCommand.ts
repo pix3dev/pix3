@@ -16,7 +16,7 @@ export class RestartGameCommand extends CommandBase<void, void> {
     menuPath: 'project',
     keybinding: 'Mod+Ctrl+R',
     addToMenu: true,
-    menuOrder: 104,
+    menuOrder: 105,
   };
 
   constructor(private readonly gamePlaySessionService: GamePlaySessionService) {

@@ -97,6 +97,15 @@ export class AudioService {
    * the two apart is what makes the focus handling survive the asynchrony of `suspend()`/`resume()`.
    */
   private wantsAudible = true;
+  /** Page-activity half of {@link wantsAudible}: the document is visible and focused. */
+  private pageActive = true;
+  /**
+   * Host-pause half of {@link wantsAudible}. A paused game must go quiet even though its window is
+   * still focused — a frozen scene over continuing music reads as a hang, not a pause. Suspending
+   * the context (rather than stopping playbacks) is what makes resume seamless: every buffer picks
+   * up where the pause caught it.
+   */
+  private pausedByHost = false;
   /** Whether the browser has ever permitted this context to run (autoplay unlock has happened). */
   private unlockedByGesture = false;
   private readonly unlockFromPointerDown = (): void => {
@@ -286,9 +295,27 @@ export class AudioService {
   private handleActivityChange = (): void => {
     const isVisible = document.visibilityState === 'visible';
     const hasFocus = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
-    this.wantsAudible = isVisible && hasFocus;
-    this.reconcileContextState();
+    this.pageActive = isVisible && hasFocus;
+    this.updateWantsAudible();
   };
+
+  /**
+   * Silence (or un-silence) the mixer because the host paused the game. Idempotent, and orthogonal
+   * to the focus rule: whichever of the two wants silence gets it, and audio only comes back when
+   * both are happy. Driven by {@link SceneRunner.pause}/`resume`.
+   */
+  setPaused(paused: boolean): void {
+    if (this.pausedByHost === paused) {
+      return;
+    }
+    this.pausedByHost = paused;
+    this.updateWantsAudible();
+  }
+
+  private updateWantsAudible(): void {
+    this.wantsAudible = this.pageActive && !this.pausedByHost;
+    this.reconcileContextState();
+  }
 
   /**
    * Drive the context towards {@link wantsAudible}.
@@ -583,6 +610,8 @@ export class AudioService {
     this.context = null;
     this.buses.clear();
     this.wantsAudible = true;
+    this.pageActive = true;
+    this.pausedByHost = false;
     this.unlockedByGesture = false;
   }
 

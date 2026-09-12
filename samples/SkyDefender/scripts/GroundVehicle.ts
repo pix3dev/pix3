@@ -29,7 +29,8 @@ const TIP_RAMMER = 13;
  * - otherwise → parks and FIRES its deck cannon every `attackPeriod` s: a
  *   visible direct `EnemyShell` from the hull's front edge (damage rides on the
  *   shell's castle impact, not emitted directly).
- * Spawned by WaveSpawner once the bridge reports ready; shares the balloon
+ * Spawned by WaveSpawner on the wave's single clock, like every other unit (the
+ * original has no bridge gate — see WaveSpawner.onUpdate); shares the balloon
  * signal contract (`damaged` in, `unit-killed` / `castle-damaged` / `enemy-gone`
  * out on `game-root`).
  */

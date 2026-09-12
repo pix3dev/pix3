@@ -1,6 +1,10 @@
-# Unit Gallery — DEV scene. Every enemy unit prefab laid out in a grid for
-# visual review in the editor (no play mode needed). Labels inside the prefabs
-# are editorOnly nodes: the runtime strips them from play clones and exports.
+# Unit Gallery — DEV scene. One enemy unit prefab per family laid out in a grid
+# for visual review in the editor (no play mode needed). Labels inside the
+# prefabs are editorOnly nodes: the runtime strips them from play clones and
+# exports. The air band now has ONE PREFAB PER CLASS (48 distinct rigs, see
+# .plans/enemy-fidelity-audit.md §3); all of them are on the generated
+# src/assets/scenes/dev/air-gallery.pix3scene, and only each family's first
+# variant is kept here.
 version: 1.0.0
 metadata:
   author: Sky Defender Remaster
@@ -138,16 +142,16 @@ root:
             scale: [1, 1]
             rotation: 0
       - id: gal-unik
-        instance: res://src/assets/prefabs/unik.pix3scene
-        name: "Unik"
+        instance: res://src/assets/prefabs/units/unik-1.pix3scene
+        name: "Unik 1"
         properties:
           transform:
             position: [360, 0]
             scale: [1, 1]
             rotation: 0
       - id: gal-urik
-        instance: res://src/assets/prefabs/urik.pix3scene
-        name: "Urik"
+        instance: res://src/assets/prefabs/units/urik-1.pix3scene
+        name: "Urik 1"
         properties:
           transform:
             position: [-360, -140]

@@ -19,43 +19,105 @@ import { V15_SURVIVAL } from './SdV15';
 
 /** Joe's alarm cry — the original plays it on every ground-unit spawn. */
 const GROUND_ALARM_SOUND = 'res://src/assets/audio/other/warning_scream.mp3';
+/** `GRracer` — the one truck `FN_addMob` gives `tip 13` (rams the gate). */
+const GROUND_RAMMER_ID = 61;
 
 // ── Unit prefab registry ─────────────────────────────────────────────────────
-// Every unit FAMILY is an authored prefab (visual composition baked per the
-// decompiled com.enemy.*.init(); reviewable on the dev unit-gallery scene).
-// The spawner only applies per-id STATS from SdBalance on top.
+// Every unit CLASS is an authored prefab (visual composition baked per the
+// decompiled com.enemy.*.init(); reviewable on the dev air-gallery and
+// unit-gallery scenes). The spawner only applies per-id STATS from SdBalance.
 const PREFABS = 'res://src/assets/prefabs';
-const AIR_FAMILY: ReadonlyArray<[from: number, to: number, file: string]> = [
-  [1, 1, 'lucky'],
-  [2, 2, 'lucky2'],
-  [3, 3, 'slevin'],
-  [4, 4, 'slevin-fire'],
-  [5, 8, 'avalon1'],
-  [9, 12, 'avalon2'],
-  [13, 16, 'lavalon1'],
-  [17, 20, 'lavalon2'],
-  [21, 25, 'nz'],
-  [26, 29, 'suc'],
-  [30, 30, 'fatty'],
-  [31, 31, 'fish'],
-  [32, 32, 'splash'],
-  [34, 34, 'nut'],
-];
-const GROUND_FAMILY = [
-  'atabus', 'attaban', 'baka', 'baron', 'bb', 'bus', 'dream',
-  'dreamer', 'fatima', 'medic', 'rracer', 'garbag', 'siege', 'warchild',
-] as const; // ids 49..62 in order
+/**
+ * Air band, id → prefab file. ONE PREFAB PER CLASS, not per family: the
+ * original has 48 distinct rigs and a family's `_1` variant is not
+ * representative of the rest of it (`.plans/enemy-fidelity-audit.md` §3). The
+ * `_1`-shaped names (`avalon1`, `nz`, `suc`, …) are the pre-existing files that
+ * already carried that class's rig; everything else is a per-class file.
+ * Ids 5-24, 26-29 and 35-48 are GENERATED from the rig table in
+ * `scripts/gen-levels.mjs` — review them on `scenes/dev/air-gallery.pix3scene`.
+ */
+const AIR_CLASS: Readonly<Record<number, string>> = {
+  1: 'lucky', // Lucky_1     body + Mine
+  2: 'lucky2', // Lucky_2     body + Stoneb
+  3: 'slevin', // Slevin_1    body + Mine
+  4: 'slevin-fire', // Slevin_2  body + Stoneb + Burn1 + Littlebg
+  5: 'avalon1', // Avalon1_1  nose BigGun
+  6: 'avalon1-2', // Avalon1_2  heavy B_Torpedo
+  7: 'avalon1-3', // Avalon1_3  3x Mine
+  8: 'avalon1-4', // Avalon1_4  3x fire bomb
+  9: 'avalon2', // Avalon2_1  2x gun-basket
+  10: 'avalon2-2', // Avalon2_2  4x Stoneb
+  11: 'avalon2-3', // Avalon2_3  2x B_LTorpedo
+  12: 'avalon2-4', // Avalon2_4  5x Mine
+  13: 'lavalon1', // Lavalon1_1 gun-basket
+  14: 'lavalon1-2', // Lavalon1_2 B_LTorpedo
+  15: 'lavalon1-3', // Lavalon1_3 2x Mine
+  16: 'lavalon1-4', // Lavalon1_4 fire bomb
+  17: 'lavalon2', // Lavalon2_1 gun-basket
+  18: 'lavalon2-2', // Lavalon2_2 2x Stoneb — the level-1 "Bomber"
+  19: 'lavalon2-3', // Lavalon2_3 burning hull, no weapon
+  20: 'lavalon2-4', // Lavalon2_4 2x Mine
+  21: 'nz', // NZ_1        gun-basket
+  22: 'nz-2', // NZ_2        basket + 55x10 sniper
+  23: 'nz-3', // NZ_3        3x Mine
+  24: 'nz-4', // NZ_4        3x Burn2 (burning)
+  // NZ_5 is the ONE variant of the family that carries no basket and no gun:
+  // `E/NZ_5.init()` hangs `Stoneb` + `Burn1` + `Littlebg` off a `d1` sprite.
+  25: 'nz-fire',
+  26: 'suc', // SUC_1       gun-basket
+  27: 'suc-2', // SUC_2       basket + 2x sniper
+  28: 'suc-3', // SUC_3       2x Mine
+  29: 'suc-4', // SUC_4       2x Stoneb
+  30: 'fatty',
+  31: 'fish',
+  32: 'splash',
+  34: 'nut',
+  35: 'unik-1', // Unik_1   compound + B_TypSnp
+  36: 'unik-2', // Unik_2   compound + B_LTorpedo
+  37: 'unik-3', // Unik_3   compound + Stoneb
+  38: 'unik-4', // Unik_4   compound + fire bomb
+  39: 'unik-5', // Unik_5   PLANE + B_TypSnp
+  40: 'unik-6', // Unik_6   PLANE + B_TypGun — the level-1 "ATS"
+  41: 'unik-7', // Unik_7   PLANE + B_LTorpedo
+  42: 'unik-8', // Unik_8   PLANE, burning
+  43: 'urik-1', // Urik_1   compound + heavy B_Torpedo
+  44: 'urik-2', // Urik_2   compound + 3x Mine
+  45: 'urik-3', // Urik_3   compound + BigGun
+  46: 'urik-4', // Urik_4   PLANE + B_TypGun
+  47: 'urik-5', // Urik_5   PLANE + B_Mine
+  48: 'urik-6', // Urik_6   PLANE, burning + motion blur
+};
+/**
+ * Ground band, id → truck prefab. EXPLICIT, not an offset into an ordered list:
+ * `FN_addMob`'s stage-1 switch has no `case 49` and maps every id from 50 up to
+ * `id - 2`, so the band is 50-63 with three HOLES (58/59/62 reach a
+ * constructor-less case; SdV15 marks them `cat: 'cut'`). The `fatima`/`garbag`/
+ * `siege` prefabs stay on disk but are deliberately out of this registry — those
+ * liveries only ever existed as `CorsetCar` wreck bitmaps.
+ */
+const GROUND_FAMILY: Readonly<Record<number, string>> = {
+  50: 'atabus',
+  51: 'attaban',
+  52: 'baka',
+  53: 'baron',
+  54: 'bb',
+  55: 'bus',
+  56: 'dream',
+  57: 'dreamer',
+  60: 'medic',
+  61: 'rracer',
+  63: 'warchild',
+};
 
 /** id (1-84) → prefab path, or null for ids without a prefab yet (quest npc). */
 function unitPrefabPath(id: number): string | null {
   if (id === 33) return `${PREFABS}/transporter-enemy.pix3scene`;
-  if (id >= 35 && id <= 42) return `${PREFABS}/unik.pix3scene`;
-  if (id >= 43 && id <= 48) return `${PREFABS}/urik.pix3scene`;
-  if (id >= 49 && id <= 62) return `${PREFABS}/units/${GROUND_FAMILY[id - 49]}.pix3scene`;
-  if (id >= 63 && id <= 74) return `${PREFABS}/quest-npc.pix3scene`;
-  if (id >= 75 && id <= 84) return `${PREFABS}/boss.pix3scene`;
-  const air = AIR_FAMILY.find(([from, to]) => id >= from && id <= to);
-  return air ? `${PREFABS}/units/${air[2]}.pix3scene` : null;
+  const truck = GROUND_FAMILY[id];
+  if (truck) return `${PREFABS}/units/${truck}.pix3scene`;
+  if (id >= 64 && id <= 75) return `${PREFABS}/quest-npc.pix3scene`;
+  if (id >= 76 && id <= 84) return `${PREFABS}/boss.pix3scene`;
+  const air = AIR_CLASS[id];
+  return air ? `${PREFABS}/units/${air}.pix3scene` : null;
 }
 
 /** Original 640×480 top-left y → stage-local center-origin Y-up. */
@@ -83,11 +145,6 @@ export class WaveSpawner extends Script {
   private missionName = '';
   /** Survival-only stat overrides for the typical balloon. */
   private survivalStats: { hp: number; speed: number; score: number } | null = null;
-  /** Ground assault: waits for the bridge, then runs its own clock. */
-  private groundEntries: MissionEntry[] = [];
-  private groundFlags: boolean[] = [];
-  private groundElapsed = 0;
-  private bridgeReady = false;
   /** 1-based campaign level of the current wave (0 = survival/none) — drives the
    *  per-level quest identity + container rect for quest NPCs. */
   private questLevel = 0;
@@ -130,9 +187,7 @@ export class WaveSpawner extends Script {
       alive: this.aliveCount,
       entries: this.entries.length,
       spawned: this.spawnedFlags.filter(Boolean).length,
-      ground: this.groundEntries.length,
-      groundSpawned: this.groundFlags.filter(Boolean).length,
-      bridgeReady: this.bridgeReady,
+      ground: this.entries.filter(e => UNITS[e.id]?.ground).length,
       survival: this.survivalStats,
       questLevel: this.questLevel,
     };
@@ -142,11 +197,6 @@ export class WaveSpawner extends Script {
     // Track despawns for the clear check (enemies emit on game-root).
     this.findNode('game-root')?.connect('enemy-gone', this, () => {
       this.aliveCount = Math.max(0, this.aliveCount - 1);
-    });
-    // Ground waves hold until the transporters finish the bridge (mission 1);
-    // once built it stays up for the rest of the run.
-    this.findNode('game-root')?.connect('bridge-ready', this, () => {
-      this.bridgeReady = true;
     });
     // Warm the texture cache for every unit body so first spawns don't pop in.
     // (Prefab rig art — baskets, guns, gondolas — loads with each prefab.)
@@ -174,7 +224,6 @@ export class WaveSpawner extends Script {
     const index = Math.min(Math.max(1, waveNumber), MISSIONS.length) - 1;
     const mission = MISSIONS[index];
     this.entries = mission.entries;
-    this.groundEntries = mission.ground ?? [];
     this.missionName = mission.name;
     this.survivalStats = null;
     this.questLevel = index + 1;
@@ -184,21 +233,16 @@ export class WaveSpawner extends Script {
   /**
    * Survival: the original PREDEFINED 40-wave set (release build set2), verbatim.
    * Waves play in order with a lives counter; beyond wave 40 the last wave
-   * repeats. Ground units in a wave route onto the bridge deck like campaign.
+   * repeats. Ground units in a wave route onto the bridge deck like campaign —
+   * on the same single clock (the 40-level set in fact uses no id >= 49).
    */
   startSurvivalWave(waveNumber: number): void {
     const n = Math.max(1, waveNumber);
     const level = V15_SURVIVAL[Math.min(n, V15_SURVIVAL.length) - 1] ?? [];
-    const entries: MissionEntry[] = [];
-    const ground: MissionEntry[] = [];
-    for (const [t, id, y, a, tip, dop] of level) {
-      const e: MissionEntry = { t, id, y, a, tip, dop };
-      if (UNITS[id]?.ground) ground.push(e);
-      else entries.push(e);
-    }
     this.survivalStats = null;
-    this.entries = entries;
-    this.groundEntries = ground;
+    this.entries = level.map(
+      ([t, id, y, a, tip, dop]): MissionEntry => ({ t, id, y, a, tip, dop })
+    );
     this.missionName = `Survival ${n}`;
     // Survival has no campaign quest levels; quest NPCs (if any appear) fall back
     // to a per-unit questId with no container.
@@ -208,9 +252,7 @@ export class WaveSpawner extends Script {
 
   private beginRun(): void {
     this.spawnedFlags = this.entries.map(() => false);
-    this.groundFlags = this.groundEntries.map(() => false);
     this.elapsed = 0;
-    this.groundElapsed = 0;
     this.aliveCount = 0;
     this.running = true;
   }
@@ -222,7 +264,6 @@ export class WaveSpawner extends Script {
   /** Dev-only: mark the current wave finished so GameFlow advances (debug action). */
   forceClear(): void {
     this.spawnedFlags = this.spawnedFlags.map(() => true);
-    this.groundFlags = this.groundFlags.map(() => true);
     // Despawn the survivors too — otherwise they keep flying and shell the
     // castle while the debug-driven shop is open.
     this.despawnAll();
@@ -245,14 +286,17 @@ export class WaveSpawner extends Script {
 
   /** True when every entry has spawned and every spawned enemy is gone. */
   isWaveClear(): boolean {
-    return (
-      this.running &&
-      this.spawnedFlags.every(Boolean) &&
-      this.groundFlags.every(Boolean) &&
-      this.aliveCount === 0
-    );
+    return this.running && this.spawnedFlags.every(Boolean) && this.aliveCount === 0;
   }
 
+  /**
+   * ONE clock for the whole table, ground included — the original's
+   * `MT.gameCode` is a single `++this.g_time` compared against every
+   * `arMobs[i][0]` with no ground branch. The bridge carriers run concurrently
+   * on `t_enTP` and gate nothing: on level 1 the last one docks at ~7 s just as
+   * the `GBaron` (t=7) rolls on, which is the coincidence the old `bridge-ready`
+   * gate mistook for a dependency.
+   */
   onUpdate(dt: number): void {
     if (!this.running || !this.scene) return;
     this.elapsed += dt;
@@ -262,17 +306,6 @@ export class WaveSpawner extends Script {
       this.spawnedFlags[i] = true;
       this.aliveCount += 1;
       this.spawn(this.entries[i]);
-    }
-
-    // Ground assault clock only ticks once the bridge is standing.
-    if (this.bridgeReady && this.groundEntries.length > 0) {
-      this.groundElapsed += dt;
-      for (let i = 0; i < this.groundEntries.length; i++) {
-        if (this.groundFlags[i] || this.groundEntries[i].t > this.groundElapsed) continue;
-        this.groundFlags[i] = true;
-        this.aliveCount += 1;
-        this.spawn(this.groundEntries[i]);
-      }
     }
   }
 
@@ -341,7 +374,7 @@ export class WaveSpawner extends Script {
     this.attachHealthBar(node, unit);
   }
 
-  /** Per-id stats for compound units (unik/urik prefabs). */
+  /** Per-id stats for the rope-hung compounds (Unik_1-4 / Urik_1-3). */
   private applyCompoundStats(node: NodeBase, entry: MissionEntry, unit: UnitDef): void {
     const logic = node.components.find((c): c is CompoundBalloon => c instanceof CompoundBalloon);
     if (!logic) return;
@@ -350,11 +383,13 @@ export class WaveSpawner extends Script {
     logic.config.score = unit.score;
     logic.config.stopX = toStopX(entry.a);
     // Air units never ram (see CompoundBalloon): they park-and-shoot from `a`
-    // or drift through. Unik (35-42) = arc cannon, Urik (43-48) = torpedo.
+    // or drift through.
     logic.config.castleDamage = 0;
     logic.config.attackDamage = unit.attackDamage ?? 0;
     logic.config.attackPeriod = unit.attackPeriod ?? 2;
-    logic.config.weaponClass = entry.id >= 43 && entry.id <= 48 ? 'torpedo' : 'arc';
+    // Per CLASS, not per family: only Unik_2 (36) and Urik_1 (43) mount a
+    // torpedo launcher — the rest of the compounds fire the lobbed arc shell.
+    logic.config.weaponClass = unit.weaponClass ?? 'arc';
     this.attachHealthBar(node, unit);
   }
 
@@ -369,7 +404,11 @@ export class WaveSpawner extends Script {
     logic.config.attackDamage = unit.attackDamage ?? 0;
     logic.config.attackPeriod = unit.attackPeriod ?? 5;
     // Behaviour variant: tip 13 = ram-and-self-destruct; else park-and-shoot.
-    logic.config.tip = entry.tip;
+    // It comes from the CLASS, not the XML: `FN_addMob` emits `pushbyte 12;
+    // setproperty tip` for every `G*` and `pushbyte 13` for `GRracer` (id 61),
+    // while the XML `<tip>` lands in `tpp` and is `0` for every campaign ground
+    // spawn — so feeding `entry.tip` here meant the racers never rammed.
+    logic.config.tip = entry.id === GROUND_RAMMER_ID ? 13 : 12;
     this.attachHealthBar(node, unit);
   }
 

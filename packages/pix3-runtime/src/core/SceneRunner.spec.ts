@@ -214,6 +214,7 @@ describe('SceneRunner camera projection updates', () => {
       stopAll: vi.fn(),
       resetBuses: vi.fn(),
       applySnapshot: vi.fn(),
+      setPaused: vi.fn(),
     } as unknown as AudioService;
     const runner = new SceneRunner(
       createSceneManagerStub(),
@@ -492,6 +493,7 @@ describe('SceneRunner camera projection updates', () => {
       stopAll: vi.fn(),
       resetBuses: vi.fn(),
       applySnapshot: vi.fn(),
+      setPaused: vi.fn(),
       getActivePlaybackSnapshot: vi.fn(() => []),
     } as unknown as AudioService;
     const runner = new SceneRunner(
@@ -547,6 +549,7 @@ describe('SceneRunner camera projection updates', () => {
       stopAll: vi.fn(),
       resetBuses: vi.fn(),
       applySnapshot,
+      setPaused: vi.fn(),
       getActivePlaybackSnapshot: vi.fn(() => []),
     } as unknown as AudioService;
     const runner = new SceneRunner(
@@ -611,6 +614,7 @@ describe('SceneRunner camera projection updates', () => {
       stopAll: vi.fn(),
       resetBuses: vi.fn(),
       applySnapshot,
+      setPaused: vi.fn(),
       getActivePlaybackSnapshot: vi.fn(() => []),
     } as unknown as AudioService;
     const runner = new SceneRunner(
@@ -655,6 +659,7 @@ describe('SceneRunner camera projection updates', () => {
       stopAll: vi.fn(),
       resetBuses: vi.fn(),
       applySnapshot: vi.fn(),
+      setPaused: vi.fn(),
       getActivePlaybackSnapshot: vi.fn(() => []),
     } as unknown as AudioService;
     const runner = new SceneRunner(

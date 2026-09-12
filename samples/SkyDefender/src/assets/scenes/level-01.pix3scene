@@ -190,6 +190,7 @@ root:
                 config:
                   mineX: -20
           - id: castle
+            type: Group2D
             name: Castle
             instance: res://src/assets/prefabs/castle.pix3scene
           - id: effects
@@ -393,14 +394,21 @@ root:
                     rotation: 0
                 children: []
       - id: hud
+        type: CanvasLayer2D
         name: HUD
         instance: res://src/assets/prefabs/battle-hud.pix3scene
       - id: shop-overlay
+        type: Group2D
         name: Shop Overlay
         instance: res://src/assets/prefabs/battle-shop.pix3scene
+        properties:
+          visible: true
       - id: result-overlay
+        type: Group2D
         name: Result Overlay
         instance: res://src/assets/prefabs/battle-result.pix3scene
+        properties:
+          visible: true
   - id: camera2d
     type: Camera2D
     name: Game Camera

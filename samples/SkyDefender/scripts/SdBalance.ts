@@ -272,6 +272,12 @@ export interface UnitDef {
    * prefab; EnemyBalloon reads its own baked config.gunType for recoil/shells).
    */
   gunType?: 'typical' | 'heavy';
+  /**
+   * Compound units only: the gondola weapon `CompoundBalloon` fires — `arc`
+   * (lobbed cannon shell) or `torpedo` (free-fall rocket). It is per CLASS,
+   * not per family: only `Unik_2` and `Urik_1` mount a torpedo launcher.
+   */
+  weaponClass?: 'arc' | 'torpedo';
   /** Bombers (Lucky/Slevin): carry ONE bomb, drop at `a`, then climb away. */
   bomber?: boolean;
   /** tpb 3 fire bomb (Stone + Burn1 flame) vs plain mine/stone. */
@@ -280,7 +286,7 @@ export interface UnitDef {
   ground?: boolean;
   /** Enemy transporter airship (S_SS): animated brown body + static red overlay. */
   transporter?: boolean;
-  /** Boss (ids 75-84): driven by the generic boss.pix3scene + BossEnemy script. */
+  /** Boss (ids 76-84): driven by the generic boss.pix3scene + BossEnemy script. */
   boss?: boolean;
   /** Boss white-flash overlay texture (`B_bossN_w`). */
   whiteTex?: string;
@@ -288,9 +294,9 @@ export interface UnitDef {
   gunCount?: number;
   /** Boss escort/mini-boss: same behaviour, but stays OFF the HUD boss bar. */
   escort?: boolean;
-  /** Final boss (id 84): fires the King finale below 400 HP. */
+  /** Final boss (id 84 `Boss6`): fires the King finale below 400 HP. */
   finale?: boolean;
-  /** Quest NPC (ids 63-74): driven by quest-npc.pix3scene + QuestNpc script. */
+  /** Quest NPC (ids 64-75): driven by quest-npc.pix3scene + QuestNpc script. */
   npc?: boolean;
   /** Quest role (protect/carrier/combat) from the QUEST table. */
   role?: QuestRole;
@@ -352,43 +358,97 @@ const ART: Record<number, Art> = {
     variants: [`${AIR}/transporter/00000.png`, `${AIR}/transporter/over.png`],
   },
   34: { sprite: `${AIR}/support/nut.png`, w: 51, h: 29 },
+  // Unik_1-4 / Urik_1-3 are the rope-hung COMPOUNDS: `sprite` is the carriage
+  // (what the wreck reuses), `w`/`h` size the floating HP bar.
   35: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
   36: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
   37: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
   38: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
-  39: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
-  40: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
-  41: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
-  42: { sprite: `${AIR}/unik/unik_body.png`, w: 61, h: 33 },
+  // Unik_5-8 (39-42) and Urik_4-6 (46-48) are AIRPLANES, not balloons: their
+  // `init()` builds a single `B_unik_nd` (56x23) / `B_urik_nd` (72x24) airframe
+  // and never touches the gasbags/ropes/carriage (SdV15 puts them in `air`).
+  39: { sprite: `${AIR}/unik/unik_nd.png`, w: 56, h: 23 },
+  40: { sprite: `${AIR}/unik/unik_nd.png`, w: 56, h: 23 },
+  41: { sprite: `${AIR}/unik/unik_nd.png`, w: 56, h: 23 },
+  42: { sprite: `${AIR}/unik/unik_nd.png`, w: 56, h: 23 },
   43: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
   44: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
   45: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
-  46: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
-  47: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
-  48: { sprite: `${AIR}/urik/urik_body.png`, w: 72, h: 24 },
-  49: { sprite: `${GROUND}/atabus/atabus.png`, w: 81, h: 31 },
-  50: { sprite: `${GROUND}/attaban/attaban.png`, w: 75, h: 33 },
-  51: { sprite: `${GROUND}/baka/baka.png`, w: 83, h: 33 },
-  52: { sprite: `${GROUND}/baron/baron.png`, w: 84, h: 38 },
-  53: { sprite: `${GROUND}/bb/bb.png`, w: 80, h: 43 },
-  54: { sprite: `${GROUND}/bus/bus.png`, w: 80, h: 33 },
-  55: { sprite: `${GROUND}/dream/dream.png`, w: 90, h: 23 },
-  56: { sprite: `${GROUND}/dreamer/dreamer.png`, w: 93, h: 24 },
-  57: { sprite: `${GROUND}/fatima/fatima.png`, w: 100, h: 30 },
-  58: { sprite: `${GROUND}/medic/medic.png`, w: 80, h: 32 },
-  59: { sprite: `${GROUND}/rracer/rracer.png`, w: 70, h: 24 },
-  60: { sprite: `${GROUND}/garbag/garbag.png`, w: 80, h: 38 },
-  61: { sprite: `${GROUND}/siege/siege.png`, w: 62, h: 75 },
-  62: { sprite: `${GROUND}/warchild/warchild.png`, w: 80, h: 27 },
+  46: { sprite: `${AIR}/urik/urik_nd.png`, w: 72, h: 24 },
+  47: { sprite: `${AIR}/urik/urik_nd.png`, w: 72, h: 24 },
+  48: { sprite: `${AIR}/urik/urik_nd.png`, w: 72, h: 24 },
+  // Ground band = ids 50-63 (`FN_addMob`: `if(param1 >= 50 && param1 <= 63)
+  // { _loc6_.y = 380; }` forces the deck height for exactly this range). Every
+  // body below is the SWF `G*_B_body` bitmap at its native size. 49/58/59/62 are
+  // deliberately absent: they reach no constructor (SdV15 `cat: 'cut'`), so
+  // `buildUnit` leaves them `unsupported` and the spawner skips them loudly.
+  50: { sprite: `${GROUND}/atabus/atabus.png`, w: 81, h: 31 },
+  51: { sprite: `${GROUND}/attaban/attaban.png`, w: 75, h: 33 },
+  52: { sprite: `${GROUND}/baka/baka.png`, w: 83, h: 33 },
+  53: { sprite: `${GROUND}/baron/baron.png`, w: 84, h: 38 },
+  54: { sprite: `${GROUND}/bb/bb.png`, w: 80, h: 43 },
+  55: { sprite: `${GROUND}/bus/bus.png`, w: 80, h: 33 },
+  56: { sprite: `${GROUND}/dream/dream.png`, w: 90, h: 23 },
+  57: { sprite: `${GROUND}/dreamer/dreamer.png`, w: 93, h: 24 },
+  60: { sprite: `${GROUND}/medic/medic.png`, w: 80, h: 32 },
+  61: { sprite: `${GROUND}/rracer/rracer.png`, w: 70, h: 24 },
+  63: { sprite: `${GROUND}/warchild/warchild.png`, w: 80, h: 27 },
 };
 
-// ── Bosses (ids 75-84) ──────────────────────────────────────────────────────
-// BEST-EFFORT art mapping: only 5 boss art sets survive in the archive
-// (baby/grafz/rud/snake/xenon) for 10 boss ids, so several ids REUSE a family as
-// a placeholder — flagged below. Every path is Glob-verified to exist under
-// src/assets/textures/enemy/bosses/; the sizes are the display sizes from the
-// remaster spec and need in-editor visual confirmation. `_white` overlays that a
-// family lacks fall back to a sibling family's white (noted per-id).
+/**
+ * `TypGunMob.rld_max` in FRAMES, per spawn id — the original counts `++rld`
+ * once per frame and fires when `rld > rld_max`, so the cadence is `rld/30` s.
+ * `TypGunMob`'s constructor defaults it to 50 (1.67 s), which is what every
+ * basket gun uses; only the classes below override it in their `init()`:
+ * the 55x10 `B_TypSnp` snipers reload slowly (70), the plane mounts fast
+ * (Unik_5 25, Unik_6/Urik_4 20). Ids with no gun keep the default and never
+ * reach `EnemyBalloon.fireGun` anyway (their prefab has `gunType: ''`).
+ */
+const RELOAD: Record<number, number> = { 22: 70, 27: 70, 35: 70, 39: 25, 40: 20, 46: 20 };
+const RELOAD_DEFAULT = 50;
+
+/**
+ * Barrel each ARMED air class carries, from its `init()`: `B_TypGun` (23x9,
+ * lobbed shell) vs the heavy direct-fire barrels — `B_TypSnp` (55x10) and the
+ * `BigGun` clip. Classes absent here mount no `TypGunMob` at all.
+ */
+const GUN_KIND: Record<number, 'typical' | 'heavy'> = {
+  5: 'heavy', // Avalon1_1  BigGun (nose)
+  9: 'typical', // Avalon2_1  2x B_TypGun in baskets
+  13: 'typical', // Lavalon1_1 B_TypGun
+  17: 'typical', // Lavalon2_1 B_TypGun
+  21: 'typical', // NZ_1       B_TypGun
+  22: 'heavy', // NZ_2       B_TypSnp
+  26: 'typical', // SUC_1      B_TypGun
+  27: 'heavy', // SUC_2      2x B_TypSnp
+  35: 'heavy', // Unik_1     B_TypSnp
+  39: 'heavy', // Unik_5     B_TypSnp (plane)
+  40: 'typical', // Unik_6     B_TypGun (plane)
+  45: 'heavy', // Urik_3     BigGun
+  46: 'typical', // Urik_4     B_TypGun (plane)
+};
+
+/**
+ * Gondola weapon of the seven rope-hung COMPOUNDS. Only Unik_2 and Urik_1
+ * actually launch something (`TorpedoGun2` + `B_LTorpedo`, `TorpedoGun` +
+ * `B_Torpedo`); Unik_1/Urik_3 fire their barrel and the rest carry visual load
+ * only, so they keep the lobbed `arc` default.
+ */
+const COMPOUND_WEAPON: Record<number, 'arc' | 'torpedo'> = {
+  36: 'torpedo',
+  43: 'torpedo',
+};
+
+// ── Bosses (ids 76-84) ──────────────────────────────────────────────────────
+// Band per `FN_addMob`: `if(param1 > 75) x = 820` — bosses start at 76, and
+// `Boss6` (id 84, `if(param1 == 84) x = 950`) is the only class calling
+// `FN_final`, so it is the finale. Id 75 is NOT a boss: it is `MFargoWar` (see
+// QUEST). With the corrected mapping seven of the nine used slots resolve to
+// their OWN art — only Boss2a (77) and Boss2b (78) have no surviving remaster
+// bitmap (SWF `99_…_B_boss2a.png` 278x89 and `43_…_B_boss2b.png` 269x110 still
+// need importing as bosses/boss2a/, bosses/boss2b/) and keep a flagged
+// placeholder. `_white` overlays that a family lacks fall back to a sibling
+// family's white (noted per-id).
 const BOSSES = 'res://src/assets/textures/enemy/bosses';
 
 interface BossDef {
@@ -402,44 +462,52 @@ interface BossDef {
 }
 
 const BOSS: Record<number, BossDef> = {
-  // 75 Boss1 — mini-boss escort (1200 hp).
-  75: { art: `${BOSSES}/snake/snake1.png`, whiteTex: `${BOSSES}/snake/snake1_white.png`, width: 70, height: 70, gunCount: 1, escort: true },
-  // 76 Boss2a — L5 level-ender.
+  // 76 Boss1 — L5 level-ender (8000 hp row). `B_boss1` 214x81 = baby.
   76: { art: `${BOSSES}/baby/baby.png`, whiteTex: `${BOSSES}/baby/baby_white.png`, width: 214, height: 81, gunCount: 2 },
-  // 77 Boss2b — L10.
+  // 77 Boss2a — L10 (first of the pair). PLACEHOLDER: its own `B_boss2a` (278x89)
+  // is not in the remaster archive yet; grafz stands in, sized to grafz.
   77: { art: `${BOSSES}/grafz/grafz.png`, whiteTex: `${BOSSES}/grafz/grafz_white.png`, width: 432, height: 79, gunCount: 3 },
-  // 78 Boss3 — L10.
+  // 78 Boss2b — L10 (second of the pair). PLACEHOLDER: its own `B_boss2b`
+  // (269x110) is not in the remaster archive yet; rud stands in, sized to rud.
   78: { art: `${BOSSES}/rud/rud.png`, whiteTex: `${BOSSES}/rud/rud_white.png`, width: 207, height: 107, gunCount: 2 },
-  // 79 S_Xenon — L15.
+  // 79 Boss3 — L15 boss (18000 hp row). `B_boss3` 164x66 = xenon/x.
   79: { art: `${BOSSES}/xenon/x.png`, whiteTex: `${BOSSES}/xenon/x_white.png`, width: 164, height: 66, gunCount: 2 },
-  // 80 Boss5 — escort swarm (L15). White FALLS BACK to xenon's x_white (no xsup_white).
+  // 80 S_Xenon — L15 escort swarm x42 (1100 hp row). `B_xsup` 80x32.
+  // White FALLS BACK to xenon's x_white (no xsup_white).
   80: { art: `${BOSSES}/xenon/xsup.png`, whiteTex: `${BOSSES}/xenon/x_white.png`, width: 80, height: 32, gunCount: 1, escort: true },
-  // 81 Boss4 — L25. REUSE grafz art (PLACEHOLDER — no dedicated Boss4 art in archive).
-  81: { art: `${BOSSES}/grafz/grafz.png`, whiteTex: `${BOSSES}/grafz/grafz_white.png`, width: 432, height: 79, gunCount: 3 },
-  // 82 Bear — L20. REUSE rud art (PLACEHOLDER — Bear needs FFDec B_bear extraction).
+  // 81 Boss5 — L25 boss (30000 hp row). `B_boss5` 70x70 = snake/snake1.
+  81: { art: `${BOSSES}/snake/snake1.png`, whiteTex: `${BOSSES}/snake/snake1_white.png`, width: 70, height: 70, gunCount: 1 },
+  // 82 Boss4 — L20 boss (27000 hp row). `B_boss4` 207x107 = rud.
   82: { art: `${BOSSES}/rud/rud.png`, whiteTex: `${BOSSES}/rud/rud_white.png`, width: 207, height: 107, gunCount: 2 },
-  // 83 Boss6 — escort (L20). White FALLS BACK to rud_white (no rui_white).
+  // 83 Bear — L20 escort x40 (1000 hp row). `B_bear` 55x33 = rud/rui.
+  // White FALLS BACK to rud_white (no rui_white).
   83: { art: `${BOSSES}/rud/rui.png`, whiteTex: `${BOSSES}/rud/rud_white.png`, width: 55, height: 33, gunCount: 1, escort: true },
-  // 84 FinalBoss — L30. REUSE grafz art (PLACEHOLDER — dedicated final art in a later SWF).
+  // 84 Boss6 — L30 final (40000 hp row). `B_boss6` 432x79 = grafz; the only
+  // class calling `FN_final`.
   84: { art: `${BOSSES}/grafz/grafz.png`, whiteTex: `${BOSSES}/grafz/grafz_white.png`, width: 432, height: 79, gunCount: 3, finale: true },
 };
 
-// ── Quest NPCs (ids 63-74) ───────────────────────────────────────────────────
+// ── Quest NPCs (ids 64-75) ───────────────────────────────────────────────────
+// Band per `FN_addMob`: `if(param1 == 64 || … 65 || 66 || 67 || 68 || 75)` sets
+// the NPC aim points — exactly MTurik/MFargo/MWife/MBob/MEngin and MFargoWar
+// under the corrected mapping. Id 63 is NOT an NPC: it is the GWarchild truck.
 // The special "quest" mechanics (protect / cargo-into-container / combat) run on
 // the generic quest-npc.pix3scene + QuestNpc script. This table gives each id its
 // ROLE, cargo class and BEST-EFFORT body/payload art — there is no dedicated
 // quest-NPC art in the surviving archive, so several ids reuse a fitting
 // interactive/npc sprite as a placeholder. FLAG (needs in-editor art review):
-//   63 MTurik   → hunter.png       (no "Turik" art; reuse the hunter livery)
-//   64 MFargo   → fargo_small       (in-world Fargo — fmain.png is a portrait)
-//   66 MBob     → cityzen1          (generic citizen stand-in)
-//   68 MLucky   → bomber_lucky      (reuse an air-unit livery)
-//   69 MZombee  → firefly           (the "zom-bee" abductor — no dedicated art)
-//   70 MSheep   → sheep             (carrier body IS a sheep — reads as airlifted)
-//   71 MGold    → gold bar          (stands in for the defended gold pile/mine)
-//   72 MLuckyGold → hunter          (robber carrying a gold bar)
-//   73 MPolicek → policehunter      (golden-train guard carrying a cone/apple)
-//   74 MFargoWar → fargoship        (Fargo's warship stand-in)
+//   64 MTurik   → hunter.png        (no "Turik" art; reuse the hunter livery)
+//   65 MFargo   → fargo_small       (in-world Fargo — fmain.png is a portrait)
+//   67 MBob     → cityzen1          (generic citizen stand-in)
+//   69 MLucky   → bomber_lucky      (reuse an air-unit livery)
+//   70 MZombee  → firefly           (the "zom-bee" abductor — no dedicated art;
+//                                    the original rolls one of MZombee1-4)
+//   71 MSheep   → sheep             (carrier body IS a sheep — reads as airlifted)
+//   72 MGold    → gold bar          (stands in for the defended gold pile/mine)
+//   73 MLuckyGold → hunter          (robber carrying a gold bar)
+//   74 MPolicek → policehunter      (golden-train guard carrying a cone/apple)
+//   75 MFargoWar → fargoship        (Fargo's warship stand-in; unused by the
+//                                    30-level campaign)
 // Cargo art is real: gold.png (tpb10) / sheep.png (tpb11) / apple.png (tpb12).
 
 const INTER = 'res://src/assets/textures/interactive';
@@ -457,20 +525,36 @@ export interface QuestDef {
   height: number;
 }
 
-/** id (63-74) → quest role + art. questId/container come from QUEST_LEVELS. */
+/**
+ * id (64-75) → quest role + art. questId/container come from QUEST_LEVELS.
+ * Each row keeps the role/livery that was chosen for its CLASS — the whole band
+ * simply moved up one id when the `FN_addMob` `id - 2` shift was corrected.
+ */
 export const QUEST: Record<number, QuestDef> = {
-  63: { role: 'combat', payloadType: 0, npcTex: `${INTER}/hunter/hunter.png`, width: 60, height: 44 },
-  64: { role: 'protect', payloadType: 0, npcTex: `${NPC}/fargo_small/fs_1.png`, width: 44, height: 52 },
-  65: { role: 'protect', payloadType: 0, npcTex: `${INTER}/wife/wife.png`, width: 44, height: 52 },
-  66: { role: 'protect', payloadType: 0, npcTex: `${NPC}/cityzen1/c1_1.png`, width: 40, height: 50 },
-  67: { role: 'protect', payloadType: 0, npcTex: `${NPC}/enginer/e_run_1.png`, width: 40, height: 50 },
-  68: { role: 'combat', payloadType: 0, npcTex: `${AIR}/bomber_lucky/bl.png`, width: 40, height: 45 },
-  69: { role: 'carrier', payloadType: 11, npcTex: `${INTER}/firefly/firefly.png`, payloadTex: `${INTER}/sheep/sheep.png`, width: 48, height: 40 },
-  70: { role: 'carrier', payloadType: 11, npcTex: `${INTER}/sheep/sheep.png`, payloadTex: `${INTER}/sheep/sheep.png`, width: 48, height: 40 },
-  71: { role: 'protect', payloadType: 0, npcTex: `${INTER}/drop_objects/gold.png`, width: 40, height: 28 },
-  72: { role: 'carrier', payloadType: 10, npcTex: `${INTER}/hunter/hunter.png`, payloadTex: `${INTER}/drop_objects/gold.png`, width: 60, height: 44 },
-  73: { role: 'carrier', payloadType: 12, npcTex: `${INTER}/hunter/policehunter.png`, payloadTex: `${INTER}/drop_objects/apple.png`, width: 60, height: 44 },
-  74: { role: 'combat', payloadType: 0, npcTex: `${INTER}/fargo/fargoship.png`, width: 80, height: 50 },
+  // 64 MTurik (L3 x10)
+  64: { role: 'combat', payloadType: 0, npcTex: `${INTER}/hunter/hunter.png`, width: 60, height: 44 },
+  // 65 MFargo (L6)
+  65: { role: 'protect', payloadType: 0, npcTex: `${NPC}/fargo_small/fs_1.png`, width: 44, height: 52 },
+  // 66 MWife (L8)
+  66: { role: 'protect', payloadType: 0, npcTex: `${INTER}/wife/wife.png`, width: 44, height: 52 },
+  // 67 MBob (L19)
+  67: { role: 'protect', payloadType: 0, npcTex: `${NPC}/cityzen1/c1_1.png`, width: 40, height: 50 },
+  // 68 MEngin (L17)
+  68: { role: 'protect', payloadType: 0, npcTex: `${NPC}/enginer/e_run_1.png`, width: 40, height: 50 },
+  // 69 MLucky (L11 x12)
+  69: { role: 'combat', payloadType: 0, npcTex: `${AIR}/bomber_lucky/bl.png`, width: 40, height: 45 },
+  // 70 MZombee (L11 x31)
+  70: { role: 'carrier', payloadType: 11, npcTex: `${INTER}/firefly/firefly.png`, payloadTex: `${INTER}/sheep/sheep.png`, width: 48, height: 40 },
+  // 71 MSheep (L7 x20)
+  71: { role: 'carrier', payloadType: 11, npcTex: `${INTER}/sheep/sheep.png`, payloadTex: `${INTER}/sheep/sheep.png`, width: 48, height: 40 },
+  // 72 MGold (L9 x22)
+  72: { role: 'protect', payloadType: 0, npcTex: `${INTER}/drop_objects/gold.png`, width: 40, height: 28 },
+  // 73 MLuckyGold (L21 x40)
+  73: { role: 'carrier', payloadType: 10, npcTex: `${INTER}/hunter/hunter.png`, payloadTex: `${INTER}/drop_objects/gold.png`, width: 60, height: 44 },
+  // 74 MPolicek (L22 x12)
+  74: { role: 'carrier', payloadType: 12, npcTex: `${INTER}/hunter/policehunter.png`, payloadTex: `${INTER}/drop_objects/apple.png`, width: 60, height: 44 },
+  // 75 MFargoWar (unused in the 30-level campaign)
+  75: { role: 'combat', payloadType: 0, npcTex: `${INTER}/fargo/fargoship.png`, width: 80, height: 50 },
 };
 
 // ── Quest levels ──────────────────────────────────────────────────────────────
@@ -677,10 +761,14 @@ export const MISSION_NAMES: readonly string[] = [
 function buildUnit(id: number): UnitDef {
   const v = V15_UNITS[id];
   const a = ART[id];
-  const compound = id >= 35 && id <= 48;
-  const ground = id >= 49 && id <= 62;
-  const boss = id >= 75 && id <= 84;
-  const npc = id >= 63 && id <= 74;
+  // The class BAND is the v15 category (SdV15 derives it from the `FN_addMob`
+  // constructor list), never a hardcoded id range — that hardcoding is what the
+  // `id - 2` shift made wrong for every id >= 50. `cut` ids match nothing and
+  // fall through to `unsupported` below.
+  const compound = v.cat === 'compound';
+  const ground = v.cat === 'ground';
+  const boss = v.cat === 'boss';
+  const npc = v.cat === 'npc';
   const b = BOSS[id];
   const q = QUEST[id];
   return {
@@ -706,18 +794,21 @@ function buildUnit(id: number): UnitDef {
     bomber: id >= 1 && id <= 4 ? true : undefined,
     fireBomb: id === 4 ? true : undefined,
     attackDamage: v.dmg,
-    attackPeriod: ground ? 5 : 1.7,
-    // Informational (rigs are baked in prefabs): Avalon1 = heavy nose gun,
-    // Avalon2/Lavalon/NZ/SUC = typical basket gun.
-    gunType: id >= 5 && id <= 8 ? 'heavy' : id >= 9 && id <= 29 ? 'typical' : undefined,
+    // Air cadence is the class's own `TypGunMob.rld_max` in frames (see RELOAD).
+    attackPeriod: ground ? 5 : (RELOAD[id] ?? RELOAD_DEFAULT) / 30,
+    // Informational (the rig itself is baked into the per-class prefab, and
+    // EnemyBalloon reads its own `config.gunType` for recoil/shell class).
+    gunType: GUN_KIND[id],
+    weaponClass: compound ? (COMPOUND_WEAPON[id] ?? 'arc') : undefined,
     // Quest NPCs (generic prefab + QuestNpc): role + cargo + art from QUEST.
     npc: npc || undefined,
     role: npc ? q.role : undefined,
     payloadType: npc ? q.payloadType : undefined,
     npcTex: npc ? q.npcTex : undefined,
     payloadTex: npc ? q.payloadTex : undefined,
-    // Bosses + quest NPCs are now wired (generic prefab + script); only art-less
-    // ordinary ids remain unsupported.
+    // Bosses + quest NPCs are wired (generic prefab + script); art-less ordinary
+    // ids and the four CUT ids (49/58/59/62 — `cat: 'cut'`, no constructor in
+    // `FN_addMob`, zero campaign spawns) have no ART row and stay unsupported.
     unsupported: boss || npc ? undefined : a ? undefined : true,
   };
 }
@@ -727,11 +818,14 @@ export const UNITS: Record<number, UnitDef> = Object.fromEntries(
   Array.from({ length: 84 }, (_, i) => i + 1).map(id => [id, buildUnit(id)])
 );
 
-// Air-unit COMPOSITION (gasbag + suspended baskets/guns/bombs) is baked into
-// the per-family prefabs under src/assets/prefabs/units/ — authored from the
-// decompiled com.enemy.*.init() offsets. Ground truth + table:
-// design/original-data/release-v15/air-composition.md. Review visually on the
-// dev scene src/assets/scenes/dev/unit-gallery.pix3scene.
+// Air-unit COMPOSITION (gasbag/airframe + suspended baskets, guns, bomb racks,
+// torpedoes, flames) is baked into ONE PREFAB PER CLASS under
+// src/assets/prefabs/units/ — authored from the decompiled com.enemy.*.init()
+// offsets. Ground truth + the full 48-rig table: .plans/enemy-fidelity-audit.md
+// §3 (design/original-data/release-v15/air-composition.md transcribed only each
+// family's `_1` variant and is wrong for every other class). Review visually on
+// the dev scenes src/assets/scenes/dev/air-gallery.pix3scene (per-class air) and
+// unit-gallery.pix3scene (everything else).
 
 // ── Missions (campaign = V15_CAMPAIGN, 30 levels verbatim) ──────────────
 
@@ -741,7 +835,12 @@ export interface MissionEntry {
   y: number;
   /** Original attack x (640-wide screen coords); 0 = fly through. */
   a: number;
-  /** Behaviour variant (original `tip`): ground 13 = ram-and-self-destruct. */
+  /**
+   * The XML `<tip>` column. NOT the ground `tip`: `FN_addMob` puts this into
+   * `_loc6_.tpp = param4` and sets `tip` per CLASS (`pushbyte 12` for every
+   * `G*`, `pushbyte 13` for `GRracer`) — and every ground `<tip>` in the
+   * campaign is `0`, so feeding it to `GroundVehicle.tip` disabled the rammer.
+   */
   tip: number;
   /** Extra spawn parameter (original `dop`). */
   dop: number;
@@ -749,21 +848,22 @@ export interface MissionEntry {
 
 export interface MissionDef {
   name: string;
+  /**
+   * EVERY spawn on ONE clock — ground units included. The original has a single
+   * counter (`MT.gameCode`: `++this.g_time;` then `if(this.g_time ==
+   * this.arMobs[i][0]) FN_addMob(...)` over the whole table) and no ground/air
+   * branch; the bridge carriers run on their own concurrent `t_enTP` timer that
+   * gates nothing. Splitting ground out behind `bridge-ready` is what pushed
+   * level 1's truck from 7 s to ~15 s, behind the zeppelin.
+   */
   entries: MissionEntry[];
-  /** Ground assault (drives the bridge deck): waits for the bridge to build. */
-  ground?: MissionEntry[];
 }
 
 function buildMission(levelIdx: number): MissionDef {
-  const entries: MissionEntry[] = [];
-  const ground: MissionEntry[] = [];
-  for (const [t, id, y, a, tip, dop] of V15_CAMPAIGN[levelIdx]) {
-    const u = UNITS[id];
-    const e: MissionEntry = { t, id, y, a, tip, dop };
-    if (u?.ground) ground.push(e);
-    else entries.push(e);
-  }
-  return { name: MISSION_NAMES[levelIdx] ?? `Mission ${levelIdx + 1}`, entries, ground };
+  const entries = V15_CAMPAIGN[levelIdx].map(
+    ([t, id, y, a, tip, dop]): MissionEntry => ({ t, id, y, a, tip, dop })
+  );
+  return { name: MISSION_NAMES[levelIdx] ?? `Mission ${levelIdx + 1}`, entries };
 }
 
 /** All 30 campaign missions, waves verbatim from the release build. */

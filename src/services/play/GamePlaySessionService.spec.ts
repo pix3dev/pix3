@@ -316,3 +316,81 @@ describe('GamePlaySessionService — launch serialization', () => {
     await expect(enqueue.call(service, async () => 'ok')).resolves.toBe('ok');
   });
 });
+
+/**
+ * The user-facing half of the pause: `appState.ui.playModeStatus` is what the Game tab, the Flow
+ * stage bar, the popout window, `play_status` and the debug bridge all read, and a Pause button that
+ * does not move it leaves every one of them claiming the game is still running. The sync hangs off
+ * `setPauseRequested` rather than off `setPaused` alone so that a pause nobody pressed — `game_run`
+ * freezing on its outcome frame, `GameInputService` releasing one — moves the buttons too.
+ */
+describe('GamePlaySessionService — pause status', () => {
+  const invoke = vi.fn(async (_operation: unknown) => ({ didMutate: true }));
+
+  const makePausableSession = () => {
+    const session = makeSession();
+    // `@inject` installs a prototype getter, so the fake has to be defined over it.
+    Object.defineProperty(session.service, 'operationService', {
+      value: { invoke },
+      configurable: true,
+    });
+    return session;
+  };
+
+  beforeEach(() => {
+    invoke.mockClear();
+    appState.ui.isPlaying = true;
+    appState.ui.playModeStatus = 'playing';
+    appState.ui.pauseRenderingOnUnfocus = true;
+  });
+
+  afterEach(() => {
+    appState.ui.isPlaying = false;
+    appState.ui.playModeStatus = 'stopped';
+  });
+
+  it('moves the play-mode status with the pause and back', async () => {
+    const { service, runner } = makePausableSession();
+
+    await service.setPaused(true);
+    expect(runner.paused).toBe(true);
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke.mock.calls[0][0]).toMatchObject({ params: { paused: true } });
+
+    appState.ui.playModeStatus = 'paused';
+    await service.setPaused(false);
+    expect(runner.paused).toBe(false);
+    expect(invoke.mock.calls[1][0]).toMatchObject({ params: { paused: false } });
+  });
+
+  it('toggles from whatever the current pause state is', async () => {
+    const { service, runner } = makePausableSession();
+
+    await service.togglePaused();
+    expect(runner.paused).toBe(true);
+    expect(service.pauseRequested).toBe(true);
+
+    appState.ui.playModeStatus = 'paused';
+    await service.togglePaused();
+    expect(runner.paused).toBe(false);
+    expect(service.pauseRequested).toBe(false);
+  });
+
+  it('follows a pause that the host asked for behind the UI (agent tools, input release)', async () => {
+    const { service } = makePausableSession();
+
+    service.setPauseRequested(true);
+    await Promise.resolve();
+    expect(invoke).toHaveBeenCalledTimes(1);
+    expect(invoke.mock.calls[0][0]).toMatchObject({ params: { paused: true } });
+  });
+
+  it('does not touch the status while nothing is playing', async () => {
+    appState.ui.isPlaying = false;
+    const { service, runner } = makePausableSession();
+
+    await service.setPaused(true);
+    expect(runner.paused).toBe(false);
+    expect(invoke).not.toHaveBeenCalled();
+  });
+});

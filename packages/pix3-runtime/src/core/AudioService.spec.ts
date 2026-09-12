@@ -485,6 +485,51 @@ describe('page focus', () => {
     service.dispose();
   });
 });
+
+/**
+ * The host pause (the editor's Pause button, `game_time {paused: true}`) is the second reason the
+ * mixer can go quiet, and it is deliberately independent of focus: a paused game sits in a window
+ * that is still focused, and music playing on over a frozen scene reads as a hang. Suspending the
+ * context rather than stopping playbacks is what makes resume seamless.
+ */
+describe('host pause', () => {
+  it('suspends the context while paused and restores it on resume', () => {
+    const service = new AudioService();
+    const ctx = context();
+    expect(ctx.state).toBe('running');
+
+    service.setPaused(true);
+    ctx.settle();
+    expect(ctx.state).toBe('suspended');
+
+    service.setPaused(false);
+    ctx.settle();
+    expect(ctx.state).toBe('running');
+    service.dispose();
+  });
+
+  it('stays silent after a resume that arrives while the page is away', () => {
+    const service = new AudioService();
+    const ctx = context();
+
+    service.setPaused(true);
+    documentFocused = false;
+    window.dispatchEvent(new Event('blur'));
+    ctx.settle();
+    expect(ctx.state).toBe('suspended');
+
+    // Un-pausing is not enough: the other reason for silence still holds.
+    service.setPaused(false);
+    ctx.settle();
+    expect(ctx.state).toBe('suspended');
+
+    documentFocused = true;
+    window.dispatchEvent(new Event('focus'));
+    ctx.settle();
+    expect(ctx.state).toBe('running');
+    service.dispose();
+  });
+});
 });
 
 function createAudioBufferMock(options: {

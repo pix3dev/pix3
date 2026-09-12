@@ -78,6 +78,7 @@ import { StartOnlineGameCommand } from '@/features/scripts/StartOnlineGameComman
 import { StartMainSceneGameCommand } from '@/features/scripts/StartMainSceneGameCommand';
 import { StopGameCommand } from '@/features/scripts/StopGameCommand';
 import { RestartGameCommand } from '@/features/scripts/RestartGameCommand';
+import { PauseGameCommand } from '@/features/scripts/PauseGameCommand';
 import { OpenGamePopoutWindowCommand } from '@/features/scripts/OpenGamePopoutWindowCommand';
 import { OpenProjectSettingsCommand } from '@/features/project/OpenProjectSettingsCommand';
 import { OpenProjectSyncCommand } from '@/features/project/OpenProjectSyncCommand';
@@ -432,6 +433,7 @@ export class Pix3EditorShell extends ComponentBase {
     );
     const stopGameCommand = new StopGameCommand(this.editorTabService, this.gamePlaySessionService);
     const restartGameCommand = new RestartGameCommand(this.gamePlaySessionService);
+    const pauseGameCommand = new PauseGameCommand(this.gamePlaySessionService);
     const openGamePopoutWindowCommand = new OpenGamePopoutWindowCommand(
       this.gamePlaySessionService
     );
@@ -517,6 +519,7 @@ export class Pix3EditorShell extends ComponentBase {
       startMainSceneGameCommand,
       stopGameCommand,
       restartGameCommand,
+      pauseGameCommand,
       openGamePopoutWindowCommand,
       editorSettingsCommand,
       switchWorkspaceModeCommand,

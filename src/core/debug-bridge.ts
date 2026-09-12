@@ -454,6 +454,8 @@ export interface Pix3DebugBridge {
     start(scenePath?: string): Promise<boolean>;
     stop(): Promise<boolean>;
     restart(): Promise<boolean>;
+    /** Toggle the running game between frozen and running (`game.pause`). */
+    pause(): Promise<boolean>;
   };
 
   // --- mutate (through the gateway) ---
@@ -826,6 +828,9 @@ function createBridge(): Pix3DebugBridge {
       },
       restart() {
         return resolveCommandDispatcher().executeById('game.restart');
+      },
+      pause() {
+        return resolveCommandDispatcher().executeById('game.pause');
       },
     },
 

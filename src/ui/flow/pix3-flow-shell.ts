@@ -115,6 +115,9 @@ export class Pix3FlowShell extends ComponentBase {
   private isPlaying = appState.ui.isPlaying;
 
   @state()
+  private isPaused = appState.ui.playModeStatus === 'paused';
+
+  @state()
   private isAgentRunning = false;
 
   @state()
@@ -206,6 +209,7 @@ export class Pix3FlowShell extends ComponentBase {
     this.disposeUi = subscribe(appState.ui, () => {
       const wasPlaying = this.isPlaying;
       this.isPlaying = appState.ui.isPlaying;
+      this.isPaused = appState.ui.playModeStatus === 'paused';
       this.stageError = appState.ui.playModeError?.message ?? null;
       if (wasPlaying !== this.isPlaying) {
         this.syncViewToPlayState(wasPlaying);
@@ -984,7 +988,9 @@ export class Pix3FlowShell extends ComponentBase {
           ${this.isAgentRunning && toolLabel
             ? html`<span class="flow-plan__spinner"></span><span>${toolLabel}</span>`
             : this.isPlaying
-              ? html`<span>Live</span>`
+              ? this.isPaused
+                ? html`<span>Paused</span>`
+                : html`<span>Live</span>`
               : html`<span>Stopped</span>`}
         </span>
         <button
@@ -996,6 +1002,18 @@ export class Pix3FlowShell extends ComponentBase {
         >
           ${this.icons.getIcon(this.isPlaying ? 'square' : 'play', IconSize.SMALL)}
         </button>
+        ${this.isPlaying
+          ? html`<button
+              class="flow-stage__button ${this.isPaused ? 'flow-stage__button--active' : ''}"
+              type="button"
+              title=${this.isPaused ? 'Resume' : 'Pause'}
+              aria-label=${this.isPaused ? 'Resume' : 'Pause'}
+              aria-pressed=${String(this.isPaused)}
+              @click=${() => void this.commandDispatcher.executeById('game.pause')}
+            >
+              ${this.icons.getIcon('pause', IconSize.SMALL)}
+            </button>`
+          : null}
         <button
           class="flow-stage__button"
           type="button"

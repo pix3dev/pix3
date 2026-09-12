@@ -9,7 +9,7 @@ export class OpenGamePopoutWindowCommand extends CommandBase<void, void> {
     keywords: ['game', 'window', 'popout'],
     menuPath: 'project',
     addToMenu: true,
-    menuOrder: 105,
+    menuOrder: 106,
   };
 
   constructor(private readonly gamePlaySessionService: GamePlaySessionService) {
