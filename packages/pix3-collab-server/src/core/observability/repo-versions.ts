@@ -26,6 +26,19 @@ export interface RepoState {
   readonly headMessage: string | null;
   /** Commits between the deployed sha and head, when both are known and comparable. */
   readonly behindBy: number | null;
+  /**
+   * Whether anything the component actually ships changed in that range.
+   *
+   * A deploy workflow fires on its own `paths:` filter, so the deployed sha trails the branch head
+   * by design every time a sibling part of the repository moves: the editor gets fifteen commits and
+   * the backend is still correctly running the sha it was last built from. `behindBy` alone cannot
+   * tell those two apart, which is how a healthy backend reads as "отстаёт на 15".
+   *
+   * `false` means production is missing nothing. `null` means it could not be established — the
+   * compare call failed, or its file list came back truncated — and callers must treat that as
+   * "possibly stale", never as "fine".
+   */
+  readonly deployPathsTouched: boolean | null;
   /** Non-fatal reason the fields above are missing. */
   readonly error: string | null;
 }
@@ -59,6 +72,46 @@ export interface RepoVersions {
   readonly fetchedAt: string;
   readonly pix3: RepoState & Pix3RepoVersions;
   readonly rooms: RepoState & RoomsRepoVersions;
+}
+
+/**
+ * What each deploy workflow actually ships, mirroring its `paths:` filter.
+ *
+ * These must stay in step with the workflows — `.github/workflows/deploy-collab-server.yml` and
+ * pix3-rooms' `.github/workflows/deploy.yml`. A path listed here but not in the workflow makes the
+ * dashboard demand a deploy that will never fire; a path in the workflow but missing here is worse,
+ * because a real change then reads as "актуально".
+ *
+ * Entries ending in `/` match a directory prefix; every other entry matches one exact file.
+ */
+const CLOUD_DEPLOY_PATHS = [
+  'packages/pix3-collab-server/',
+  'package-lock.json',
+  '.github/workflows/deploy-collab-server.yml',
+] as const;
+
+const ROOMS_DEPLOY_PATHS = [
+  'src/',
+  'deploy/',
+  'Directory.Build.props',
+  'Pix3.Rooms.slnx',
+  '.github/workflows/deploy.yml',
+] as const;
+
+/**
+ * GitHub's compare endpoint returns at most this many files and says nothing when it truncates. At
+ * the cap the list is no longer evidence of absence, so the verdict degrades to "unknown".
+ */
+const COMPARE_FILE_CAP = 300;
+
+/** True when any changed file falls under one of the deploy paths. Exported for tests. */
+export function touchesDeployPaths(
+  files: readonly string[],
+  deployPaths: readonly string[]
+): boolean {
+  return files.some(file =>
+    deployPaths.some(path => (path.endsWith('/') ? file.startsWith(path) : file === path))
+  );
 }
 
 /** How long a fetched answer is reused. Ten minutes keeps API use at ~24 calls/hour. */
@@ -183,7 +236,8 @@ async function readClientManifest(
 async function readRepoState(
   slug: string,
   branch: string,
-  deployedSha: string | null
+  deployedSha: string | null,
+  deployPaths: readonly string[]
 ): Promise<RepoState> {
   let headSha: string | null = null;
   let headCommittedAt: string | null = null;
@@ -204,15 +258,31 @@ async function readRepoState(
   }
 
   let behindBy: number | null = null;
+  let deployPathsTouched: boolean | null = null;
   if (deployedSha && headSha && !sameCommit(deployedSha, headSha)) {
     try {
-      const comparison = await fetchJson<{ behind_by?: number; ahead_by?: number }>(
+      // One call answers both questions: the same response carries the commit distance and the
+      // aggregate file list for the range, so the path-aware verdict costs no extra API budget.
+      const comparison = await fetchJson<{
+        behind_by?: number;
+        ahead_by?: number;
+        files?: { filename?: unknown }[];
+      }>(
         `https://api.github.com/repos/${slug}/compare/${deployedSha}...${branch}`,
         githubHeaders()
       );
       // `ahead_by` counts commits the branch has that the deployed sha does not — that is the
       // "how far behind is production" number, despite the field's name being read from the base.
       behindBy = typeof comparison.ahead_by === 'number' ? comparison.ahead_by : null;
+
+      const changed = Array.isArray(comparison.files)
+        ? comparison.files
+            .map(entry => (typeof entry.filename === 'string' ? entry.filename : null))
+            .filter((name): name is string => name !== null)
+        : null;
+      if (changed && changed.length < COMPARE_FILE_CAP) {
+        deployPathsTouched = touchesDeployPaths(changed, deployPaths);
+      }
     } catch {
       // A force-pushed or garbage-collected deployed sha cannot be compared; the shas alone still tell
       // the operator they differ.
@@ -220,9 +290,19 @@ async function readRepoState(
     }
   } else if (deployedSha && headSha) {
     behindBy = 0;
+    deployPathsTouched = false;
   }
 
-  return { slug, branch, headSha, headCommittedAt, headMessage, behindBy, error };
+  return {
+    slug,
+    branch,
+    headSha,
+    headCommittedAt,
+    headMessage,
+    behindBy,
+    deployPathsTouched,
+    error,
+  };
 }
 
 /** True when a short sha and a full sha denote the same commit. */
@@ -244,11 +324,13 @@ async function load(deployed: DeployedShas): Promise<RepoVersions> {
 
   const [pix3State, rootVersion, client, collabServerVersion, roomsState, roomsDeclaredVersion] =
     await Promise.all([
-      readRepoState(pix3Slug, branch, deployed.pix3),
+      // `deployed.pix3` is the collab backend's sha, so the pix3 repo state answers the cloud row's
+      // question. The editor row compares committed build numbers and never reads it.
+      readRepoState(pix3Slug, branch, deployed.pix3, CLOUD_DEPLOY_PATHS),
       readVersionField(pix3Slug, branch, 'package.json'),
       readClientManifest(pix3Slug, branch),
       readVersionField(pix3Slug, branch, 'packages/pix3-collab-server/package.json'),
-      readRepoState(roomsSlug, branch, deployed.rooms),
+      readRepoState(roomsSlug, branch, deployed.rooms, ROOMS_DEPLOY_PATHS),
       readRoomsDeclaredVersion(roomsSlug, branch),
     ]);
 
@@ -307,6 +389,7 @@ export async function getRepoVersions(
         headCommittedAt: null,
         headMessage: null,
         behindBy: null,
+        deployPathsTouched: null,
         error: message,
         rootVersion: null,
         client: null,
@@ -319,6 +402,7 @@ export async function getRepoVersions(
         headCommittedAt: null,
         headMessage: null,
         behindBy: null,
+        deployPathsTouched: null,
         error: message,
         declaredVersion: null,
       },
