@@ -288,6 +288,10 @@ function buildVersionRows(
   // ── Cloud backend ───────────────────────────────────────────────────────────
   const cloudRepoVersion = repo.pix3.collabServerVersion ?? repo.pix3.rootVersion;
   const cloudCommitMatches = sameCommit(cloudCommit, repo.pix3.headSha);
+  // Matching the branch head is one way to be current, not the only one. The backend's workflow
+  // fires on its own paths, so every editor-only commit widens the sha gap without leaving anything
+  // undeployed — judging by the head sha alone turned a healthy backend into "отстаёт на 15".
+  const cloudUntouched = !cloudCommitMatches && repo.pix3.deployPathsTouched === false;
   rows.push({
     component: 'Бекенд cloud',
     deployedVersion: cloudVersion,
@@ -304,13 +308,15 @@ function buildVersionRows(
           : cloudVersion === cloudRepoVersion
             ? 'current'
             : 'stale'
-        : cloudCommitMatches
+        : cloudCommitMatches || cloudUntouched
           ? 'current'
           : 'stale',
     note:
       cloudCommit === null
         ? 'коммит не определён — сравнение только по версии пакета'
-        : 'версия lockstep с редактором, решает коммит',
+        : cloudUntouched
+          ? `деплой-пути сервера не менялись: ${commitsAhead(repo.pix3.behindBy)} впереди относятся к редактору`
+          : 'версия lockstep с редактором, решает коммит',
     noteSeverity: 'info',
   });
 
@@ -321,6 +327,8 @@ function buildVersionRows(
   const roomsCommit = readString(roomsStats, 'commit');
   const roomsVersion = readString(roomsStats, 'version');
   const roomsRepoVersion = repo.rooms.declaredVersion;
+  const roomsCommitMatches = sameCommit(roomsCommit, repo.rooms.headSha);
+  const roomsUntouched = !roomsCommitMatches && repo.rooms.deployPathsTouched === false;
   rows.push({
     component: 'Бекенд rooms',
     deployedVersion: roomsVersion,
@@ -336,10 +344,16 @@ function buildVersionRows(
           : roomsVersion === roomsRepoVersion
             ? 'current'
             : 'stale'
-        : sameCommit(roomsCommit, repo.rooms.headSha)
+        : roomsCommitMatches || roomsUntouched
           ? 'current'
           : 'stale',
-    ...roomsVersionNote(roomsStats, roomsCommit, roomsVersion, cloudVersion),
+    ...roomsVersionNote(
+      roomsStats,
+      roomsCommit,
+      roomsVersion,
+      cloudVersion,
+      roomsUntouched ? repo.rooms.behindBy : null
+    ),
   });
 
   return rows;
@@ -350,11 +364,36 @@ function buildVersionRows(
  * did not answer, then a build with no provenance, then a platform-version disagreement with cloud —
  * which is not staleness against its own repository and would otherwise pass unnoticed.
  */
+/**
+ * Russian plural for a commit count, so the dashboard says "15 коммитов" and "1 коммит" rather than
+ * a parenthesised "коммит(ов)" on a panel an operator reads at a glance.
+ */
+export function commitsAhead(count: number | null): string {
+  if (count === null) {
+    return 'коммиты';
+  }
+
+  const mod100 = count % 100;
+  const mod10 = count % 10;
+  if (mod100 >= 11 && mod100 <= 14) {
+    return `${count} коммитов`;
+  }
+  if (mod10 === 1) {
+    return `${count} коммит`;
+  }
+  if (mod10 >= 2 && mod10 <= 4) {
+    return `${count} коммита`;
+  }
+  return `${count} коммитов`;
+}
+
 export function roomsVersionNote(
   roomsStats: Record<string, unknown> | null,
   roomsCommit: string | null,
   roomsVersion: string | null,
-  cloudVersion: string
+  cloudVersion: string,
+  /** Commits the branch gained without touching anything rooms deploys; null when it is not that case. */
+  untouchedBehind: number | null = null
 ): { note: string; noteSeverity: 'info' | 'warn' } {
   if (roomsStats === null) {
     return { note: 'фабрика не ответила — версия и коммит неизвестны', noteSeverity: 'warn' };
@@ -371,6 +410,13 @@ export function roomsVersionNote(
     return {
       note: `версия платформы расходится с cloud (${cloudVersion}) — либо не задеплоено, либо забыт бамп Directory.Build.props`,
       noteSeverity: 'warn',
+    };
+  }
+
+  if (untouchedBehind !== null) {
+    return {
+      note: `деплой-пути сервера не менялись: ${commitsAhead(untouchedBehind)} впереди их не затрагивают`,
+      noteSeverity: 'info',
     };
   }
 

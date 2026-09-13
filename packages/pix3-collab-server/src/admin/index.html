@@ -256,7 +256,9 @@
                                         <span class="px-2 py-1 rounded text-xs font-medium" :class="versionStateClass(row.state)">
                                             {{ versionStateLabel(row.state) }}
                                         </span>
-                                        <span v-if="row.behindBy" class="ml-2 text-xs text-amber-200">отстаёт на {{ row.behindBy }}</span>
+                                        <!-- Only alongside a 'stale' verdict: a current row can still sit behind the branch head,
+                                             and amber next to 'актуально' reads as a contradiction. The note column says it instead. -->
+                                        <span v-if="row.behindBy && row.state === 'stale'" class="ml-2 text-xs text-amber-200">отстаёт на {{ row.behindBy }}</span>
                                     </td>
                                 </tr>
                             </tbody>
