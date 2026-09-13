@@ -315,6 +315,21 @@ pix3-scene-tree-node {
   opacity: 0.5;
 }
 
+/* Off screen because of Peek, not because of the scene file. The struck-through name is the same
+   language the viewport's Peek chips use for a masked branch, so the two panels read as one state
+   rather than two coincidences; the row's opacity it already shares with `--hidden`. */
+.tree-node__content--peek-root .tree-node__name {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+/* The eye of a masked branch root: a faint ring rather than the accent fill of `--active`, because
+   this state is a per-user view mask, not something the author set on the node. */
+.tree-node__button--peek {
+  color: var(--fg-2);
+  box-shadow: inset 0 0 0 1px var(--line-2);
+}
+
 .tree-node__prefab-badge {
   font-size: 0.7rem;
   opacity: 0.85;

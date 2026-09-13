@@ -7,7 +7,9 @@ import { IconService } from '@/services/editor/IconService';
 import type { SceneTreeNode } from './scene-tree-node';
 
 class CommandDispatcherStub {
-  execute = vi.fn(async () => undefined);
+  // Typed with the argument the row actually passes, so the assertions below can read which
+  // COMMAND a click dispatched — the two eyes in this panel drive two different ones.
+  execute = vi.fn(async (_command: { metadata?: { id?: string } }) => undefined);
   executeById = vi.fn(async () => true);
 }
 
@@ -32,14 +34,35 @@ const baseNode = (overrides: Partial<SceneTreeNode> = {}): SceneTreeNode => ({
 
 type TestRow = HTMLElement & { updateComplete: Promise<unknown> };
 
-const mountRow = async (node: SceneTreeNode): Promise<TestRow> => {
+interface RowOptions {
+  readonly peekHiddenNodeIds?: Set<string>;
+  readonly peekHiddenAncestor?: boolean;
+}
+
+const mountRow = async (node: SceneTreeNode, options: RowOptions = {}): Promise<TestRow> => {
   const host = document.createElement('div');
   document.body.appendChild(host);
-  render(html`<pix3-scene-tree-node .node=${node} .level=${1}></pix3-scene-tree-node>`, host);
+  render(
+    html`<pix3-scene-tree-node
+      .node=${node}
+      .level=${1}
+      .peekHiddenNodeIds=${options.peekHiddenNodeIds ?? new Set<string>()}
+      .peekHiddenAncestor=${options.peekHiddenAncestor ?? false}
+    ></pix3-scene-tree-node>`,
+    host
+  );
   const row = host.querySelector('pix3-scene-tree-node') as TestRow;
   await row.updateComplete;
   return row;
 };
+
+const eyeOf = (row: TestRow): HTMLButtonElement =>
+  row.querySelector('.tree-node__button--visible') as HTMLButtonElement;
+
+const dispatcher = (): CommandDispatcherStub =>
+  ServiceContainer.getInstance().getService<CommandDispatcherStub>(
+    ServiceContainer.getInstance().getOrCreateToken(CommandDispatcher)
+  );
 
 beforeAll(async () => {
   const container = ServiceContainer.getInstance();
@@ -103,5 +126,59 @@ describe('Scene tree row — inert nodes', () => {
     expect(row.querySelector('[role="treeitem"]')?.getAttribute('title')).toBe(
       'spawner · Sprite2D'
     );
+  });
+});
+
+/**
+ * Peek lives in the viewport strip, but the row it masks is in this panel — and a row showing an
+ * open eye over a branch the viewport is not drawing is the panel contradicting the canvas beside
+ * it. See `docs/pix3-specification.md`, "Editor Peek".
+ */
+describe('Scene tree row — the Peek mask', () => {
+  it('reports a masked branch as off screen and says who hid it', async () => {
+    const row = await mountRow(baseNode(), { peekHiddenNodeIds: new Set(['node-1']) });
+
+    expect(row.querySelector('.tree-node__content--peek-hidden')).not.toBeNull();
+    expect(eyeOf(row).querySelector('[data-icon="eye-off"]')).not.toBeNull();
+    // Not the accent-filled `--active` treatment: this is a per-user view mask, not authored state.
+    expect(eyeOf(row).classList.contains('tree-node__button--active')).toBe(false);
+    expect(eyeOf(row).classList.contains('tree-node__button--peek')).toBe(true);
+    expect(row.querySelector('[role="treeitem"]')?.getAttribute('title')).toContain(
+      'hidden by Peek'
+    );
+  });
+
+  it("clears the mask from the masked root's eye instead of editing the scene file", async () => {
+    const row = await mountRow(baseNode(), { peekHiddenNodeIds: new Set(['node-1']) });
+    dispatcher().execute.mockClear();
+
+    eyeOf(row).click();
+    await row.updateComplete;
+
+    const command = dispatcher().execute.mock.calls[0]?.[0];
+    expect(command?.metadata?.id).toBe('viewport.peek-show');
+  });
+
+  it('shows a descendant as off screen but keeps its eye on its own authored visibility', async () => {
+    const row = await mountRow(baseNode(), { peekHiddenAncestor: true });
+    dispatcher().execute.mockClear();
+
+    expect(eyeOf(row).querySelector('[data-icon="eye-off"]')).not.toBeNull();
+    expect(eyeOf(row).classList.contains('tree-node__button--peek')).toBe(false);
+
+    eyeOf(row).click();
+    await row.updateComplete;
+
+    // Un-masking somebody else's branch from a row that does not show the mask would be an edit
+    // the user cannot see coming, so this stays the ordinary property write.
+    const command = dispatcher().execute.mock.calls[0]?.[0];
+    expect(command?.metadata?.id).toBe('scene.update-object-property');
+  });
+
+  it('leaves an unmasked row alone', async () => {
+    const row = await mountRow(baseNode());
+
+    expect(row.querySelector('.tree-node__content--peek-hidden')).toBeNull();
+    expect(eyeOf(row).querySelector('[data-icon="eye"]')).not.toBeNull();
   });
 });

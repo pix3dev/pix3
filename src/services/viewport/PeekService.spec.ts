@@ -147,6 +147,19 @@ describe('PeekService', () => {
       expect(label.isVisibleInTree()).toBe(false);
     });
 
+    it('reports an authored `visible: false` separately from its own mask', () => {
+      const { service, hud } = build();
+      hud.visible = false;
+
+      const branch = service.getSnapshot().branches.find(b => b.nodeId === 'hud');
+
+      // The strip renders both as an off eye — the chip answers "is this on screen" — but only the
+      // mask is Peek's to clear, so the two states cannot collapse into one flag.
+      expect(branch).toMatchObject({ hidden: false, authoredHidden: true });
+      // And an authored hide does not inflate the "N hidden" pill, which counts the per-user mask.
+      expect(service.getSnapshot().hiddenCount).toBe(0);
+    });
+
     it('clears the flag when the mask shrinks', () => {
       const { service, hud } = build();
       service.setHiddenNodeIds(['hud']);

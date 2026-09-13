@@ -65,6 +65,21 @@ export class Pix3PeekStrip extends ComponentBase {
   @property({ type: Boolean, attribute: false })
   soloEnabled = true;
 
+  /**
+   * Whether the per-branch chips are offered here at all.
+   *
+   * False on Flow's game stage. Peek is a way of looking at the SCENE, and the scene is what the
+   * editor viewport shows — over a running game a column of branch chips is editor chrome sitting
+   * on the thing the user is trying to look at. What survives is the pill: the mask still applies
+   * to the play clone, so a HUD hidden in the Scene view is missing from the game too, and a state
+   * that changes what the game looks like with no on-screen way back is exactly the trap §6.19a.3
+   * pays for with visibility.
+   *
+   * Property-only for the same reason as {@link soloEnabled}.
+   */
+  @property({ type: Boolean, attribute: false })
+  chipsEnabled = true;
+
   @state()
   private branches: readonly PeekBranch[] = [];
 
@@ -108,6 +123,15 @@ export class Pix3PeekStrip extends ComponentBase {
   }
 
   protected render() {
+    if (!this.chipsEnabled) {
+      // Pill only, and only while it has something to say. The "always in the layout" reservation
+      // below exists to keep a COLUMN OF CHIPS from shifting under the cursor; with no chips there
+      // is nothing to keep still, and a permanently reserved empty row over the game would be a
+      // hole in the stage for nothing.
+      return this.hiddenCount > 0
+        ? html`<div class="peek peek--pill-only">${this.renderPill()}</div>`
+        : nothing;
+    }
     // A scene with one branch has nothing to hide *relative to*, so the strip stays out of the way
     // entirely rather than offering a chip that blanks the view.
     if (this.branches.length < 2) {
@@ -131,23 +155,42 @@ export class Pix3PeekStrip extends ComponentBase {
     `;
   }
 
+  /**
+   * One branch chip. The eye answers "is this on screen", which is not the same question as "did
+   * Peek hide it": a branch carrying `visible: false` from the scene file is off screen too, and a
+   * chip showing an open eye over it would be the strip contradicting the viewport beside it.
+   *
+   * A chip that is ONLY authored-hidden is inert rather than clickable. Peek's toggle would happily
+   * flip the mask underneath it, but nothing on screen would move — a click that looks like it did
+   * nothing is worse than a control that says why it is not offering itself. The scene tree's eye
+   * is where that state belongs, and the tooltip says so. Once Peek has ALSO masked it, the chip is
+   * live again: clearing the mask is a real step back towards seeing it.
+   */
   private renderChip(branch: PeekBranch) {
     const soloHint = this.soloEnabled ? ' (⌥-click to solo)' : '';
-    const title = branch.hidden
-      ? `Show ${branch.label} — hidden in your editor only`
-      : `Hide ${branch.label} in your editor only${soloHint}`;
+    const authoredOnly = branch.authoredHidden && !branch.hidden;
+    const title = authoredOnly
+      ? `${branch.label} is hidden in the scene itself — show it with the eye in the Scene Tree`
+      : branch.hidden
+        ? `Show ${branch.label} — hidden in your editor only${
+            branch.authoredHidden ? ' (it is also hidden in the scene itself)' : ''
+          }`
+        : `Hide ${branch.label} in your editor only${soloHint}`;
+    const offScreen = branch.hidden || branch.authoredHidden;
     return html`
       <button
         class="peek__chip"
         type="button"
         data-hidden=${branch.hidden ? 'true' : 'false'}
+        data-authored-hidden=${branch.authoredHidden ? 'true' : 'false'}
         data-dimmed=${branch.dimmed && this.soloEnabled ? 'true' : 'false'}
         data-soloed=${branch.soloed && this.soloEnabled ? 'true' : 'false'}
-        aria-pressed=${branch.hidden ? 'false' : 'true'}
+        aria-pressed=${offScreen ? 'false' : 'true'}
+        ?disabled=${authoredOnly}
         title=${title}
         @click=${(event: MouseEvent) => this.onChipClick(event, branch)}
       >
-        ${this.icons.getIcon(branch.hidden ? 'eye-off' : 'eye', IconSize.SMALL)}
+        ${this.icons.getIcon(offScreen ? 'eye-off' : 'eye', IconSize.SMALL)}
         <span class="peek__chip-label">${branch.label}</span>
       </button>
     `;

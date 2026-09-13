@@ -822,6 +822,31 @@ top-level nodes — one level deeper when there is a single root — plus any pr
 `CanvasLayer2D` met on those levels. Identity is `node.id` (stable in the file), so a rename keeps
 the mask and a deletion silently drops it.
 
+### 6.19a.6 Where the mask shows itself
+
+A per-user mask that only one panel knows about is a mask the author forgets they set, so the state
+is reported wherever it changes what is on screen:
+
+- **The scene tree**, which sits beside the viewport and until now showed an open eye over a branch
+  the viewport was not drawing. A masked branch root and everything under it render dimmed with a
+  struck-through name — the same language the chips use — and the row tooltip names Peek as the
+  reason. On the masked ROOT the eye clears the mask instead of writing `visible: true` into a file
+  that never said otherwise; on a descendant it keeps editing that node's own authored visibility,
+  because taking down a mask from a row that does not show it would be an edit the user cannot see
+  coming. The tree reads the mask from `PeekService.getSnapshot()`, never from the persisted id
+  list, which keeps ids whose node has stopped being a branch (§6.19a.5).
+- **The strip's chips**, in the other direction: a branch with an authored `visible: false` draws as
+  an off eye too — the chip answers "is this on screen" — struck through and inert, with a tooltip
+  pointing at the scene tree. Peek neither caused that state nor can clear it, and a toggle that
+  moved the mask while nothing on screen changed would be worse than a control that says why it is
+  not offering itself. A chip that is authored-hidden *and* masked stays live: clearing the mask is
+  a real step back towards seeing it.
+- **Flow's game stage gets the exit pill only.** Choosing what to look at is a scene-editing gesture
+  and belongs to the Scene view's viewport; a column of branch chips over a running game is editor
+  chrome on top of the thing being played. The mask still applies to the play clone (§6.19a.4), so
+  the pill appears there whenever something is hidden — which is the on-screen way back that a
+  state changing the game's appearance has to have.
+
 ## 6.20 Node Prefabs System
 
 ### 6.20.1 Overview

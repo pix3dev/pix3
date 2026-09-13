@@ -16,6 +16,7 @@ import {
   selectObjectRange,
 } from '@/features/selection/SelectObjectCommand';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
+import { PeekShowCommand } from '@/features/peek/PeekCommands';
 import { FrameSelectedCommand } from '@/features/viewport/FrameSelectedCommand';
 import {
   classifySceneCreateAssetResource,
@@ -113,6 +114,20 @@ export class SceneTreeNodeComponent extends ComponentBase {
   @property({ type: Object })
   collapsedNodeIds: Set<string> = new Set();
 
+  /**
+   * Branch roots the viewport's Peek strip is currently masking (see `PeekService`).
+   *
+   * The tree shows it because the alternative is what shipped: a row with an open eye beside a
+   * viewport that is not drawing it, and no clue anywhere in the panel that a per-user mask — not
+   * the scene — is the reason.
+   */
+  @property({ type: Object })
+  peekHiddenNodeIds: Set<string> = new Set();
+
+  /** Set on every descendant of a masked branch: off screen, but not itself the thing to un-mask. */
+  @property({ type: Boolean })
+  peekHiddenAncestor = false;
+
   @state()
   private isCollapsed: boolean = false;
 
@@ -153,6 +168,16 @@ export class SceneTreeNodeComponent extends ComponentBase {
     }
   }
 
+  /** This row IS a masked branch root — the row whose eye can put the mask back. */
+  private get isPeekHidden(): boolean {
+    return this.peekHiddenNodeIds.has(this.node.id);
+  }
+
+  /** Not drawn right now, for any reason — what the eye icon reports. */
+  private get isPeekMasked(): boolean {
+    return this.isPeekHidden || this.peekHiddenAncestor;
+  }
+
   protected render() {
     const hasChildren = this.node.children.length > 0;
     const isSelected = this.selectedNodeIds.includes(this.node.id);
@@ -173,7 +198,12 @@ export class SceneTreeNodeComponent extends ComponentBase {
       'tree-node__content--prefab': !!this.node.isPrefabNode,
       'tree-node__content--prefab-root': !!this.node.isPrefabRoot,
       'tree-node__content--prefab-child': !!this.node.isPrefabChild,
-      'tree-node__content--hidden': !this.isVisible,
+      'tree-node__content--hidden': !this.isVisible || this.isPeekMasked,
+      'tree-node__content--peek-hidden': this.isPeekMasked,
+      // The struck-through name marks the branch the mask is ON, not everything under it: the
+      // subtree is off screen (and dimmed for it), but only this row's eye puts the mask back, and
+      // striking the whole subtree turns a one-branch mask into a wall of crossed-out text.
+      'tree-node__content--peek-root': this.isPeekHidden,
     });
 
     const expanderClasses = classMap({
@@ -300,13 +330,19 @@ export class SceneTreeNodeComponent extends ComponentBase {
           <div class="tree-node__buttons">
             <button
               type="button"
-              class="tree-node__button tree-node__button--visible ${this.isVisible
-                ? 'tree-node__button--active'
-                : ''}"
-              aria-label=${this.isVisible ? `Hide ${this.node.name}` : `Show ${this.node.name}`}
+              class=${classMap({
+                'tree-node__button': true,
+                'tree-node__button--visible': true,
+                'tree-node__button--active': this.isVisible && !this.isPeekMasked,
+                // Only the branch root gets the Peek treatment: it is the only row whose eye acts
+                // on the mask, so it is the only one that may advertise it.
+                'tree-node__button--peek': this.isPeekHidden,
+              })}
+              aria-label=${this.getVisibilityToggleLabel()}
+              title=${this.getVisibilityToggleLabel()}
               @click=${(event: Event) => this.onToggleVisibility(event)}
             >
-              ${this.renderToggleIcon(this.isVisible ? 'eye' : 'eye-off')}
+              ${this.renderToggleIcon(this.isVisible && !this.isPeekMasked ? 'eye' : 'eye-off')}
             </button>
             <button
               type="button"
@@ -333,6 +369,8 @@ export class SceneTreeNodeComponent extends ComponentBase {
                       .selectedNodeIds=${this.selectedNodeIds}
                       .primaryNodeId=${this.primaryNodeId}
                       .collapsedNodeIds=${this.collapsedNodeIds}
+                      .peekHiddenNodeIds=${this.peekHiddenNodeIds}
+                      .peekHiddenAncestor=${this.isPeekMasked}
                       .draggedNodeId=${this.draggedNodeId}
                       .draggedNodeType=${this.draggedNodeType}
                       .remoteSelectionByNodeId=${this.remoteSelectionByNodeId}
@@ -354,6 +392,12 @@ export class SceneTreeNodeComponent extends ComponentBase {
       // Ahead of the prefab note on purpose: an inert node does nothing at all, which outranks
       // every other thing this row could tell you about it.
       return `${base} · ${node.inertReason ?? 'unrecognised type — this node does nothing'}`;
+    }
+    if (this.isPeekMasked) {
+      // Ahead of the prefab note: "why is this not on screen" is the question the row is raising.
+      return this.isPeekHidden
+        ? `${base} · hidden by Peek — your editor only, the game and the export show it`
+        : `${base} · inside a Peek-hidden branch — your editor only`;
     }
     if (node.isPrefabChild) {
       return `${base} · part of prefab instance — open prefab to edit structure`;
@@ -886,8 +930,42 @@ export class SceneTreeNodeComponent extends ComponentBase {
     );
   }
 
+  /**
+   * What the eye will do, spelled out — the two visibilities are different enough that a bare
+   * "Hide"/"Show" would be the panel's second lie after the icon's.
+   */
+  private getVisibilityToggleLabel(): string {
+    if (this.isPeekHidden) {
+      return `Show ${this.node.name} — hidden by Peek in your editor only`;
+    }
+    if (this.peekHiddenAncestor) {
+      // Its own eye still writes its own `visible`, and saying so is the point: the row is off
+      // screen because of an ANCESTOR, and clicking here will not bring it back.
+      return this.isVisible
+        ? `Hide ${this.node.name} in the scene (a Peek-hidden parent is why it is off screen)`
+        : `Show ${this.node.name} in the scene (a Peek-hidden parent is why it is off screen)`;
+    }
+    return this.isVisible ? `Hide ${this.node.name}` : `Show ${this.node.name}`;
+  }
+
+  /**
+   * The eye means "is this on screen", so when Peek is what took the row off screen, the eye is
+   * what puts it back — it clears the mask instead of writing `visible: true` into a scene file
+   * that never said otherwise. The masked root is the only row that does this; a descendant's eye
+   * keeps editing its own authored visibility, because taking someone else's mask down from a row
+   * that does not show it would be an edit the user cannot see coming.
+   */
   private async onToggleVisibility(event: Event): Promise<void> {
     event.stopPropagation();
+
+    if (this.isPeekHidden) {
+      try {
+        await this.commandDispatcher.execute(new PeekShowCommand([this.node.id]));
+      } catch (error) {
+        console.error('[SceneTreeNode] Failed to clear the Peek mask:', error);
+      }
+      return;
+    }
 
     const newVisibleState = !this.isVisible;
     try {

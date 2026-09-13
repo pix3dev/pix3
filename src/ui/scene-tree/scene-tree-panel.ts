@@ -10,6 +10,7 @@ import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { KeybindingService } from '@/services/editor/KeybindingService';
 import { NodeRegistry } from '@/services/scene/NodeRegistry';
 import { NodeTypePickerService } from '@/services/editor/NodeTypePickerService';
+import { PeekService } from '@/services/viewport/PeekService';
 import { AddModelCommand } from '@/features/scene/AddModelCommand';
 import { CreateAnimatedSprite2DCommand } from '@/features/scene/CreateAnimatedSprite2DCommand';
 import { ReparentNodeCommand } from '@/features/scene/ReparentNodeCommand';
@@ -60,6 +61,9 @@ export class SceneTreePanel extends ComponentBase {
   @inject(NodeRegistry)
   private readonly nodeRegistry!: NodeRegistry;
 
+  @inject(PeekService)
+  private readonly peek!: PeekService;
+
   @inject(NodeTypePickerService)
   private readonly nodeTypePickerService!: NodeTypePickerService;
 
@@ -80,6 +84,17 @@ export class SceneTreePanel extends ComponentBase {
 
   @state()
   private collapsedNodeIds: Set<string> = new Set();
+
+  /**
+   * Branch roots the Peek mask is currently hiding — the chips' state, mirrored into the tree.
+   *
+   * Read from the SNAPSHOT, not from `appState.scenes.peekHiddenByScene`: the persisted mask keeps
+   * ids whose node has stopped being a branch (so a structure that changes back re-applies it), and
+   * `PeekService` releases the flag on those. Dimming their rows would be the tree reporting a mask
+   * the viewport is not applying.
+   */
+  @state()
+  private peekHiddenNodeIds: Set<string> = new Set();
 
   @state()
   private loadState = appState.scenes.loadState;
@@ -121,6 +136,7 @@ export class SceneTreePanel extends ComponentBase {
   private disposeSceneSubscription?: () => void;
   private disposeSelectionSubscription?: () => void;
   private disposeCollaborationSubscription?: () => void;
+  private disposePeekSubscription?: () => void;
   private readonly onWindowClick = (event: MouseEvent): void => {
     if (!this.contextMenu) {
       return;
@@ -143,8 +159,16 @@ export class SceneTreePanel extends ComponentBase {
     this.syncSceneState();
     this.syncSelectionState();
     this.syncRemoteSelections();
+    this.syncPeekState();
     this.disposeSceneSubscription = subscribe(appState.scenes, () => {
       this.syncSceneState();
+      this.syncPeekState();
+    });
+    // The mask also moves without `appState.scenes` moving with it — a re-parsed graph (a collab
+    // update, a prefab refresh) re-stamps the same ids onto fresh nodes, and a solo is cleared
+    // through the service. The service's own signal is the one that covers all of those.
+    this.disposePeekSubscription = this.peek.subscribe(() => {
+      this.syncPeekState();
     });
     this.disposeSelectionSubscription = subscribe(appState.selection, () => {
       this.syncSelectionState();
@@ -169,6 +193,8 @@ export class SceneTreePanel extends ComponentBase {
     this.disposeSelectionSubscription = undefined;
     this.disposeCollaborationSubscription?.();
     this.disposeCollaborationSubscription = undefined;
+    this.disposePeekSubscription?.();
+    this.disposePeekSubscription = undefined;
     document.removeEventListener('click', this.onWindowClick, { capture: true });
     window.removeEventListener('keydown', this.onWindowEscape);
     this.portal.close();
@@ -222,6 +248,7 @@ export class SceneTreePanel extends ComponentBase {
                       .selectedNodeIds=${this.selectedNodeIds}
                       .primaryNodeId=${this.primaryNodeId}
                       .collapsedNodeIds=${this.collapsedNodeIds}
+                      .peekHiddenNodeIds=${this.peekHiddenNodeIds}
                       .draggedNodeId=${this.draggedNodeId}
                       .draggedNodeType=${this.draggedNodeType}
                       .remoteSelectionByNodeId=${this.remoteSelectionByNodeId}
@@ -366,6 +393,29 @@ export class SceneTreePanel extends ComponentBase {
   private getCommandShortcut(commandId: string): string {
     const displayString = this.keybindingService.getDisplayString(commandId);
     return displayString ?? '';
+  }
+
+  /**
+   * Pull the Peek mask into a set the rows can test against.
+   *
+   * A new Set only when the CONTENT differs: this runs on every `appState.scenes` notification (a
+   * busy proxy), and assigning a fresh Set each time would re-render every row in the tree for
+   * nothing.
+   */
+  private syncPeekState(): void {
+    const next = new Set(
+      this.peek
+        .getSnapshot()
+        .branches.filter(branch => branch.hidden)
+        .map(branch => branch.nodeId)
+    );
+    if (
+      next.size === this.peekHiddenNodeIds.size &&
+      [...next].every(id => this.peekHiddenNodeIds.has(id))
+    ) {
+      return;
+    }
+    this.peekHiddenNodeIds = next;
   }
 
   private syncSceneState(): void {

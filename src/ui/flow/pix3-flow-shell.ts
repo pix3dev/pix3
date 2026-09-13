@@ -756,13 +756,16 @@ export class Pix3FlowShell extends ComponentBase {
         ${this.renderStageBar()}
         <div class="flow-stage__frame">
           <div class="flow-stage__host"></div>
-          <!-- Peek's chips over the running game, bottom-left — the same corner and the same column
-               as the viewport overlay in the scene view, so switching stage views does not move
-               them. Property binding, not an attribute: Lit's Boolean converter reads ANY present
-               attribute as true, so a solo-enabled="false" attribute would enable it. Solo is off here
-               because it fades the EDITOR's proxy materials, which the running game does not
-               use — hiding works in both places, so the stage keeps the half it can deliver. -->
-          <pix3-peek-strip .soloEnabled=${false}></pix3-peek-strip>
+          <!-- Peek over the running game: the EXIT only, never the chips. Choosing what to look at
+               is a scene-editing gesture and belongs to the Scene view's viewport, where the same
+               strip renders in full; a column of branch chips over the game would be editor chrome
+               on top of the thing being played. The pill stays because the mask does: it is pushed
+               into the play clone, so a branch hidden in the Scene view is missing from the game
+               too, and it appears only while something is actually hidden. Solo is off for the
+               separate reason that it fades the EDITOR's proxy materials, which the running game
+               does not use. Property bindings, not attributes: Lit's Boolean converter reads ANY
+               present attribute as true, so a solo-enabled="false" attribute would enable it. -->
+          <pix3-peek-strip .soloEnabled=${false} .chipsEnabled=${false}></pix3-peek-strip>
           ${this.renderStageOverlay()}
         </div>
       </main>

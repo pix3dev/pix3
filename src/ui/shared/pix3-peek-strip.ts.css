@@ -83,6 +83,26 @@ pix3-peek-strip .peek__chip[data-hidden='true'] .peek__chip-label {
   text-decoration: line-through;
 }
 
+/* Hidden by the SCENE FILE, not by Peek. Struck through like any off-screen branch — the eye
+   reports what is on screen — but flat and un-clickable, because the control that changes this one
+   is the scene tree's eye (see `renderChip`). */
+pix3-peek-strip .peek__chip[data-authored-hidden='true'] .peek__chip-label {
+  text-decoration: line-through;
+}
+
+pix3-peek-strip .peek__chip:disabled {
+  border-style: dashed;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: default;
+}
+
+pix3-peek-strip .peek__chip:disabled:hover {
+  border-color: var(--line-1);
+  background: transparent;
+  color: var(--fg-3);
+}
+
 /* Faded by somebody else's solo: the same visual language the viewport is using on the branch. */
 pix3-peek-strip .peek__chip[data-dimmed='true'] {
   opacity: 0.5;
@@ -180,6 +200,17 @@ pix3-peek-strip .peek__menu,
 
 .pix3-dropdown-portal .peek__chip[data-hidden='true'] .peek__chip-label {
   text-decoration: line-through;
+}
+
+.pix3-dropdown-portal .peek__chip[data-authored-hidden='true'] .peek__chip-label {
+  text-decoration: line-through;
+}
+
+.pix3-dropdown-portal .peek__chip:disabled {
+  border-style: dashed;
+  background: transparent;
+  color: var(--fg-3);
+  cursor: default;
 }
 
 .pix3-dropdown-portal .peek__chip[data-dimmed='true'] {

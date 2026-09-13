@@ -25,6 +25,14 @@ export interface PeekBranch {
   readonly label: string;
   readonly type: string;
   readonly hidden: boolean;
+  /**
+   * The branch's own `visible: false` in the scene file.
+   *
+   * Not Peek's doing and not Peek's to undo — but a chip that showed an open eye over a branch the
+   * viewport is not drawing would be the strip lying about what is on screen, which is the one
+   * thing the strip exists to report. The chip renders it as off and says where to change it.
+   */
+  readonly authoredHidden: boolean;
   /** Faded by an active solo on some OTHER branch. */
   readonly dimmed: boolean;
   /** This branch is (one of) the soloed ones. */
@@ -187,6 +195,7 @@ export class PeekService {
       label: node.name || node.type,
       type: node.type,
       hidden: hidden.has(node.nodeId),
+      authoredHidden: !node.authoredVisible,
       dimmed: soloActive && !solo.has(node.nodeId),
       soloed: solo.has(node.nodeId),
     }));
