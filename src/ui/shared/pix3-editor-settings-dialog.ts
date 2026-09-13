@@ -567,6 +567,32 @@ export class EditorSettingsDialog extends ComponentBase {
     return this.openKeys.includes(key) ? html`<div class="key-panel">${body}</div>` : null;
   }
 
+  /**
+   * The button that reveals the bridge URL override. The host address is an advanced detail that
+   * almost nobody changes, so it stays hidden; the button lights up like a stored key while the
+   * URL differs from the default, so an override is still visible at a glance.
+   */
+  private renderUrlToggle() {
+    const open = this.openKeys.includes('bridge-url');
+    const overridden = this.isBridgeUrlOverridden();
+    const title = `Bridge URL — ${overridden ? this.bridgeUrlInput.trim() : 'default'}`;
+    return html`<button
+      type="button"
+      class="key-toggle ${overridden ? 'is-set' : ''} ${open ? 'is-open' : ''}"
+      aria-expanded=${open}
+      aria-label=${title}
+      title=${title}
+      @click=${() => this.toggleKey('bridge-url')}
+    >
+      ${this.icons.getIcon('sliders', IconSize.SMALL)}
+    </button>`;
+  }
+
+  private isBridgeUrlOverridden(): boolean {
+    const value = this.bridgeUrlInput.trim().replace(/\/+$/, '');
+    return value !== '' && value !== DEFAULT_BRIDGE_URL.replace(/\/+$/, '');
+  }
+
   private toggleKey(key: string): void {
     this.openKeys = this.openKeys.includes(key)
       ? this.openKeys.filter(item => item !== key)
@@ -1012,17 +1038,19 @@ export class EditorSettingsDialog extends ComponentBase {
         ${this.renderNote(
           'bridge',
           html`Serves the metered providers (OpenAI, Anthropic, OpenCode Zen, custom) from your
-          machine so keys never enter the browser. Gemini works without it. Start it and open the
-          pairing link it prints — that stores the token for you; the field behind the key button is
-          only for pasting it by hand. Then add providers:
-          ${this.renderCommandBlock('npx @pix3/agent-bridge')}
-          ${this.renderCommandBlock('npx @pix3/agent-bridge provider add openai --key sk-…')}`
+            machine so keys never enter the browser. Gemini works without it. Start it and open the
+            pairing link it prints — that stores the token for you; the field behind the key button
+            is only for pasting it by hand. Then add providers with the
+            <code>provider add</code> command.`
         )}
+        <div class="command-list">
+          ${connected ? null : this.renderCommandBlock('npx @pix3/agent-bridge')}
+          ${this.renderCommandBlock('npx @pix3/agent-bridge provider add openai --key sk-…')}
+        </div>
 
         <div class="settings-field">
           <div class="field-head">
-            <span class="field-title">Bridge URL</span>
-            ${this.renderInfo('bridge-url')}
+            <span class="field-title">Connection</span>
             <span class="field-head-spacer"></span>
             <button
               class="icon-btn"
@@ -1033,18 +1061,25 @@ export class EditorSettingsDialog extends ComponentBase {
             >
               ${this.icons.getIcon('refresh-cw', IconSize.SMALL)}
             </button>
+            ${this.renderUrlToggle()}
             ${this.renderKeyToggle('bridge-token', this.bridgeTokenConfigured, 'Pairing token')}
           </div>
-          ${this.renderNote(
+          ${this.renderKeyPanel(
             'bridge-url',
-            'Only change this if you run the bridge on a non-default port.'
+            html`
+              <input
+                type="text"
+                aria-label="Bridge URL"
+                .value=${this.bridgeUrlInput}
+                @change=${this.onBridgeUrlChange}
+                placeholder=${DEFAULT_BRIDGE_URL}
+              />
+              <div class="field-note">
+                Bridge URL — only change this if you run the bridge on a non-default port. Leave
+                empty for the default.
+              </div>
+            `
           )}
-          <input
-            type="text"
-            .value=${this.bridgeUrlInput}
-            @change=${this.onBridgeUrlChange}
-            placeholder=${DEFAULT_BRIDGE_URL}
-          />
           ${this.renderKeyPanel(
             'bridge-token',
             html`

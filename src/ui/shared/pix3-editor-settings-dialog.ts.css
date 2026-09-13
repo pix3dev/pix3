@@ -488,6 +488,14 @@ pix3-editor-settings-dialog .key-row .btn-key-save {
   }
 }
 
+/* The setup commands, shown up front: stacked with the same rhythm as the fields below. */
+pix3-editor-settings-dialog .command-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
 /* Copyable one-line CLI command (Pix3AgentBridge setup). */
 pix3-editor-settings-dialog .command-block {
   display: flex;
