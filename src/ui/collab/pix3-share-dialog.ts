@@ -8,6 +8,7 @@ import { DialogService } from '@/services/editor/DialogService';
 import * as ApiClient from '@/services/cloud/ApiClient';
 import type {
   ApiAssignableProjectMemberRole,
+  ApiProjectAccess,
   ApiProjectMember,
   ApiProjectUserSuggestion,
 } from '@/services/cloud/ApiClient';
@@ -15,6 +16,25 @@ import { subscribe } from 'valtio/vanilla';
 import './pix3-share-dialog.ts.css';
 
 type ShareScope = 'private' | 'selected' | 'link';
+
+/**
+ * Sharing state of the project the dialog acts on. For an open cloud project this mirrors
+ * `appState.collaboration`; for a local folder linked to a cloud copy it is fetched from the
+ * server, because the editor is not connected to that project's room.
+ */
+interface ShareAccess {
+  shareEnabled: boolean;
+  shareToken: string | null;
+  role: ApiProjectAccess['role'] | null;
+}
+
+interface ShareTarget {
+  projectId: string;
+  /** `true` when the target is the cloud copy linked to the open local folder. */
+  isLinkedCopy: boolean;
+}
+
+const EMPTY_ACCESS: ShareAccess = { shareEnabled: false, shareToken: null, role: null };
 
 const sortMembers = (members: ApiProjectMember[]): ApiProjectMember[] =>
   [...members].sort((left, right) => {
@@ -52,9 +72,9 @@ export class Pix3ShareDialog extends ComponentBase {
   @state() private members: ApiProjectMember[] = [];
   @state() private suggestions: ApiProjectUserSuggestion[] = [];
   @state() private isSuggestionsOpen = false;
-  @state() private shareScope: ShareScope = appState.collaboration.shareEnabled
-    ? 'link'
-    : 'private';
+  @state() private shareScope: ShareScope = 'private';
+  @state() private access: ShareAccess = EMPTY_ACCESS;
+  @state() private isLoadingAccess = false;
 
   @query('#shareLinkInput') private inputEl!: HTMLInputElement | null;
 
@@ -73,7 +93,8 @@ export class Pix3ShareDialog extends ComponentBase {
       this.requestUpdate();
     });
     this.disposeCollaborationSubscription = subscribe(appState.collaboration, () => {
-      if (this.isOpen) {
+      if (this.isOpen && !this.shareTarget?.isLinkedCopy) {
+        this.syncAccessFromCollaborationState();
         this.updateLink();
       }
       this.requestUpdate();
@@ -106,7 +127,12 @@ export class Pix3ShareDialog extends ComponentBase {
     this.members = [];
     this.suggestions = [];
     this.isSuggestionsOpen = false;
-    this.shareScope = appState.collaboration.shareEnabled ? 'link' : 'private';
+    this.access = EMPTY_ACCESS;
+    this.shareScope = 'private';
+    if (!this.shareTarget?.isLinkedCopy) {
+      this.syncAccessFromCollaborationState();
+      this.shareScope = this.access.shareEnabled ? 'link' : 'private';
+    }
     this.updateLink();
     void this.initializeDialog();
   }
@@ -120,18 +146,76 @@ export class Pix3ShareDialog extends ComponentBase {
   }
 
   private async initializeDialog(): Promise<void> {
+    if (this.shareTarget?.isLinkedCopy) {
+      await this.loadLinkedCopyAccess();
+    }
     await this.loadMembers();
     if (this.shareScope === 'link') {
       window.setTimeout(() => this.inputEl?.select(), 50);
     }
   }
 
-  private updateLink(): void {
-    const projectId = appState.project.id;
-    const sceneId = appState.scenes.activeSceneId;
-    const shareToken = appState.collaboration.shareToken;
+  /**
+   * The project this dialog shares: the open cloud project, or — for a local folder that has
+   * been synced to the cloud — its linked cloud copy. Collaborators always work in the cloud
+   * copy; the local owner exchanges changes with it through Sync Project.
+   */
+  private get shareTarget(): ShareTarget | null {
+    if (appState.project.backend === 'cloud' && appState.project.id) {
+      return { projectId: appState.project.id, isLinkedCopy: false };
+    }
 
-    if (!projectId || !sceneId || !appState.collaboration.shareEnabled || !shareToken) {
+    const linkedCloudProjectId = appState.project.hybridSync.linkedCloudProjectId;
+    if (linkedCloudProjectId) {
+      return { projectId: linkedCloudProjectId, isLinkedCopy: true };
+    }
+
+    return null;
+  }
+
+  private get targetProjectId(): string | null {
+    return this.shareTarget?.projectId ?? null;
+  }
+
+  private syncAccessFromCollaborationState(): void {
+    this.access = {
+      shareEnabled: appState.collaboration.shareEnabled,
+      shareToken: appState.collaboration.shareToken,
+      role: appState.collaboration.role,
+    };
+  }
+
+  private async loadLinkedCopyAccess(): Promise<void> {
+    const projectId = this.targetProjectId;
+    if (!projectId || !appState.auth.isAuthenticated) {
+      this.access = EMPTY_ACCESS;
+      return;
+    }
+
+    this.isLoadingAccess = true;
+    try {
+      const access = await ApiClient.getProjectAccess(projectId);
+      this.access = {
+        shareEnabled: access.share_enabled,
+        shareToken: access.share_token,
+        role: access.role,
+      };
+      this.shareScope = access.share_enabled ? 'link' : 'private';
+      this.updateLink();
+    } catch (error) {
+      this.errorMessage =
+        error instanceof Error ? error.message : 'Failed to load sharing state of the cloud copy.';
+    } finally {
+      this.isLoadingAccess = false;
+    }
+  }
+
+  private updateLink(): void {
+    const projectId = this.targetProjectId;
+    const sceneId = appState.scenes.activeSceneId;
+    const shareToken = this.access.shareToken;
+
+    if (!projectId || !sceneId || !this.access.shareEnabled || !shareToken) {
       this.link = '';
       return;
     }
@@ -140,7 +224,7 @@ export class Pix3ShareDialog extends ComponentBase {
   }
 
   private buildLinkFromShareToken(shareToken?: string): string {
-    const projectId = appState.project.id;
+    const projectId = this.targetProjectId;
     const sceneId = appState.scenes.activeSceneId;
     if (!projectId || !sceneId) {
       return '';
@@ -150,11 +234,11 @@ export class Pix3ShareDialog extends ComponentBase {
   }
 
   private get canManageShareSettings(): boolean {
-    return appState.collaboration.role === 'owner';
+    return this.access.role === 'owner';
   }
 
   private get canManageMembers(): boolean {
-    return appState.collaboration.role === 'owner';
+    return this.access.role === 'owner';
   }
 
   private get nonOwnerMembers(): ApiProjectMember[] {
@@ -163,6 +247,7 @@ export class Pix3ShareDialog extends ComponentBase {
 
   private get isBusy(): boolean {
     return (
+      this.isLoadingAccess ||
       this.isUpdatingScope ||
       this.isSubmittingInvite ||
       this.isLoadingMembers ||
@@ -171,12 +256,12 @@ export class Pix3ShareDialog extends ComponentBase {
     );
   }
 
-  private get isCloudProject(): boolean {
-    return appState.project.backend === 'cloud';
+  private get hasShareTarget(): boolean {
+    return this.shareTarget !== null;
   }
 
   private syncScopeFromState(preserveSelectedScope = false): void {
-    if (appState.collaboration.shareEnabled) {
+    if (this.access.shareEnabled) {
       this.shareScope = 'link';
       return;
     }
@@ -193,7 +278,7 @@ export class Pix3ShareDialog extends ComponentBase {
   }
 
   private async loadMembers(options?: { preserveSelectedScope?: boolean }): Promise<void> {
-    if (!this.isCloudProject || !appState.project.id || !appState.auth.isAuthenticated) {
+    if (!this.hasShareTarget || !this.targetProjectId || !appState.auth.isAuthenticated) {
       this.members = [];
       this.syncScopeFromState(options?.preserveSelectedScope ?? false);
       return;
@@ -202,7 +287,7 @@ export class Pix3ShareDialog extends ComponentBase {
     this.isLoadingMembers = true;
 
     try {
-      const { members } = await ApiClient.getProjectMembers(appState.project.id);
+      const { members } = await ApiClient.getProjectMembers(this.targetProjectId);
       this.members = sortMembers(members);
       this.syncScopeFromState(options?.preserveSelectedScope ?? false);
     } catch (error) {
@@ -214,7 +299,7 @@ export class Pix3ShareDialog extends ComponentBase {
   }
 
   private async confirmSwitchToPrivate(): Promise<boolean> {
-    const shouldRevokeLink = appState.collaboration.shareEnabled;
+    const shouldRevokeLink = this.access.shareEnabled;
     const shouldRemoveMembers = this.nonOwnerMembers.length > 0;
 
     if (!shouldRevokeLink && !shouldRemoveMembers) {
@@ -244,8 +329,8 @@ export class Pix3ShareDialog extends ComponentBase {
     const previousScope = this.shareScope;
 
     if (
-      !this.isCloudProject ||
-      !appState.project.id ||
+      !this.hasShareTarget ||
+      !this.targetProjectId ||
       nextScope === this.shareScope ||
       !this.canManageShareSettings ||
       this.isBusy
@@ -265,12 +350,13 @@ export class Pix3ShareDialog extends ComponentBase {
           return;
         }
 
-        if (appState.collaboration.shareEnabled) {
-          await this.cloudProjectService.revokeShareToken(appState.project.id);
+        if (this.access.shareEnabled) {
+          await this.cloudProjectService.revokeShareToken(this.targetProjectId);
+          this.access = { ...this.access, shareEnabled: false, shareToken: null };
         }
 
         if (this.nonOwnerMembers.length > 0) {
-          await ApiClient.removeAllNonOwnerProjectMembers(appState.project.id);
+          await ApiClient.removeAllNonOwnerProjectMembers(this.targetProjectId);
           this.members = this.members.filter(member => member.role === 'owner');
         }
 
@@ -280,8 +366,9 @@ export class Pix3ShareDialog extends ComponentBase {
       }
 
       if (nextScope === 'selected') {
-        if (appState.collaboration.shareEnabled) {
-          await this.cloudProjectService.revokeShareToken(appState.project.id);
+        if (this.access.shareEnabled) {
+          await this.cloudProjectService.revokeShareToken(this.targetProjectId);
+          this.access = { ...this.access, shareEnabled: false, shareToken: null };
         }
 
         this.link = '';
@@ -293,7 +380,8 @@ export class Pix3ShareDialog extends ComponentBase {
         throw new Error('Open a scene before enabling link sharing.');
       }
 
-      const shareToken = await this.cloudProjectService.generateShareToken(appState.project.id);
+      const shareToken = await this.cloudProjectService.generateShareToken(this.targetProjectId);
+      this.access = { ...this.access, shareEnabled: true, shareToken };
       this.link = this.buildLinkFromShareToken(shareToken);
       this.copyLabel = 'Copy link';
       this.shareScope = 'link';
@@ -368,7 +456,7 @@ export class Pix3ShareDialog extends ComponentBase {
   };
 
   private async updateSuggestions(emailQuery: string): Promise<void> {
-    const projectId = appState.project.id;
+    const projectId = this.targetProjectId;
     if (!projectId || !this.canManageMembers || emailQuery.trim().length < 2) {
       this.suggestions = [];
       this.isSearchingUsers = false;
@@ -428,7 +516,7 @@ export class Pix3ShareDialog extends ComponentBase {
   };
 
   private async addMember(): Promise<void> {
-    const projectId = appState.project.id;
+    const projectId = this.targetProjectId;
     const email = this.inviteEmail.trim();
     if (!projectId || !email || !this.canManageMembers || this.isBusy) {
       return;
@@ -454,7 +542,7 @@ export class Pix3ShareDialog extends ComponentBase {
   }
 
   private async updateMemberRole(member: ApiProjectMember, event: Event): Promise<void> {
-    const projectId = appState.project.id;
+    const projectId = this.targetProjectId;
     const nextRole = (event.target as HTMLSelectElement).value as ApiAssignableProjectMemberRole;
     if (
       !projectId ||
@@ -479,7 +567,7 @@ export class Pix3ShareDialog extends ComponentBase {
   }
 
   private async removeMember(member: ApiProjectMember): Promise<void> {
-    const projectId = appState.project.id;
+    const projectId = this.targetProjectId;
     if (!projectId || member.role === 'owner' || !this.canManageMembers) {
       return;
     }
@@ -578,7 +666,7 @@ export class Pix3ShareDialog extends ComponentBase {
   }
 
   private renderMembersSection() {
-    if (!this.isCloudProject) {
+    if (!this.hasShareTarget) {
       return nothing;
     }
 
@@ -721,14 +809,24 @@ export class Pix3ShareDialog extends ComponentBase {
           <div class="pix3-share-header">
             <div class="pix3-share-title">Share Project</div>
             <div class="pix3-share-subtitle">
-              Manage who can open this cloud project and whether a view-only share link is active.
+              ${this.shareTarget?.isLinkedCopy
+                ? 'Manage who can open the cloud copy of this folder and whether a view-only share link is active.'
+                : 'Manage who can open this cloud project and whether a view-only share link is active.'}
             </div>
           </div>
           <div class="pix3-share-body">
             ${this.errorMessage
               ? html`<div class="pix3-share-error">${this.errorMessage}</div>`
               : nothing}
-            ${this.isCloudProject
+            ${this.shareTarget?.isLinkedCopy
+              ? html`
+                  <div class="pix3-share-hint pix3-share-hint--linked">
+                    You are sharing the cloud copy linked to this folder. Collaborators work in the
+                    cloud project; run Project / Sync Project to exchange changes with it.
+                  </div>
+                `
+              : nothing}
+            ${this.hasShareTarget
               ? html`
                   <div class="pix3-share-section">
                     <div class="pix3-share-section__header">
@@ -764,13 +862,13 @@ export class Pix3ShareDialog extends ComponentBase {
                 `
               : html`
                   <div class="pix3-share-empty">
-                    Open a cloud project to manage sharing. Local-folder synchronization now lives
-                    in Project / Sync to Local Folder.
+                    Sharing needs a cloud project. Open one, or create a cloud copy of this folder
+                    with Project / Sync Project — the copy can then be shared from here.
                   </div>
                 `}
           </div>
           <div class="pix3-share-actions">
-            ${this.isCloudProject
+            ${this.hasShareTarget
               ? html`
                   <button
                     class="pix3-share-button"

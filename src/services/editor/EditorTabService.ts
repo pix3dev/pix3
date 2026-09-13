@@ -9,6 +9,7 @@ import { SaveAnimationCommand } from '@/features/scene/SaveAnimationCommand';
 import { SaveSceneCommand } from '@/features/scene/SaveSceneCommand';
 import { RefreshPrefabInstancesCommand } from '@/features/scene/RefreshPrefabInstancesCommand';
 import { deriveAnimationDocumentId } from '@/features/scene/animation-asset-utils';
+import { deriveSceneIdFromResourcePath } from '@/core/scene-id';
 import { ViewportRendererService } from '@/services/viewport/ViewportRenderService';
 import { OperationService } from '@/services/core/OperationService';
 import { AnimationEditorService } from '@/services/animation/AnimationEditorService';
@@ -1052,16 +1053,7 @@ export class EditorTabService {
   }
 
   private deriveSceneIdFromResource(resourcePath: string): string {
-    const withoutScheme = resourcePath
-      .replace(/^res:\/\//i, '')
-      .replace(/^templ:\/\//i, '')
-      .replace(/^collab:\/\//i, '');
-    const withoutExtension = withoutScheme.replace(/\.[^./]+$/i, '');
-    const normalized = withoutExtension
-      .replace(/[^a-z0-9]+/gi, '-')
-      .replace(/^-+|-+$/g, '')
-      .toLowerCase();
-    return normalized || 'scene';
+    return deriveSceneIdFromResourcePath(resourcePath);
   }
 
   private deriveAnimationIdFromResource(resourcePath: string): string {

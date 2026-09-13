@@ -7,6 +7,9 @@ import { SceneManager, type SceneGraph } from '@pix3/runtime';
 import { ref } from 'valtio/vanilla';
 import { CloudProjectService } from '@/services/cloud/CloudProjectService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
+import { EditorTabService } from '@/services/editor/EditorTabService';
+import { resolveProjectStorageService } from '@/services/project/ProjectStorageService';
+import { deriveSceneIdFromResourcePath } from '@/core/scene-id';
 
 export interface CollabJoinParams {
   projectId: string;
@@ -72,9 +75,17 @@ export class CollabJoinService {
       container.getOrCreateToken(SceneManager)
     );
 
-    const sceneGraph = await crdtBinding.buildSceneFromYDoc(ydoc, sceneId);
-    const sceneFilePath = crdtBinding.getSceneFilePath(ydoc, sceneId) ?? `collab://${sceneId}`;
-    this.injectSceneIntoEditor(sceneId, sceneGraph, sceneManager, sceneFilePath, null);
+    // 5. The room may have no snapshot for this scene yet: a project uploaded to the cloud
+    // has all of its files in storage, but the Y.Doc only gains a `scenes` entry once
+    // somebody actually opens that scene. In that case load the scene from the project's
+    // files — the binding below then seeds the snapshot into the shared document.
+    if (crdtBinding.hasScene(ydoc, sceneId)) {
+      const sceneGraph = await crdtBinding.buildSceneFromYDoc(ydoc, sceneId);
+      const sceneFilePath = crdtBinding.getSceneFilePath(ydoc, sceneId) ?? `collab://${sceneId}`;
+      this.injectSceneIntoEditor(sceneId, sceneGraph, sceneManager, sceneFilePath, null);
+    } else {
+      await this.openSceneFromProjectFiles(container, sceneId);
+    }
 
     // 6. Set up CRDT binding for ongoing sync
     crdtBinding.bindToOperationService(operationService, collabService);
@@ -83,10 +94,43 @@ export class CollabJoinService {
     console.log('[CollabJoin] Successfully joined collaborative session', {
       projectId,
       sceneId,
-      nodeCount: sceneGraph.nodeMap.size,
+      nodeCount: sceneManager.getSceneGraph(sceneId)?.nodeMap.size ?? 0,
     });
 
     return true;
+  }
+
+  /**
+   * Fallback for a room that carries no CRDT snapshot for `sceneId`: find the project file
+   * whose derived id matches and open it through the normal scene-loading path
+   * (`EditorTabService` -> `LoadSceneCommand`).
+   */
+  private async openSceneFromProjectFiles(
+    container: ServiceContainer,
+    sceneId: string
+  ): Promise<void> {
+    console.log('[CollabJoin] No CRDT snapshot for scene, loading it from project files', {
+      sceneId,
+    });
+
+    const storage = resolveProjectStorageService();
+    const entries = await storage.getManifestEntries();
+    const match = entries.find(
+      entry =>
+        entry.path.endsWith('.pix3scene') && deriveSceneIdFromResourcePath(entry.path) === sceneId
+    );
+
+    if (!match) {
+      throw new Error(
+        `Scene '${sceneId}' is not available in the collaboration document, and no matching ` +
+          `.pix3scene file was found in the cloud project's files either.`
+      );
+    }
+
+    const editorTabService = container.getService<EditorTabService>(
+      container.getOrCreateToken(EditorTabService)
+    );
+    await editorTabService.openResourceTab('scene', `res://${match.path}`);
   }
 
   /**

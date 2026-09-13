@@ -248,3 +248,64 @@ pix3-status-bar .status-lane.is-off .status-lane-dot {
   background: var(--line-strong);
   opacity: 0.6;
 }
+
+/* Hybrid sync pill (local folder <-> linked cloud copy). Green = in sync (see the lane note
+   above: green means OK, amber is reserved for things that need attention). */
+pix3-status-bar .status-sync {
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+  gap: 5px;
+  background: var(--bg-2);
+  color: var(--fg-2);
+}
+
+pix3-status-bar .status-sync:hover {
+  background: var(--bg-3);
+  color: var(--fg-1);
+}
+
+pix3-status-bar .status-sync svg {
+  width: 12px;
+  height: 12px;
+  opacity: 0.85;
+}
+
+pix3-status-bar .status-sync.is-ok {
+  color: var(--ok);
+}
+
+pix3-status-bar .status-sync.is-busy {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+pix3-status-bar .status-sync.is-busy svg {
+  animation: status-sync-spin 1.2s linear infinite;
+}
+
+/* Pending changes are normal work in progress, not a fault: neutral, just not green. */
+pix3-status-bar .status-sync.is-pending {
+  color: var(--fg-1);
+}
+
+pix3-status-bar .status-sync.is-warn {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+
+pix3-status-bar .status-sync.is-error {
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+pix3-status-bar .status-sync.is-error:hover {
+  background: var(--danger-line);
+}
+
+@keyframes status-sync-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

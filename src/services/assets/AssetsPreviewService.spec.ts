@@ -239,6 +239,42 @@ describe('AssetsPreviewService', () => {
     }
   });
 
+  it('ignores project-state churn that is not a file mutation (hybrid sync progress)', async () => {
+    mockProjectService.listDirectory.mockResolvedValue([
+      { name: 'config.json', path: 'config.json', kind: 'file' },
+    ]);
+    mockProjectStorageService.readBlob.mockResolvedValue(
+      createFile('config.json', '{"name":"pix3"}', 'application/json', 11)
+    );
+    // A stale-but-set modified directory used to make EVERY appState.project write reload the
+    // folder; hybrid sync writes one progress tick per uploaded file.
+    appState.project.lastModifiedDirectoryPath = '.';
+
+    const service = new AssetsPreviewService();
+    try {
+      await vi.waitFor(() => expect(service.getSnapshot().items).toHaveLength(1));
+      await vi.waitFor(() => expect(service.getSnapshot().folderItemCount).not.toBeNull());
+      const callsAfterLoad = mockProjectService.listDirectory.mock.calls.length;
+
+      appState.project.hybridSync.status = 'syncing';
+      appState.project.hybridSync.totalFileCount = 3;
+      for (let i = 1; i <= 3; i += 1) {
+        appState.project.hybridSync.processedFileCount = i;
+        await Promise.resolve();
+      }
+      await new Promise(resolve => setTimeout(resolve, 0));
+      expect(mockProjectService.listDirectory).toHaveBeenCalledTimes(callsAfterLoad);
+
+      // A real file mutation still refreshes the folder.
+      appState.project.fileRefreshSignal += 1;
+      await vi.waitFor(() =>
+        expect(mockProjectService.listDirectory.mock.calls.length).toBeGreaterThan(callsAfterLoad)
+      );
+    } finally {
+      service.dispose();
+    }
+  });
+
   it('builds text previews for code and content files', async () => {
     mockProjectService.listDirectory.mockResolvedValue([
       { name: 'scene.yaml', path: 'configs/scene.yaml', kind: 'file' },

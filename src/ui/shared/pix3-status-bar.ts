@@ -21,10 +21,11 @@ import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService'
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
+import { ProjectSyncService } from '@/services/project/ProjectSyncService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import { subscribe } from 'valtio/vanilla';
-import { appState } from '@/state';
+import { appState, type HybridSyncStatus } from '@/state';
 import './pix3-status-bar.ts.css';
 import '../collab/collab-status-bar';
 
@@ -80,8 +81,42 @@ export class Pix3StatusBar extends ComponentBase {
   @inject(IconService)
   private readonly icons!: IconService;
 
+  @inject(ProjectSyncService)
+  private readonly projectSyncService!: ProjectSyncService;
+
   @state()
   private currentMessage: StatusMessage | null = null;
+
+  /**
+   * Hybrid (local folder <-> cloud copy) sync, copied out of `appState.project.hybridSync` field
+   * by field so a progress tick re-renders this bar only when something it shows has changed.
+   */
+  @state()
+  private syncStatus: HybridSyncStatus = 'unlinked';
+
+  @state()
+  private syncProcessed = 0;
+
+  @state()
+  private syncTotal = 0;
+
+  @state()
+  private syncLocalChanges = 0;
+
+  @state()
+  private syncCloudChanges = 0;
+
+  @state()
+  private syncConflicts = 0;
+
+  @state()
+  private syncIssueCount = 0;
+
+  @state()
+  private syncError: string | null = null;
+
+  @state()
+  private syncLastAt: number | null = null;
 
   @state()
   private bundleSize: BundleSizeReport | null = null;
@@ -142,6 +177,7 @@ export class Pix3StatusBar extends ComponentBase {
         this.bundleSizeComputing = false;
       }
       this.projectName = appState.project.projectName;
+      this.syncHybridSyncState();
     });
 
     this.disposeUiSubscription = subscribe(appState.ui, () => {
@@ -184,6 +220,7 @@ export class Pix3StatusBar extends ComponentBase {
 
     // Initialize state
     this.projectName = appState.project.projectName;
+    this.syncHybridSyncState();
     this.isPlaying = appState.ui.isPlaying;
     this.diagnostics = this.diagnosticsService.getLastSummary();
   }
@@ -195,6 +232,111 @@ export class Pix3StatusBar extends ComponentBase {
    * the status bar keeps re-rendering twice a second — and, because the probe stops as soon as its
    * last subscriber leaves, dropping the subscription also stops the 500 ms timer behind it.
    */
+  private syncHybridSyncState(): void {
+    const sync = appState.project.hybridSync;
+    // Lit's @state setters already skip equal primitives, so plain assignment is change-detected.
+    this.syncStatus = sync.status;
+    this.syncProcessed = sync.processedFileCount;
+    this.syncTotal = sync.totalFileCount;
+    this.syncLocalChanges = sync.localChangeCount;
+    this.syncCloudChanges = sync.cloudChangeCount;
+    this.syncConflicts = sync.conflictCount;
+    this.syncIssueCount = sync.issues.length;
+    this.syncError = sync.errorMessage;
+    this.syncLastAt = sync.lastSyncAt;
+  }
+
+  /**
+   * One pill for the local-folder <-> cloud link, so a sync that stalls, errors, or leaves
+   * conflicts is visible without opening the Sync dialog. Hidden while the project has no cloud
+   * link at all; clicking opens the dialog where every state here is actionable.
+   */
+  private renderSyncStatus() {
+    if (this.syncStatus === 'unlinked' || !this.projectName) {
+      return html``;
+    }
+
+    const lastSync = this.syncLastAt
+      ? `Last sync ${new Date(this.syncLastAt).toLocaleString()}`
+      : 'Not synced yet';
+    const extra = this.syncError ? `\n${this.syncError}` : '';
+    const footer = `\n${lastSync}\nClick to open Sync Project.`;
+
+    let tone = 'is-ok';
+    let icon = 'cloud';
+    let label = 'Synced';
+    let title = `Local folder and cloud copy are in sync.${footer}`;
+
+    switch (this.syncStatus) {
+      case 'checking':
+        tone = 'is-busy';
+        icon = 'refresh-cw';
+        label = 'Checking…';
+        title = `Comparing the local folder with the cloud copy.${footer}`;
+        break;
+      case 'syncing':
+        tone = 'is-busy';
+        icon = 'refresh-cw';
+        label = this.syncTotal > 0 ? `Syncing ${this.syncProcessed}/${this.syncTotal}` : 'Syncing…';
+        title = `Applying file updates between the local folder and the cloud copy.${footer}`;
+        break;
+      case 'local-changes':
+        tone = this.syncIssueCount > 0 ? 'is-warn' : 'is-pending';
+        icon = 'upload-cloud';
+        label =
+          this.syncIssueCount > 0
+            ? `${this.syncIssueCount} skipped`
+            : `${this.syncLocalChanges} to upload`;
+        title =
+          this.syncIssueCount > 0
+            ? `${this.syncIssueCount} file(s) could not be uploaded.${extra}${footer}`
+            : `${this.syncLocalChanges} local change(s) not yet in the cloud copy.${footer}`;
+        break;
+      case 'cloud-changes':
+        tone = 'is-pending';
+        icon = 'download-cloud';
+        label = `${this.syncCloudChanges} to download`;
+        title = `${this.syncCloudChanges} cloud change(s) not yet in the local folder.${footer}`;
+        break;
+      case 'conflict':
+        tone = 'is-error';
+        icon = 'alert-triangle';
+        label = `${this.syncConflicts} conflict${this.syncConflicts === 1 ? '' : 's'}`;
+        title = `Both sides changed the same file(s). Resolve in Sync Project.${footer}`;
+        break;
+      case 'auth-required':
+        tone = 'is-error';
+        icon = 'cloud-off';
+        label = 'Sign in to sync';
+        title = `The cloud copy needs you signed in.${extra}${footer}`;
+        break;
+      case 'error':
+        tone = 'is-error';
+        icon = 'alert-triangle';
+        label = 'Sync error';
+        title = `Sync failed.${extra}${footer}`;
+        break;
+      default:
+        break;
+    }
+
+    return html`
+      <button
+        type="button"
+        class="status-indicator status-sync ${tone}"
+        title=${title}
+        @click=${this.onSyncIndicatorClick}
+      >
+        ${this.icons.getIcon(icon, IconSize.SMALL)}
+        <span class="status-sync-label">${label}</span>
+      </button>
+    `;
+  }
+
+  private onSyncIndicatorClick = (): void => {
+    void this.projectSyncService.showDialog();
+  };
+
   private syncBridgeState(): void {
     this.bridgeAvailable = this.bridge.isAvailable();
     this.bridgeProviderCount = this.bridge.getEntries().length;
@@ -300,8 +442,9 @@ export class Pix3StatusBar extends ComponentBase {
                 </button>
               `
             : html``}
-          ${this.renderAgentLanes()} ${this.isFlow ? html`` : this.renderPerformance()}
-          ${this.renderDiagnostics()} ${this.projectName ? this.renderBundleSize() : html``}
+          ${this.renderSyncStatus()} ${this.renderAgentLanes()}
+          ${this.isFlow ? html`` : this.renderPerformance()} ${this.renderDiagnostics()}
+          ${this.projectName ? this.renderBundleSize() : html``}
           <span class="status-version">${this.updateState.currentVersion.displayVersion}</span>
           ${this.projectName
             ? html`<span class="status-project">${this.projectName}</span>`

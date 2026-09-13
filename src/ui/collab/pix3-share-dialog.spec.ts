@@ -133,6 +133,82 @@ describe('Pix3ShareDialog', () => {
     expect(dialog.textContent).toContain('Selected Users');
   });
 
+  it('shares the linked cloud copy of a local project and reads its access from the server', async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.includes('/api/projects/cloud-copy-9/access')) {
+        return new Response(
+          JSON.stringify({
+            id: 'cloud-copy-9',
+            name: 'Cloud Copy',
+            role: 'owner',
+            auth_source: 'member',
+            access_mode: 'edit',
+            share_enabled: true,
+            share_token: 'copy-token',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      if (url.includes('/api/projects/cloud-copy-9/members')) {
+        return new Response(
+          JSON.stringify({
+            members: [
+              { user_id: 'owner-1', email: 'owner@example.com', username: 'owner', role: 'owner' },
+            ],
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      }
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    setupShareDialogDependencies();
+
+    // A LOCAL project (no collaboration room) that has been synced to a cloud copy.
+    appState.project.id = 'local-session-1';
+    appState.project.backend = 'local';
+    appState.project.status = 'ready';
+    appState.project.hybridSync.linkedCloudProjectId = 'cloud-copy-9';
+    appState.project.hybridSync.status = 'up-to-date';
+    appState.scenes.activeSceneId = 'scenes-main';
+    appState.auth.user = {
+      id: 'owner-1',
+      email: 'owner@example.com',
+      username: 'owner',
+      is_admin: false,
+    };
+    appState.auth.isAuthenticated = true;
+    appState.collaboration.role = null;
+    appState.collaboration.shareEnabled = false;
+    appState.collaboration.shareToken = null;
+
+    const dialog = document.createElement('pix3-share-dialog') as TestShareDialogElement;
+    document.body.appendChild(dialog);
+    await dialog.updateComplete;
+
+    await openDialog(dialog);
+
+    await vi.waitFor(() => {
+      const scopeSelect = dialog.querySelector('#sharedForSelect') as HTMLSelectElement;
+      expect(scopeSelect.value).toBe('link');
+    });
+    expect(dialog.textContent).not.toContain('Sharing needs a cloud project');
+    expect(dialog.textContent).toContain('cloud copy linked to this folder');
+
+    // Every API call targets the linked cloud copy, never the local session id.
+    const urls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(urls.some(url => url.includes('local-session-1'))).toBe(false);
+    expect(urls.some(url => url.includes('/api/projects/cloud-copy-9/members'))).toBe(true);
+
+    // The invite link is built for the cloud copy with the token the server reported.
+    const linkInput = dialog.querySelector('#shareLinkInput') as HTMLInputElement;
+    expect(linkInput.value).toContain('collab=cloud-copy-9');
+    expect(linkInput.value).toContain('scene=scenes-main');
+    expect(linkInput.value).toContain('token=copy-token');
+  });
+
   it('switches to Only me by revoking the link and removing non-owner members', async () => {
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);

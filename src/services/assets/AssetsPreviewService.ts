@@ -180,6 +180,16 @@ export class AssetsPreviewService {
    */
   private readonly spriteFolderCache = new Map<string, string | null>();
 
+  /**
+   * The last file-mutation signal this service reacted to. `appState.project` also carries
+   * high-churn fields that have nothing to do with the folder listing (hybrid-sync progress
+   * ticks once per uploaded file, for one), and the subscription fires for every one of them;
+   * only an actual mutation signal may trigger a folder reload, otherwise the preview grid
+   * reloads — thumbnails and blob URLs included — hundreds of times during a sync.
+   */
+  private lastSeenFileRefreshSignal = appState.project.fileRefreshSignal ?? 0;
+  private lastSeenModifiedDirectory = appState.project.lastModifiedDirectoryPath;
+
   constructor() {
     this.disposeProjectSubscription = subscribe(appState.project, () => {
       this.handleProjectStateChange();
@@ -323,12 +333,23 @@ export class AssetsPreviewService {
       return;
     }
 
+    const fileRefreshSignal = appState.project.fileRefreshSignal ?? 0;
+    const modifiedDirectory = appState.project.lastModifiedDirectoryPath;
+    const hasFileMutation =
+      fileRefreshSignal !== this.lastSeenFileRefreshSignal ||
+      modifiedDirectory !== this.lastSeenModifiedDirectory;
+    this.lastSeenFileRefreshSignal = fileRefreshSignal;
+    this.lastSeenModifiedDirectory = modifiedDirectory;
+
     if (!this.state.selectedFolderPath) {
       void this.setSelectedFolder('.');
       return;
     }
 
-    const modifiedDirectory = appState.project.lastModifiedDirectoryPath;
+    if (!hasFileMutation) {
+      return;
+    }
+
     if (modifiedDirectory && this.shouldRefreshForDirectory(modifiedDirectory)) {
       void this.refreshCurrentFolder();
     }

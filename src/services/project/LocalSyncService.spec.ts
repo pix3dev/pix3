@@ -464,6 +464,58 @@ describe('LocalSyncService', () => {
     expect(logger.warn).toHaveBeenCalled();
   });
 
+  it('offers the linked local folder when opening the cloud copy of a synced project', async () => {
+    localStorage.setItem(
+      'pix3.hybridLinks:v1',
+      JSON.stringify([
+        {
+          cloudProjectId: 'cloud-7',
+          localSessionId: 'local-7',
+          localProjectName: 'Hybrid Project',
+          localAbsolutePath: 'C:/Projects/Hybrid',
+          lastSyncAt: 1,
+        },
+      ])
+    );
+
+    const service = new LocalSyncService();
+    const projectService = {
+      getPersistedProjectDirectoryHandle: vi.fn(async () => ({ name: 'Hybrid' })),
+      openRecentProject: vi.fn(async () => undefined),
+    };
+    const cloudProjectService = { openProject: vi.fn(async () => undefined) };
+    const dialogService = {
+      showChoice: vi.fn<() => Promise<'confirm' | 'secondary' | 'cancel'>>(async () => 'confirm'),
+    };
+    Object.defineProperty(service, 'projectService', { value: projectService });
+    Object.defineProperty(service, 'cloudProjectService', { value: cloudProjectService });
+    Object.defineProperty(service, 'dialogService', { value: dialogService });
+
+    // Linked + folder handle still persisted: ask, and "Open local folder" opens the folder.
+    await service.openCloudProject('cloud-7');
+    expect(dialogService.showChoice).toHaveBeenCalledTimes(1);
+    expect(projectService.openRecentProject).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'local-7', backend: 'local', linkedCloudProjectId: 'cloud-7' })
+    );
+    expect(cloudProjectService.openProject).not.toHaveBeenCalled();
+
+    // "Open cloud copy" goes to the plain cloud session.
+    dialogService.showChoice.mockResolvedValueOnce('secondary');
+    await service.openCloudProject('cloud-7');
+    expect(cloudProjectService.openProject).toHaveBeenCalledWith('cloud-7');
+
+    // No link record on this machine: no dialog, straight to the cloud session.
+    await service.openCloudProject('cloud-unlinked');
+    expect(dialogService.showChoice).toHaveBeenCalledTimes(2);
+    expect(cloudProjectService.openProject).toHaveBeenLastCalledWith('cloud-unlinked');
+
+    // Linked but the folder handle is gone (other machine / cleared storage): same.
+    projectService.getPersistedProjectDirectoryHandle.mockResolvedValueOnce(null as never);
+    await service.openCloudProject('cloud-7');
+    expect(dialogService.showChoice).toHaveBeenCalledTimes(2);
+    expect(cloudProjectService.openProject).toHaveBeenLastCalledWith('cloud-7');
+  });
+
   it('allows syncing into a Git-only folder and keeps cloud .gitignore files', async () => {
     const localRoot = createDirectoryTree({
       '.git/config': '[core]\n  repositoryformatversion = 0\n',

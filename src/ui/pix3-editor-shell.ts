@@ -136,6 +136,7 @@ import { EditorTabService } from '@/services/editor/EditorTabService';
 import { RouterService } from '@/services/core/RouterService';
 import { AuthService } from '@/services/cloud/AuthService';
 import { CloudProjectService } from '@/services/cloud/CloudProjectService';
+import { LocalSyncService } from '@/services/project/LocalSyncService';
 import { UpdateCheckService } from '@/services/editor/UpdateCheckService';
 import {
   ProjectLifecycleService,
@@ -187,6 +188,9 @@ export class Pix3EditorShell extends ComponentBase {
 
   @inject(CloudProjectService)
   private readonly cloudProjectService!: CloudProjectService;
+
+  @inject(LocalSyncService)
+  private readonly localSyncService!: LocalSyncService;
 
   @inject(ProjectLifecycleService)
   private readonly projectLifecycleService!: ProjectLifecycleService;
@@ -1353,7 +1357,7 @@ export class Pix3EditorShell extends ComponentBase {
     }
 
     if (pendingProjectId) {
-      await this.cloudProjectService.openProject(pendingProjectId);
+      await this.localSyncService.openCloudProject(pendingProjectId);
     }
   };
 

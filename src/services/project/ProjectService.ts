@@ -357,13 +357,15 @@ export class ProjectService {
         throw new Error('Cloud recent project is missing its project ID.');
       }
 
-      const cloudProjectService = ServiceContainer.getInstance().getService(
+      // Through LocalSyncService so a cloud project that is the synced copy of a folder on this
+      // machine offers that folder instead of re-downloading itself (dynamic import: cycle).
+      const localSyncService = ServiceContainer.getInstance().getService(
         ServiceContainer.getInstance().getOrCreateToken(
-          (await import('@/services/cloud/CloudProjectService')).CloudProjectService
+          (await import('@/services/project/LocalSyncService')).LocalSyncService
         )
-      ) as import('@/services/cloud/CloudProjectService').CloudProjectService;
+      ) as import('@/services/project/LocalSyncService').LocalSyncService;
 
-      await cloudProjectService.openProject(entry.id);
+      await localSyncService.openCloudProject(entry.id);
       return;
     }
 

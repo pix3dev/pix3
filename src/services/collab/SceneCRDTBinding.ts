@@ -69,6 +69,15 @@ export class SceneCRDTBinding {
     this.lastSerializedSnapshot = snapshot;
   }
 
+  /**
+   * True when the shared document already carries a snapshot entry for this scene.
+   * A room that nobody has ever opened a scene in has none, so callers can fall back
+   * to loading the scene from the project's files instead of failing the join.
+   */
+  hasScene(ydoc: Y.Doc, sceneId: string): boolean {
+    return this.getSceneMap(ydoc, sceneId) !== null;
+  }
+
   async buildSceneFromYDoc(ydoc: Y.Doc, sceneId: string): Promise<SceneGraph> {
     const sceneManager = this.getSceneManager();
     const sceneMap = this.getSceneMap(ydoc, sceneId);

@@ -4,6 +4,7 @@ import { ProjectService } from '@/services/project/ProjectService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { UIKIT_FORGE_HASH } from '@/core/tool-routes';
 import { CloudProjectService } from '@/services/cloud/CloudProjectService';
+import { LocalSyncService } from '@/services/project/LocalSyncService';
 import { DialogService } from '@/services/editor/DialogService';
 import type { ApiProject } from '@/services/cloud/ApiClient';
 import { appState } from '@/state';
@@ -56,6 +57,9 @@ export class Pix3Welcome extends ComponentBase {
 
   @inject(CloudProjectService)
   private readonly cloudProjectService!: CloudProjectService;
+
+  @inject(LocalSyncService)
+  private readonly localSyncService!: LocalSyncService;
 
   @inject(ProjectLifecycleService)
   private readonly projectLifecycleService!: ProjectLifecycleService;
@@ -587,7 +591,12 @@ export class Pix3Welcome extends ComponentBase {
       return;
     }
 
-    await this.cloudProjectService.openProject(projectId);
+    this.projectError = null;
+    try {
+      await this.localSyncService.openCloudProject(projectId);
+    } catch (error) {
+      this.captureProjectOpenError(error);
+    }
   };
 
   private onDeleteCloudProject = async (e: Event): Promise<void> => {
@@ -1051,7 +1060,13 @@ export class Pix3Welcome extends ComponentBase {
                                                 )}</span
                                               >
                                               <span class="recent-name">${p.name}</span>
-                                              <span class="recent-backend">Cloud</span>
+                                              ${this.localSyncService.getLinkedLocalSessionId(p.id)
+                                                ? html`<span
+                                                    class="recent-backend recent-backend--hybrid"
+                                                    title="Cloud copy of a local folder on this machine"
+                                                    >Hybrid</span
+                                                  >`
+                                                : html`<span class="recent-backend">Cloud</span>`}
                                               <span class="recent-time"
                                                 >${this.formatTime(
                                                   new Date(p.updated_at).getTime()

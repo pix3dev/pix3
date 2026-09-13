@@ -74,6 +74,21 @@ const HYBRID_BASELINE_PREFIX = 'pix3.hybridBaseline:v1:';
 const HYBRID_METADATA_KEY = 'pix3Hybrid';
 const PROJECT_MANIFEST_PATH = 'pix3project.yaml';
 
+/**
+ * How many file transfers run at once. Each upload/download is one HTTP round-trip, so a
+ * strictly sequential loop spends most of its wall-clock time waiting on latency; six matches
+ * the per-host connection budget browsers give HTTP/1.1, so more would only queue in the
+ * network stack.
+ */
+const SYNC_TRANSFER_CONCURRENCY = 6;
+
+/**
+ * Progress writes to `appState.project.hybridSync` fan out to every `appState.project`
+ * subscriber (viewport resize, editor-shell layout pass, asset panels…), so they are coalesced
+ * to at most one write per interval instead of one per finished file.
+ */
+const SYNC_PROGRESS_FLUSH_INTERVAL_MS = 120;
+
 const IGNORED_DIRECTORY_NAMES = new Set(['.git', 'node_modules', 'dist', 'coverage']);
 const IGNORED_FILE_NAMES = new Set(['.DS_Store']);
 const LOCAL_MAPPING_SEED_FILE_NAMES = new Set([
@@ -101,6 +116,65 @@ export class LocalSyncService {
   private readonly logger!: LoggingService;
 
   private lastPromptSignature: string | null = null;
+
+  private progressFlushTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingProgress: { link: HybridLinkRecord | null; progress: SyncProgressState } | null =
+    null;
+
+  /** The local session id this cloud project is a copy of on this machine, if any. */
+  getLinkedLocalSessionId(cloudProjectId: string): string | null {
+    return this.getLinkRecordByCloudProjectId(cloudProjectId)?.localSessionId ?? null;
+  }
+
+  /**
+   * Opens a cloud project the way the user most likely means it. A cloud project that is the
+   * synced copy of a local folder on this machine is the same project as that folder, so
+   * opening it as a plain cloud session — which re-downloads every file into the browser
+   * cache — is almost never what was wanted. When the linked folder is still reachable the
+   * user picks: the folder (work on the files directly, sync when ready) or the cloud copy
+   * (a live collaboration session). Without a usable link this is just `openProject`.
+   */
+  async openCloudProject(cloudProjectId: string): Promise<void> {
+    const link = this.getLinkRecordByCloudProjectId(cloudProjectId);
+    const localHandle = link
+      ? await this.projectService
+          .getPersistedProjectDirectoryHandle(link.localSessionId)
+          .catch(() => null)
+      : null;
+
+    if (!link || !localHandle) {
+      await this.cloudProjectService.openProject(cloudProjectId);
+      return;
+    }
+
+    const folderLabel = link.localAbsolutePath ?? localHandle.name ?? link.localProjectName;
+    const choice = await this.dialogService.showChoice({
+      title: 'Linked Local Folder',
+      message:
+        `"${link.localProjectName}" is the cloud copy of the local folder ${folderLabel}. ` +
+        'Open the folder to work on the files directly (and sync when you are ready), or open ' +
+        'the cloud copy for a live collaboration session.',
+      confirmLabel: 'Open local folder',
+      secondaryLabel: 'Open cloud copy',
+      cancelLabel: 'Cancel',
+    });
+
+    if (choice === 'confirm') {
+      await this.projectService.openRecentProject({
+        id: link.localSessionId,
+        name: link.localProjectName,
+        backend: 'local',
+        localAbsolutePath: link.localAbsolutePath ?? undefined,
+        linkedCloudProjectId: cloudProjectId,
+        lastOpenedAt: Date.now(),
+      });
+      return;
+    }
+
+    if (choice === 'secondary') {
+      await this.cloudProjectService.openProject(cloudProjectId);
+    }
+  }
 
   async handleProjectActivated(): Promise<void> {
     const prepared = await this.refreshCurrentProjectStatus();
@@ -327,41 +401,17 @@ export class LocalSyncService {
       projectId: project.id,
     });
 
-    for (const filePath of filePaths) {
+    await this.forEachConcurrent(filePaths, SYNC_TRANSFER_CONCURRENCY, async filePath => {
       const entry = localManifest.get(filePath);
       if (!entry) {
-        continue;
+        return;
       }
 
-      this.logger.info(`Upload ${filePath} (${this.formatBytes(entry.size)})`, {
-        path: filePath,
-        size: entry.size,
-        direction: 'local-to-cloud',
-      });
-
-      try {
-        const content = await this.readFile(localHandle, filePath);
-        await ApiClient.uploadFile(project.id, filePath, content);
-      } catch (error) {
-        if (this.isUploadTooLargeError(error)) {
-          const reason = this.getUploadTooLargeMessage(filePath, entry.size, error);
-          skipped.push({ path: filePath, size: entry.size, reason });
-          this.logger.warn(reason, {
-            path: filePath,
-            size: entry.size,
-            limitBytes: PROJECT_UPLOAD_FILE_SIZE_LIMIT_BYTES,
-          });
-          progress.processedFileCount += 1;
-          this.updateSyncProgress(null, progress);
-          continue;
-        }
-
-        throw error;
-      }
-
+      await this.uploadOneFile(project.id, localHandle, filePath, entry, skipped);
       progress.processedFileCount += 1;
       this.updateSyncProgress(null, progress);
-    }
+    });
+    this.sortSkipped(skipped);
 
     const link = this.upsertLinkRecord({
       cloudProjectId: project.id,
@@ -598,44 +648,28 @@ export class LocalSyncService {
       `Hybrid sync started: local -> cloud (${uploadPaths.length} upload(s), ${deletePaths.length} delete(s))`
     );
 
-    for (const filePath of uniqueUploadPaths) {
+    await this.forEachConcurrent(uniqueUploadPaths, SYNC_TRANSFER_CONCURRENCY, async filePath => {
       const entry = prepared.localManifest.get(filePath);
       if (!entry) {
-        continue;
+        return;
       }
 
-      this.logger.info(`Upload ${filePath} (${this.formatBytes(entry.size)})`, {
-        path: filePath,
-        size: entry.size,
-        direction: 'local-to-cloud',
-      });
-
-      try {
-        const content = await this.readFile(prepared.localHandle, filePath);
-        await ApiClient.uploadFile(prepared.link.cloudProjectId, filePath, content);
+      const wasUploaded = await this.uploadOneFile(
+        prepared.link.cloudProjectId,
+        prepared.localHandle,
+        filePath,
+        entry,
+        skipped
+      );
+      if (wasUploaded) {
         uploaded.push(filePath);
-      } catch (error) {
-        if (this.isUploadTooLargeError(error)) {
-          const reason = this.getUploadTooLargeMessage(filePath, entry.size, error);
-          skipped.push({ path: filePath, size: entry.size, reason });
-          this.logger.warn(reason, {
-            path: filePath,
-            size: entry.size,
-            limitBytes: PROJECT_UPLOAD_FILE_SIZE_LIMIT_BYTES,
-          });
-          progress.processedFileCount += 1;
-          this.updateSyncProgress(prepared.link, progress);
-          continue;
-        }
-
-        throw error;
       }
-
       progress.processedFileCount += 1;
       this.updateSyncProgress(prepared.link, progress);
-    }
+    });
+    this.sortSkipped(skipped);
 
-    for (const filePath of uniqueDeletePaths) {
+    await this.forEachConcurrent(uniqueDeletePaths, SYNC_TRANSFER_CONCURRENCY, async filePath => {
       this.logger.info(`Delete remote ${filePath}`, {
         path: filePath,
         direction: 'local-to-cloud',
@@ -649,7 +683,7 @@ export class LocalSyncService {
 
       progress.processedFileCount += 1;
       this.updateSyncProgress(prepared.link, progress);
-    }
+    });
 
     const lastSyncAt = Date.now();
     const nextLink = this.upsertLinkRecord({
@@ -733,7 +767,7 @@ export class LocalSyncService {
       `Hybrid sync started: cloud -> local (${downloadPaths.length} download(s), ${deletePaths.length} delete(s))`
     );
 
-    for (const filePath of uniqueDownloadPaths) {
+    await this.forEachConcurrent(uniqueDownloadPaths, SYNC_TRANSFER_CONCURRENCY, async filePath => {
       const entry = prepared.cloudManifest.get(filePath);
       this.logger.info(`Download ${filePath}${entry ? ` (${this.formatBytes(entry.size)})` : ''}`, {
         path: filePath,
@@ -749,8 +783,10 @@ export class LocalSyncService {
       downloaded.push(filePath);
       progress.processedFileCount += 1;
       this.updateSyncProgress(prepared.link, progress);
-    }
+    });
 
+    // Local deletes stay sequential: they walk the directory-handle tree, and the File System
+    // Access API serialises writes per handle anyway.
     for (const filePath of uniqueDeletePaths) {
       this.logger.info(`Delete local ${filePath}`, {
         path: filePath,
@@ -1097,6 +1133,10 @@ export class LocalSyncService {
     link: HybridLinkRecord | null,
     updates: Partial<typeof appState.project.hybridSync>
   ): void {
+    if (updates.status !== undefined) {
+      // A phase boundary: whatever progress tick is still queued belongs to the phase that ended.
+      this.cancelPendingProgress();
+    }
     appState.project.hybridSync.linkedCloudProjectId = link?.cloudProjectId ?? null;
     appState.project.hybridSync.linkedLocalSessionId = link?.localSessionId ?? null;
     appState.project.hybridSync.linkedLocalPath = link?.localAbsolutePath ?? null;
@@ -1118,11 +1158,124 @@ export class LocalSyncService {
       updates.errorMessage ?? appState.project.hybridSync.errorMessage;
   }
 
+  /**
+   * Coalesced progress write: the first tick lands immediately (so the dialog shows movement at
+   * once), later ticks inside the interval collapse into a single trailing write. A status change
+   * ({@link applyHybridState} with `status`) drops anything still pending, so a finished sync can
+   * never be followed by a stale "n/m files" write.
+   */
   private updateSyncProgress(link: HybridLinkRecord | null, progress: SyncProgressState): void {
-    this.applyHybridState(link, {
-      processedFileCount: progress.processedFileCount,
-      totalFileCount: progress.totalFileCount,
+    this.pendingProgress = { link, progress: { ...progress } };
+    if (this.progressFlushTimer !== null) {
+      return;
+    }
+
+    this.flushSyncProgress();
+    this.progressFlushTimer = setTimeout(() => {
+      this.progressFlushTimer = null;
+      this.flushSyncProgress();
+    }, SYNC_PROGRESS_FLUSH_INTERVAL_MS);
+  }
+
+  private flushSyncProgress(): void {
+    const pending = this.pendingProgress;
+    this.pendingProgress = null;
+    if (!pending) {
+      return;
+    }
+
+    this.applyHybridState(pending.link, {
+      processedFileCount: pending.progress.processedFileCount,
+      totalFileCount: pending.progress.totalFileCount,
     });
+  }
+
+  private cancelPendingProgress(): void {
+    if (this.progressFlushTimer !== null) {
+      clearTimeout(this.progressFlushTimer);
+      this.progressFlushTimer = null;
+    }
+    this.pendingProgress = null;
+  }
+
+  /**
+   * Runs `worker` over `items` with at most `limit` in flight. The first rejection stops new
+   * items from being picked up; the in-flight ones settle, then that rejection is rethrown —
+   * same contract as the sequential loop it replaces, minus the latency serialisation.
+   */
+  private async forEachConcurrent<T>(
+    items: readonly T[],
+    limit: number,
+    worker: (item: T) => Promise<void>
+  ): Promise<void> {
+    let nextIndex = 0;
+    let failed = false;
+    let failure: unknown = null;
+
+    const runner = async (): Promise<void> => {
+      while (!failed && nextIndex < items.length) {
+        const item = items[nextIndex];
+        nextIndex += 1;
+        try {
+          await worker(item);
+        } catch (error) {
+          if (!failed) {
+            failed = true;
+            failure = error;
+          }
+        }
+      }
+    };
+
+    const runnerCount = Math.max(1, Math.min(limit, items.length));
+    await Promise.all(Array.from({ length: runnerCount }, () => runner()));
+
+    if (failed) {
+      throw failure;
+    }
+  }
+
+  /**
+   * Reads one local file and uploads it. Returns `true` when the file reached the cloud;
+   * `false` when it exceeded the upload limit (recorded in `skipped`, sync continues). Any
+   * other failure propagates and aborts the sync.
+   */
+  private async uploadOneFile(
+    cloudProjectId: string,
+    localHandle: FileSystemDirectoryHandle,
+    filePath: string,
+    entry: FileHashEntry,
+    skipped: SyncSkippedEntry[]
+  ): Promise<boolean> {
+    this.logger.info(`Upload ${filePath} (${this.formatBytes(entry.size)})`, {
+      path: filePath,
+      size: entry.size,
+      direction: 'local-to-cloud',
+    });
+
+    try {
+      const content = await this.readFile(localHandle, filePath);
+      await ApiClient.uploadFile(cloudProjectId, filePath, content);
+      return true;
+    } catch (error) {
+      if (this.isUploadTooLargeError(error)) {
+        const reason = this.getUploadTooLargeMessage(filePath, entry.size, error);
+        skipped.push({ path: filePath, size: entry.size, reason });
+        this.logger.warn(reason, {
+          path: filePath,
+          size: entry.size,
+          limitBytes: PROJECT_UPLOAD_FILE_SIZE_LIMIT_BYTES,
+        });
+        return false;
+      }
+
+      throw error;
+    }
+  }
+
+  /** Concurrent transfers finish in arbitrary order; the issues list is shown to the user sorted. */
+  private sortSkipped(skipped: SyncSkippedEntry[]): void {
+    skipped.sort((a, b) => a.path.localeCompare(b.path));
   }
 
   private readLinkRecords(): HybridLinkRecord[] {

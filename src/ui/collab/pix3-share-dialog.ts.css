@@ -365,3 +365,8 @@ pix3-share-dialog {
     flex: 1 1 100%;
   }
 }
+
+/* Standalone hint above the sections (the per-scope hints live inside a section). */
+pix3-share-dialog .pix3-share-hint--linked {
+  margin-bottom: 12px;
+}
