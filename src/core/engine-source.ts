@@ -197,6 +197,23 @@ export interface OffPackageTopic {
   /** Tested against the raw query. Must not carry the `g` flag: these are reused across calls. */
   pattern: RegExp;
   note: string;
+  /**
+   * The note's claims about the tree, restated as symbols a spec can look up.
+   *
+   * This exists because the rewrite above fixed one stale note and changed nothing about *why* it
+   * went stale: prose asserting "X is not in this package" is a cache with no invalidation, and the
+   * next capability to move into the package will rot the next sentence exactly the same way. So
+   * every load-bearing claim is duplicated here as data, and `engine-source.spec.ts` re-derives it
+   * from the sources the tools actually search.
+   *
+   * `present` — the note tells the agent to use this, so it must be findable. `absent` — the note
+   * tells the agent a silence here is expected, so a match means the note is now lying and the
+   * agent is being sent out of the package for something that moved into it.
+   */
+  claims: {
+    readonly present: readonly string[];
+    readonly absent: readonly string[];
+  };
 }
 
 export const OFF_PACKAGE_TOPICS: readonly OffPackageTopic[] = [
@@ -204,7 +221,8 @@ export const OFF_PACKAGE_TOPICS: readonly OffPackageTopic[] = [
     id: 'rapier-physics',
     // `gravity` is deliberately absent: Particles3D has its own, so it would fire as pure noise.
     // `friction` / `restitution` are safe to add — nothing outside the physics files uses either.
-    pattern: /rigid.?bod|\bphysics\b|\brapier\b|\bcollider|\bsolver\b|\brestitution\b|\bfriction\b/i,
+    pattern:
+      /rigid.?bod|\bphysics\b|\brapier\b|\bcollider|\bsolver\b|\brestitution\b|\bfriction\b/i,
     note:
       '**2D rigid-body physics IS in this package** and this search can see it — look for ' +
       '`core:PhysicsBody2D` + `core:Collider2D` (authored together on one node, Unity-style) and ' +
@@ -222,6 +240,22 @@ export const OFF_PACKAGE_TOPICS: readonly OffPackageTopic[] = [
       '`new RAPIER.World({ x: 0, y: -9.81, z: 0 })`. It is lazy-loaded (nothing downloads until a ' +
       'compiled bundle mentions the module) and the single-file playable export vendors it, so a ' +
       "game built on it still exports. Full detail: read_skill('game-prototype', 'Physics').",
+    claims: {
+      // Named in the note as the thing to reach for: if any of these stops resolving, the note is
+      // pointing an agent at an API the tree no longer has.
+      present: [
+        'PhysicsBody2D',
+        'Collider2D',
+        'physics2d',
+        'setGravity',
+        'moveAndSlide',
+        'overlapCircle',
+      ],
+      // The note's one remaining absence claim. Rapier landing inside the package would make
+      // "does not live in `@pix3/runtime/src`" false, and the note would then be steering 3D
+      // physics work out of a tree that answers it.
+      absent: ['@dimforge/rapier3d-compat'],
+    },
   },
 ];
 

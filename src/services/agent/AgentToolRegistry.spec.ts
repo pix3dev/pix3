@@ -1454,8 +1454,10 @@ describe('AgentToolRegistry', () => {
   describe('filesystem tools', () => {
     const makeStorage = () => {
       const files = new Map<string, string>([['scripts/a.ts', 'export const x = 1;']]);
+      const binaries = new Map<string, Uint8Array>();
       return {
         files,
+        binaries,
         // Mirrors ProjectStorageService: write/delete bump fileRefreshSignal.
         writeTextFile: vi.fn(async (path: string, content: string) => {
           files.set(path, content);
@@ -1471,6 +1473,10 @@ describe('AgentToolRegistry', () => {
           return c;
         }),
         readBlob: vi.fn(async () => new Blob([new Uint8Array([1, 2, 3])], { type: 'image/png' })),
+        writeBinaryFile: vi.fn(async (path: string, data: ArrayBuffer) => {
+          binaries.set(path, new Uint8Array(data));
+          appState.project.fileRefreshSignal = (appState.project.fileRefreshSignal || 0) + 1;
+        }),
         listDirectory: vi.fn(async (dir: string) =>
           dir === 'scenes'
             ? [
@@ -1499,6 +1505,42 @@ describe('AgentToolRegistry', () => {
       expect(storage.writeTextFile).toHaveBeenCalledWith('scripts/spin.ts', 'code');
       expect(result).toEqual({ ok: true, path: 'scripts/spin.ts' });
       expect(appState.project.fileRefreshSignal || 0).toBeGreaterThan(before);
+    });
+
+    /**
+     * `fs_write` used to be text-only, which meant an agent could not deliver a binary asset at
+     * all unless `generate_asset` happened to have made it — art produced anywhere else had to be
+     * written into the project from outside the editor, breaking the session in half.
+     */
+    it('fs_write writes real bytes with encoding:base64', async () => {
+      const storage = makeStorage();
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('fs_write', {
+        path: 'sprites/dot.png',
+        content: 'AAECAw==', // 00 01 02 03
+        encoding: 'base64',
+      })) as { ok: boolean; bytes: number; path: string };
+
+      expect(result.ok).toBe(true);
+      expect(result.bytes).toBe(4);
+      expect(storage.writeTextFile).not.toHaveBeenCalled();
+      expect([...(storage.binaries.get('sprites/dot.png') ?? [])]).toEqual([0, 1, 2, 3]);
+    });
+
+    it('fs_write refuses invalid base64 instead of writing a file full of garbage', async () => {
+      const storage = makeStorage();
+      const registry = buildRegistry({ storage });
+
+      const result = (await registry.execute('fs_write', {
+        path: 'sprites/bad.png',
+        content: 'not base64 !!!',
+        encoding: 'base64',
+      })) as { ok: boolean; error: string };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toContain('not valid base64');
+      expect(storage.writeBinaryFile).not.toHaveBeenCalled();
     });
 
     it('fs_write creates a NEW file without needing overwrite (the guard never blocks creation)', async () => {

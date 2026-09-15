@@ -145,6 +145,41 @@ describe('off-package notes', () => {
       expect(topic.pattern.global).toBe(false);
     }
   });
+
+  /**
+   * The drift guard, and the reason `OffPackageTopic.claims` exists.
+   *
+   * The physics note was true when written and wrong when read: the 2D solver moved into the
+   * package underneath it, and a note is a cache of the tree's shape that nothing invalidates.
+   * Rewriting the prose fixed that instance and nothing about the mechanism, so the claims are
+   * restated as symbols and checked against the sources the tool actually searches. A capability
+   * that moves in or out of the package now fails here instead of quietly turning an advisory into
+   * a wrong answer that looks exactly like a right one.
+   */
+  it('re-derives every note claim from the shipped sources, so a note cannot go stale silently', async () => {
+    const shipped = await loadEngineSources();
+
+    for (const topic of OFF_PACKAGE_TOPICS) {
+      for (const symbol of topic.claims.present) {
+        const result = searchEngineSources(shipped, { query: symbol, maxMatches: 1 });
+        expect(
+          'matches' in result && result.matches.length > 0,
+          `Off-package note "${topic.id}" points agents at \`${symbol}\`, which is no longer in ` +
+            `@pix3/runtime/src. The note is now sending them to an API the tree does not have.`
+        ).toBe(true);
+      }
+
+      for (const symbol of topic.claims.absent) {
+        const result = searchEngineSources(shipped, { query: symbol, maxMatches: 1 });
+        expect(
+          'matches' in result && result.matches.length === 0,
+          `Off-package note "${topic.id}" tells agents \`${symbol}\` is NOT in @pix3/runtime/src, ` +
+            `but it is now. That is the exact drift that sent a carrom build into a hand-written ` +
+            `solver: rewrite the note to lead with the in-package answer, then update its claims.`
+        ).toBe(true);
+      }
+    }
+  });
 });
 
 describe('engine source read', () => {

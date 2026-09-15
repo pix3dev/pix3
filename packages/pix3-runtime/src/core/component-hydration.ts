@@ -68,7 +68,11 @@ function instantiateComponent(
   ownerNodeId: string
 ): ScriptComponent | null {
   const componentId = definition.id || `${ownerNodeId}-${definition.type}-${Date.now()}`;
-  const component = scriptRegistry.createComponent(definition.type, componentId);
+  // `expectRegistered: false`: a miss here is the normal pre-compile case and is reported by
+  // the caller as a warning about a *pending* component, not as an error.
+  const component = scriptRegistry.createComponent(definition.type, componentId, {
+    expectRegistered: false,
+  });
   if (!component) {
     return null;
   }

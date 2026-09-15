@@ -70,6 +70,19 @@ as an exported single-file HTML.
    play mode (`play_stop`, or the editor's Stop) so it doesn't keep running and
    burning CPU/GPU in the background.
 
+8. **A game that type-checks is not a game that works.** `tsc`, prettier and
+   scene-YAML validation check the artefact; only running it checks the
+   behaviour. Do not report a feature as done on the strength of static checks —
+   say what you actually observed running, and say plainly when you could not
+   run it and need the user to.
+
+9. **Give every intent a name.** Register game actions as commands
+   (`scene.commands.register('restart', …)`) and publish game state through
+   `registerGameDebug` — the templates already do both. A preview session, a
+   test and the editor can then all drive the game by intent instead of by
+   simulated taps, which is the difference between a bug you can reproduce and
+   one you can only describe.
+
 ## Workflow for "build the game from the GDD"
 
 1. Read everything in `design/`.
@@ -77,5 +90,7 @@ as an exported single-file HTML.
 3. Author/extend scenes and scripts. Iterate in `main.pix3scene` (the scene the
    editor opens and you can play directly); keep the project's entry scene
    (Project Settings → Default Export Scene Path) wired into the flow.
-4. Verify (remote preview or ask the user), iterate.
-5. Summarize: what was built, placeholders left, and what to test.
+4. Verify (remote preview or ask the user), iterate. Keep commands and the
+   `registerGameDebug` snapshot fed as features land, so each step is checkable.
+5. Summarize: what was built, placeholders left, **what you verified and how**,
+   and what still needs a human to look at.

@@ -390,146 +390,146 @@ describe('AudioService', () => {
 
     service.dispose();
   });
-describe('page focus', () => {
-  /** Take the window away; the suspend this requests is left deliberately in flight. */
-  const blur = (): void => {
-    documentFocused = false;
-    window.dispatchEvent(new Event('blur'));
-  };
+  describe('page focus', () => {
+    /** Take the window away; the suspend this requests is left deliberately in flight. */
+    const blur = (): void => {
+      documentFocused = false;
+      window.dispatchEvent(new Event('blur'));
+    };
 
-  const focus = (): void => {
-    documentFocused = true;
-    window.dispatchEvent(new Event('focus'));
-  };
+    const focus = (): void => {
+      documentFocused = true;
+      window.dispatchEvent(new Event('focus'));
+    };
 
-  it('stays audible when focus returns before the suspend it triggered has landed', async () => {
-    const service = new AudioService();
-    const ctx = context();
-    expect(ctx.state).toBe('running');
+    it('stays audible when focus returns before the suspend it triggered has landed', async () => {
+      const service = new AudioService();
+      const ctx = context();
+      expect(ctx.state).toBe('running');
 
-    blur();
-    expect(ctx.suspend).toHaveBeenCalledTimes(1);
-    // The trap: the browser has not applied it yet, so `state` still reads 'running'.
-    expect(ctx.state).toBe('running');
+      blur();
+      expect(ctx.suspend).toHaveBeenCalledTimes(1);
+      // The trap: the browser has not applied it yet, so `state` still reads 'running'.
+      expect(ctx.state).toBe('running');
 
-    focus();
+      focus();
 
-    // Now the suspend lands. The statechange it fires must drive the context back to where the
-    // (already restored) focus says it belongs, instead of leaving the game silent for good.
-    ctx.settle();
-    expect(ctx.state).toBe('suspended');
-    ctx.settle();
+      // Now the suspend lands. The statechange it fires must drive the context back to where the
+      // (already restored) focus says it belongs, instead of leaving the game silent for good.
+      ctx.settle();
+      expect(ctx.state).toBe('suspended');
+      ctx.settle();
 
-    expect(ctx.state).toBe('running');
-    service.dispose();
-  });
-
-  it('resumes on a later focus even after a missed transition, without needing a click', () => {
-    const service = new AudioService();
-    const ctx = context();
-
-    blur();
-    focus();
-    ctx.settle();
-    ctx.settle();
-    expect(ctx.state).toBe('running');
-
-    // And the ordinary cycle still works afterwards — the recovery must not have latched anything
-    // that stops audio from being suspended again.
-    blur();
-    ctx.settle();
-    expect(ctx.state).toBe('suspended');
-
-    focus();
-    ctx.settle();
-    expect(ctx.state).toBe('running');
-    service.dispose();
-  });
-
-  it('drops one-shots fired while the page is away instead of leaking them forever', async () => {
-    const service = new AudioService();
-    const ctx = context();
-
-    blur();
-    ctx.settle();
-    expect(ctx.state).toBe('suspended');
-
-    const playback = service.play(
-      createAudioBufferMock({ duration: 1, channels: 2, sampleRate: 48000 }),
-      { resourcePath: 'res://audio/explosion.mp3' }
-    );
-
-    // Nothing tracked: a suspended context has a frozen clock, so `onended` would never fire and
-    // this entry — and its source/gain nodes — would live until the page reloaded.
-    expect(service.getActivePlaybackSnapshot(0)).toEqual([]);
-    // And an awaiting script is released rather than hung.
-    await expect(playback.ended).resolves.toBeUndefined();
-
-    service.dispose();
-  });
-
-  it('still starts loops while the page is away, so music is there on return', () => {
-    const service = new AudioService();
-    const ctx = context();
-
-    blur();
-    ctx.settle();
-
-    service.play(createAudioBufferMock({ duration: 30, channels: 2, sampleRate: 48000 }), {
-      resourcePath: 'res://audio/theme.mp3',
-      loop: true,
-      bus: 'music',
+      expect(ctx.state).toBe('running');
+      service.dispose();
     });
 
-    expect(service.getActivePlaybackSnapshot(0)).toHaveLength(1);
-    service.dispose();
+    it('resumes on a later focus even after a missed transition, without needing a click', () => {
+      const service = new AudioService();
+      const ctx = context();
+
+      blur();
+      focus();
+      ctx.settle();
+      ctx.settle();
+      expect(ctx.state).toBe('running');
+
+      // And the ordinary cycle still works afterwards — the recovery must not have latched anything
+      // that stops audio from being suspended again.
+      blur();
+      ctx.settle();
+      expect(ctx.state).toBe('suspended');
+
+      focus();
+      ctx.settle();
+      expect(ctx.state).toBe('running');
+      service.dispose();
+    });
+
+    it('drops one-shots fired while the page is away instead of leaking them forever', async () => {
+      const service = new AudioService();
+      const ctx = context();
+
+      blur();
+      ctx.settle();
+      expect(ctx.state).toBe('suspended');
+
+      const playback = service.play(
+        createAudioBufferMock({ duration: 1, channels: 2, sampleRate: 48000 }),
+        { resourcePath: 'res://audio/explosion.mp3' }
+      );
+
+      // Nothing tracked: a suspended context has a frozen clock, so `onended` would never fire and
+      // this entry — and its source/gain nodes — would live until the page reloaded.
+      expect(service.getActivePlaybackSnapshot(0)).toEqual([]);
+      // And an awaiting script is released rather than hung.
+      await expect(playback.ended).resolves.toBeUndefined();
+
+      service.dispose();
+    });
+
+    it('still starts loops while the page is away, so music is there on return', () => {
+      const service = new AudioService();
+      const ctx = context();
+
+      blur();
+      ctx.settle();
+
+      service.play(createAudioBufferMock({ duration: 30, channels: 2, sampleRate: 48000 }), {
+        resourcePath: 'res://audio/theme.mp3',
+        loop: true,
+        bus: 'music',
+      });
+
+      expect(service.getActivePlaybackSnapshot(0)).toHaveLength(1);
+      service.dispose();
+    });
   });
-});
 
-/**
- * The host pause (the editor's Pause button, `game_time {paused: true}`) is the second reason the
- * mixer can go quiet, and it is deliberately independent of focus: a paused game sits in a window
- * that is still focused, and music playing on over a frozen scene reads as a hang. Suspending the
- * context rather than stopping playbacks is what makes resume seamless.
- */
-describe('host pause', () => {
-  it('suspends the context while paused and restores it on resume', () => {
-    const service = new AudioService();
-    const ctx = context();
-    expect(ctx.state).toBe('running');
+  /**
+   * The host pause (the editor's Pause button, `game_time {paused: true}`) is the second reason the
+   * mixer can go quiet, and it is deliberately independent of focus: a paused game sits in a window
+   * that is still focused, and music playing on over a frozen scene reads as a hang. Suspending the
+   * context rather than stopping playbacks is what makes resume seamless.
+   */
+  describe('host pause', () => {
+    it('suspends the context while paused and restores it on resume', () => {
+      const service = new AudioService();
+      const ctx = context();
+      expect(ctx.state).toBe('running');
 
-    service.setPaused(true);
-    ctx.settle();
-    expect(ctx.state).toBe('suspended');
+      service.setPaused(true);
+      ctx.settle();
+      expect(ctx.state).toBe('suspended');
 
-    service.setPaused(false);
-    ctx.settle();
-    expect(ctx.state).toBe('running');
-    service.dispose();
+      service.setPaused(false);
+      ctx.settle();
+      expect(ctx.state).toBe('running');
+      service.dispose();
+    });
+
+    it('stays silent after a resume that arrives while the page is away', () => {
+      const service = new AudioService();
+      const ctx = context();
+
+      service.setPaused(true);
+      documentFocused = false;
+      window.dispatchEvent(new Event('blur'));
+      ctx.settle();
+      expect(ctx.state).toBe('suspended');
+
+      // Un-pausing is not enough: the other reason for silence still holds.
+      service.setPaused(false);
+      ctx.settle();
+      expect(ctx.state).toBe('suspended');
+
+      documentFocused = true;
+      window.dispatchEvent(new Event('focus'));
+      ctx.settle();
+      expect(ctx.state).toBe('running');
+      service.dispose();
+    });
   });
-
-  it('stays silent after a resume that arrives while the page is away', () => {
-    const service = new AudioService();
-    const ctx = context();
-
-    service.setPaused(true);
-    documentFocused = false;
-    window.dispatchEvent(new Event('blur'));
-    ctx.settle();
-    expect(ctx.state).toBe('suspended');
-
-    // Un-pausing is not enough: the other reason for silence still holds.
-    service.setPaused(false);
-    ctx.settle();
-    expect(ctx.state).toBe('suspended');
-
-    documentFocused = true;
-    window.dispatchEvent(new Event('focus'));
-    ctx.settle();
-    expect(ctx.state).toBe('running');
-    service.dispose();
-  });
-});
 });
 
 function createAudioBufferMock(options: {

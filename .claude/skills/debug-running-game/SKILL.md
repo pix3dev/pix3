@@ -17,6 +17,11 @@ playbook.
   scene already loaded. The bridge needs an active scene; project loading needs
   a File System Access user gesture that only a human can grant, so the human
   opens the project once — you attach afterward.
+  **After that first grant you can reopen it yourself:**
+  `__PIX3_DEBUG__.project.recents()` lists what this profile can reopen and
+  `project.open('MyGame')` reopens one (by name or local path, exact match
+  first). Only a folder that has never been picked in this profile still needs
+  the human — and `open()` says so, listing what it does have.
 - The bridge only exists in dev builds (`import.meta.env.DEV`). If
   `window.__PIX3_DEBUG__` is `undefined`, you're on a prod build or the wrong
   page — stop and say so.
@@ -67,7 +72,44 @@ for the live list. Summary:
 | `components(id)` | Script components on a node (`className`, `scriptId`, `state`). |
 | `errors()` / `clearErrors()` | Captured `console.error` / `window.onerror` / unhandled-rejection ring buffer (last 200). |
 | `physicsDebug()` | Collider-wireframe overlay status: `{available, enabled, bodies, vertexCount, segments}` — or `null` when the game registered no source. Counts only; the raw buffers stay live for rendering. |
+| `project.recents()` / `project.open(nameOrPath)` | Projects this browser profile can reopen, and reopening one by name or local path. Closes the one step that otherwise needs a human click — see §0. |
+| `agentTools.list()` / `agentTools.execute(name, args)` | **The editor's whole tool layer** — every tool the in-editor Agent calls, driven from here. See §2.1; this is usually the right entry point, not the rows above. |
+| `agent.send(text)` / `agent.transcript(n)` / `agent.getState()` | Drive the in-editor Agent chat end to end (real provider, real key) and read back what it did. The eval harness. |
 | `assets.*` | **Headless AI asset pipeline** (bridge v2+): generate / resize / crop / compress / remove-background / save images programmatically using the user's saved key. Returns JSON-safe handle metadata, never blobs. See the [generate-sprites-in-editor](../generate-sprites-in-editor/SKILL.md) skill for the full playbook. |
+
+### 2.1 Work *with* the editor, not around it
+
+`agentTools.execute(name, args)` runs the same tool the in-editor Agent runs, through the same
+service layer, with the same validation and the same undo wiring. `agentTools.list()` enumerates
+them (currently ~49): `scene_tree`, `node_inspect`, `create_node`, `set_property`, `add_component`,
+`fs_write`, `compile_scripts`, `play_start`, `game_run`, `read_errors`, `engine_search`,
+`generate_asset`, and the rest.
+
+```js
+async () => window.__PIX3_DEBUG__.agentTools.list()
+async () => window.__PIX3_DEBUG__.agentTools.execute('scene_tree', {})
+async () => window.__PIX3_DEBUG__.agentTools.execute('create_node', {
+  nodeType: 'ColorRect2D', parentNodeId: '<scene-root>', name: 'Ball',
+})
+```
+
+**Prefer this over editing project files from a shell.** Both produce a correct artefact, and they
+are not equivalent:
+
+- A tool call goes through the mutation gateway, so it lands in the undo stack, refreshes the
+  inspector and viewport, and validates its arguments. A file written from outside does none of
+  that, and the editor may be holding a stale graph for the file you just changed.
+- The tool layer is the thing under test. Building the Carrom sample by hand — YAML in an editor,
+  vitest, shell tooling — produced a working game and found nothing about the pipeline, because it
+  never used it. The single most valuable defect of that exercise (an advisory note steering agents
+  away from the engine's own 2D physics) only appeared after switching to `agentTools`. When the
+  work is about the editor, using the editor **is** the measurement.
+- `run_command` is gated by prefix and takes no arguments; parameterised work goes through
+  `agentTools.execute`, not `command(id)`.
+
+Use the raw bridge calls (`scene()`, `liveScene()`, `setProperty`) for *reading* state and for the
+live-graph views the tool layer does not expose. Use `agentTools` for everything that changes
+something.
 
 > **Showing colliders:** the running game publishes its collider line-segment
 > buffers via `registerPhysicsDebugSource` (DeepCore: `getColliderDebug()` →

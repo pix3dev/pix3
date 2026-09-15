@@ -82,12 +82,30 @@ export class ScriptRegistry {
   }
 
   /**
-   * Create a component instance from a type ID
+   * Create a component instance from a type ID.
+   *
+   * An unknown type returns `null`. Whether that is an *error* depends entirely on the caller, so
+   * this does not decide: pass `expectRegistered: false` when a miss is an ordinary, handled
+   * outcome and you will report it yourself.
+   *
+   * That distinction is not cosmetic. Scene loading hits this for every `user:*` component before
+   * project scripts finish compiling — the components are parked and attached on registration, so
+   * nothing is wrong — and it used to log `console.error` each time. Opening any project therefore
+   * produced a dozen console errors that meant nothing, and those land in the editor's `read_errors`
+   * channel, which is the tool an agent uses to decide whether something is broken. Benign noise in
+   * the error channel trains the reader to ignore the error channel, which is how a real failure
+   * gets skipped.
    */
-  createComponent(typeId: string, instanceId: string): ScriptComponent | null {
+  createComponent(
+    typeId: string,
+    instanceId: string,
+    options: { expectRegistered?: boolean } = {}
+  ): ScriptComponent | null {
     const componentInfo = this.components.get(typeId);
     if (!componentInfo) {
-      console.error(`[ScriptRegistry] Component type "${typeId}" not found in registry.`);
+      if (options.expectRegistered !== false) {
+        console.error(`[ScriptRegistry] Component type "${typeId}" not found in registry.`);
+      }
       return null;
     }
 

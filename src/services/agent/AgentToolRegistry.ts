@@ -1159,12 +1159,21 @@ export class AgentToolRegistry {
       },
       {
         name: 'fs_write',
-        description: `Write (create or overwrite) a project text file. Missing parent directories ARE created, and the ones it had to create come back in \`createdDirectories\` — read that list: it is where a typo in a path segment shows up, since a mistyped folder is created just as happily as the one you meant (fs_delete it and write again under the right path). Use it to CREATE files; to change an existing one, use str_replace. Overwriting an existing file larger than ${FS_WRITE_GUARD_CHARS} characters is REFUSED unless you pass overwrite:true plus a reason — a full rewrite silently drops edits you made earlier in the session (measured: a model rewrote the same large file three times with identical content, believing it had changed a constant). Writing the ACTIVE scene file replaces the scene wholesale (the editor auto-reloads it): components previously attached via add_component are lost unless your YAML includes them — verify with node_inspect afterwards.`,
+        description: `Write (create or overwrite) a project text file. Missing parent directories ARE created, and the ones it had to create come back in \`createdDirectories\` — read that list: it is where a typo in a path segment shows up, since a mistyped folder is created just as happily as the one you meant (fs_delete it and write again under the right path). Use it to CREATE files; to change an existing one, use str_replace. Overwriting an existing file larger than ${FS_WRITE_GUARD_CHARS} characters is REFUSED unless you pass overwrite:true plus a reason — a full rewrite silently drops edits you made earlier in the session (measured: a model rewrote the same large file three times with identical content, believing it had changed a constant). Writing the ACTIVE scene file replaces the scene wholesale (the editor auto-reloads it): components previously attached via add_component are lost unless your YAML includes them — verify with node_inspect afterwards. For a BINARY file (image, font, audio) pass \`encoding:'base64'\` and put the base64 bytes in \`content\` — that is how you deliver an asset you did not make with generate_asset.`,
         inputSchema: {
           type: 'object',
           properties: {
             path: { type: 'string' },
             content: { type: 'string' },
+            encoding: {
+              type: 'string',
+              enum: ['utf8', 'base64'],
+              description:
+                "How to interpret `content`. Default 'utf8' (a text file). Pass 'base64' to write " +
+                'BINARY bytes — an image, a font, an audio clip, anything not text. The large-file ' +
+                'overwrite guard does not apply to a binary write (there are no edits in a PNG to ' +
+                'lose), and str_replace cannot be used on one.',
+            },
             overwrite: {
               type: 'boolean',
               description:
@@ -1182,6 +1191,7 @@ export class AgentToolRegistry {
           this.fsWrite(asString(args.path), asString(args.content), {
             overwrite: args.overwrite === true,
             reason: typeof args.reason === 'string' ? args.reason.trim() : '',
+            base64: args.encoding === 'base64',
           }),
       },
       {
@@ -3403,10 +3413,59 @@ export class AgentToolRegistry {
    * {@link FS_WRITE_GUARD_CHARS} needs `overwrite:true` + a `reason`. A forced overwrite reports
    * `forcedOverwrite: true` so the chat loop can count it as a "stuck" signal.
    */
+  /**
+   * Write raw bytes decoded from base64.
+   *
+   * Invalid base64 is answered with an error naming the cause rather than a file full of garbage:
+   * `atob` throws on bad input, and a half-written asset that "succeeded" is far harder to notice
+   * than a refused write. Data-URL prefixes are tolerated because that is the shape a model most
+   * often has bytes in.
+   */
+  private async fsWriteBinary(
+    safe: string,
+    base64: string
+  ): Promise<
+    | { ok: true; path: string; bytes: number; createdDirectories?: string[]; note?: string }
+    | { ok: false; error: string; path: string; existingChars: number }
+  > {
+    const payload =
+      base64.includes(',') && base64.startsWith('data:')
+        ? base64.slice(base64.indexOf(',') + 1)
+        : base64;
+    let bytes: Uint8Array;
+    try {
+      const binary = atob(payload.replace(/\s/g, ''));
+      bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i += 1) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+    } catch {
+      return {
+        ok: false,
+        path: safe,
+        existingChars: 0,
+        error: `\`content\` is not valid base64. With encoding:'base64' it must be the file's bytes in base64 (a data: URL prefix is accepted and stripped).`,
+      };
+    }
+
+    const createdDirectories = await this.ensureParentDirectories(safe);
+    await this.storage.writeBinaryFile(safe, bytes.buffer as ArrayBuffer);
+    return {
+      ok: true,
+      path: safe,
+      bytes: bytes.length,
+      ...(createdDirectories.length ? { createdDirectories } : {}),
+      note: `Wrote ${bytes.length} bytes. Reference it from a scene as res://${safe}.`,
+    };
+  }
+
   private async fsWrite(
     path: string,
     content: string,
-    options: { overwrite: boolean; reason: string } = { overwrite: false, reason: '' }
+    options: { overwrite: boolean; reason: string; base64?: boolean } = {
+      overwrite: false,
+      reason: '',
+    }
   ): Promise<
     | {
         ok: true;
@@ -3420,6 +3479,17 @@ export class AgentToolRegistry {
     | { ok: false; error: string; path: string; existingChars: number }
   > {
     const safe = this.safePath(path);
+
+    // Binary writes take the short path on purpose. The guard below exists to stop a model
+    // rewriting a source file it meant to edit; a PNG has no edits to lose and no str_replace to
+    // fall back on, so applying the same refusal to it would only block the one thing this mode is
+    // for. Before this existed an agent could not deliver a binary asset at all except by asking
+    // `generate_asset` to make one — art produced anywhere else had to be written from outside the
+    // editor.
+    if (options.base64) {
+      return await this.fsWriteBinary(safe, content);
+    }
+
     let existing: string | null = null;
     try {
       existing = await this.storage.readTextFile(safe);

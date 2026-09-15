@@ -27,6 +27,7 @@ import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectP
 import { StartSceneGameCommand } from '@/features/scripts/StartSceneGameCommand';
 import { AssetGenService } from '@/services/image-gen/AssetGenService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { ProjectService } from '@/services/project/ProjectService';
 import { blobToBase64 } from '@/services/image-gen/image-ops';
 import { Model3DGenService } from '@/services/model-gen/Model3DGenService';
 import { Model3DGenHistoryService } from '@/services/model-gen/Model3DGenHistoryService';
@@ -458,6 +459,35 @@ export interface Pix3DebugBridge {
     pause(): Promise<boolean>;
   };
 
+  /**
+   * Open a project without a human click.
+   *
+   * `showDirectoryPicker` is a native dialog: it needs a user gesture, and no command, CDP call or
+   * agent tool can produce one. That made "open the project" the one step of every agent workflow
+   * that started from files on disk which a person had to perform — the registry has 49 tools and
+   * 72 commands, and none of them could do it.
+   *
+   * It is only ever the FIRST grant, though. Once a human has picked a folder in this browser
+   * profile, the handle is persisted and `openRecentProject` reuses it, so everything after that is
+   * automatable. This exposes exactly that: list what has already been granted, and reopen one by
+   * name or path. A project that was never opened here still needs the human, and `open()` says so
+   * rather than silently doing nothing.
+   */
+  readonly project: {
+    /** Projects this browser profile can reopen without a picker (newest first). */
+    recents(): {
+      name: string;
+      backend: string;
+      localAbsolutePath?: string;
+      lastOpenedAt: number;
+    }[];
+    /**
+     * Reopen a recent project by name or by local path (exact match first, then a case-insensitive
+     * substring). Rejects with the available names when nothing matches.
+     */
+    open(nameOrPath: string): Promise<{ name: string; localAbsolutePath?: string }>;
+  };
+
   // --- mutate (through the gateway) ---
   /**
    * Edit a node property via UpdateObjectPropertyCommand (lands in undo). While
@@ -681,6 +711,9 @@ function createBridge(): Pix3DebugBridge {
         'command(id)': "Run a command by id, e.g. 'edit.undo'.",
         'components(id)': 'Script components attached to a node.',
         'errors() / clearErrors()': 'Captured console/runtime errors (ring buffer).',
+        'project.recents() / project.open(nameOrPath)':
+          'Reopen a project this browser profile has already been granted — the one workflow step ' +
+          'that otherwise needs a human click.',
         'agentTools.list() / agentTools.execute(name, args)':
           "The in-editor Agent's tool layer (fs_*, scene_*, play_*, viewport_screenshot, generate_asset, …).",
         'agent.send(text)':
@@ -831,6 +864,39 @@ function createBridge(): Pix3DebugBridge {
       },
       pause() {
         return resolveCommandDispatcher().executeById('game.pause');
+      },
+    },
+    project: {
+      recents() {
+        return service<ProjectService>(ProjectService)
+          .getRecentProjects()
+          .map(entry => ({
+            name: entry.name,
+            backend: entry.backend,
+            localAbsolutePath: entry.localAbsolutePath,
+            lastOpenedAt: entry.lastOpenedAt,
+          }));
+      },
+      async open(nameOrPath: string) {
+        const projects = service<ProjectService>(ProjectService);
+        const recents = projects.getRecentProjects();
+        const needle = String(nameOrPath ?? '').trim();
+        const match =
+          recents.find(entry => entry.name === needle || entry.localAbsolutePath === needle) ??
+          recents.find(
+            entry =>
+              entry.name.toLowerCase().includes(needle.toLowerCase()) ||
+              (entry.localAbsolutePath ?? '').toLowerCase().includes(needle.toLowerCase())
+          );
+        if (!match) {
+          throw new Error(
+            `No recent project matches "${needle}". This browser profile can reopen: ` +
+              `${recents.map(entry => entry.name).join(', ') || '(none)'}. ` +
+              'A project that has never been opened here needs a human to pick the folder once.'
+          );
+        }
+        await projects.openRecentProject(match);
+        return { name: match.name, localAbsolutePath: match.localAbsolutePath };
       },
     },
 

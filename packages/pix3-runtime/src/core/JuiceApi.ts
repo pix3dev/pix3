@@ -68,18 +68,35 @@ export class JuiceApi {
   /** Monotonic id source for spawned transients (burst / floatText). */
   private transientCounter = 0;
 
+  /** Targets already complained about; see {@link warnOnce}. */
+  private readonly warned = new Set<string>();
+
   constructor(private readonly scene: SceneService) {}
 
   /**
    * Smooth positional shake on a node (or the active camera via `'camera'` /
    * `'camera2d'`). The 2D camera has its own built-in additive shake (not a
    * `ShakeBehavior` component), so those targets fire-and-forget and return null.
+   *
+   * **`null` is not a failure signal for the camera targets** — they return it on success too. A
+   * shake that found no camera used to be indistinguishable from one that worked, so a scene
+   * missing its Camera2D just quietly had no juice and nothing ever said so. It now warns instead
+   * (once per target, so a per-frame call cannot flood the log).
    */
   shake(target: JuiceTarget, options: ShakeOptions = {}): ShakeBehavior | null {
     if (typeof target === 'string') {
       const key = target.toLowerCase();
       if (key === 'camera2d') {
-        this.scene.getActiveCamera2D()?.shake(options);
+        const camera2d = this.scene.getActiveCamera2D();
+        if (!camera2d) {
+          this.warnOnce(
+            'camera2d',
+            "juice.shake('camera2d') found no active Camera2D — nothing shook. Add a Camera2D to " +
+              'the scene, or shake a node instead.'
+          );
+          return null;
+        }
+        camera2d.shake(options);
         return null;
       }
       // `'camera'` in a pure-2D scene (no active Camera3D) targets the 2D camera.
@@ -308,11 +325,33 @@ export class JuiceApi {
       return target;
     }
     if (typeof target === 'string') {
-      if (target.toLowerCase() === 'camera') {
-        return this.scene.getActiveCamera();
+      const resolved =
+        target.toLowerCase() === 'camera'
+          ? this.scene.getActiveCamera()
+          : this.scene.findNode(target);
+      if (!resolved) {
+        // Every juice method returns null for an unresolved target, and callers reasonably ignore
+        // the return value — juice is decoration. Without this, a renamed node turns its effects
+        // off permanently and silently, which reads as "the juice API does not work".
+        this.warnOnce(target, `juice: no node named "${target}" — the effect did nothing.`);
       }
-      return this.scene.findNode(target);
+      return resolved;
     }
     return null;
+  }
+
+  /**
+   * Log a given complaint once per key.
+   *
+   * Juice calls sit in gameplay code and run every frame; an un-deduplicated warning would bury the
+   * console (and the agent-facing log channel) under thousands of identical lines, which is the
+   * same "noise trains you to ignore it" failure as staying silent, only louder.
+   */
+  private warnOnce(key: string, message: string): void {
+    if (this.warned.has(key)) {
+      return;
+    }
+    this.warned.add(key);
+    console.warn(`[Juice] ${message}`);
   }
 }

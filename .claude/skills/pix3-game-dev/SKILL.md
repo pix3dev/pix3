@@ -81,13 +81,52 @@ capability inventory is the catalog — start there every time.
    - Mind the gotchas: components tick before their children; `onUpdate(dt)` is
      scaled game time (chrome/timers use `performance.now()`).
 
-6. **Verify by running it**, not just by reading code: use the
-   **debug-running-game** skill (attach to the editor, `play.start()`, read
-   `errors()`, screenshot). For UI/sprite art, use **generate-sprites-in-editor**.
+5½. **Build the game's debug surface as you go.** `scene.commands.register(name,
+   handler, { description })` for every intent, and `registerGameDebug({ name,
+   snapshot, actions, inspect, action, reset })` for the state. Wire UI buttons
+   to `scene.commands.dispatch(...)` so a button and a test take the same path.
+   `actions()` answers from the registry, never a hand-kept list. This is what
+   turns "play it and look" into assertions, and it is the difference between a
+   game you can drive from outside and one only a human can check. The project
+   templates scaffold both.
+
+6. **Verify by running it**, not just by reading code.
+
+   Static gates check the artefact; only motion checks the behaviour. A real
+   case: a placement helper with an inverted sign made a game 100 % unplayable
+   and passed `tsc --noEmit`, prettier, YAML validation of every scene, and a
+   headless `SceneLoader.parseScene` that asserted the very coordinate involved
+   — because the authored value was right and nothing at load time called the
+   function. Two behavioural runs found it. **Never report "done" on static
+   checks alone.**
+
+   Cheapest first:
+
+   - **Headless** — `createHeadlessGame` from `@pix3/runtime/testing` boots a
+     real scene, registers user scripts, advances fixed steps and hands back
+     state, in about a second with no browser. See
+     `packages/pix3-runtime/src/testing/headless-game.spec.ts` for a worked
+     example against `samples/Carrom`. Renders nothing, so it answers logic,
+     physics, rules, signals and commands — not "does it look right".
+   - **In the editor** — the **debug-running-game** skill (attach, `play.start()`,
+     read `errors()`, screenshot). Required for anything visual, and for
+     anything about the editor's own tool layer. Drive it through
+     `agentTools.execute(...)`, not around it.
+   - For UI/sprite art, use **generate-sprites-in-editor**.
+
+   Two things a green run can still hide: a component that throws in
+   `onStart`/`onUpdate` is **auto-disabled** and the game keeps running looking
+   fine, so always read the error channel (`game.errors`, or `read_errors`); and
+   `scene.time.hitstop(ms)` is **edge-triggered** — calling it every frame while
+   an overlap lasts freezes `dt` to 0, so the contact can never separate.
 
 7. **After adding an engine-level capability, update
-   [docs/nodes-and-systems.md](../../../docs/nodes-and-systems.md)** so the next
-   agent finds it.
+   [docs/nodes-and-systems.md](../../../docs/nodes-and-systems.md) and
+   [docs/node-types-reference.md](../../../docs/node-types-reference.md)** so
+   the next agent finds it. Both are copied into every new project as the
+   external agent's only engine catalog, and
+   `src/core/agent-reference-docs.spec.ts` fails if a node type or `core:*`
+   behaviour is missing from them.
 
 ## Binding references
 
