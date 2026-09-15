@@ -12,11 +12,13 @@ declare a feature done without running it.
    lines you mean to change with `str_replace` (fails loudly if the anchor isn't unique). A full
    `fs_write` rewrite risks silently dropping or reverting the rest of the file — reserve it for
    creating a file. Never re-emit a whole script to flip one sign or constant.
-1. **Compile scripts** after editing anything under `scripts/`: `compile_scripts` — it builds,
-   registers, *and* type-checks in one call. `ok: false` means either the bundle broke or
-   `errorCount` type errors came back in `diagnostics` (read-only `position`/`rotation`/`scale`,
-   wrong argument types, bad imports). Fix those files and compile again. **Do not call
-   `check_scripts` after a compile** — the same diagnostics are already in the compile result.
+1. **Read the `verify` block the write gave you.** A write under `scripts/` comes back having
+   already been built, registered and type-checked: `verify.compile.ok === false` means the bundle
+   broke (`error`/`file`/`line`) or `errorCount` type errors came back in `diagnostics` (read-only
+   `position`/`rotation`/`scale`, wrong argument types, bad imports). Fix those files — the next
+   write re-checks them. Call `compile_scripts` yourself only when a write came back WITHOUT a
+   `verify` block. **Never call `check_scripts` after either** — the same diagnostics are already
+   there. `verify.unverified` says what the check did not cover; that part is step 2's job.
 2. **Run it**: `play_start`, then `play_status`. Give it a moment, then `read_errors` (runtime
    errors: thrown exceptions, rejections) and `read_logs` (log output). A clean run has no
    captured errors.
@@ -65,12 +67,18 @@ declare a feature done without running it.
    separate screenshot runs, the effect is back at rest, and reshooting in a loop proves
    nothing. (Exception: a hover state deliberately left active by the last `hover` step is
    still on screen and MAY be screenshotted for a visual once the state delta already passed.)
-4. **Fix** the first error, then repeat. Stop play mode (`play_stop`) before editing.
-5. **When you're done, STOP play mode (`play_stop`).** Once you've gathered the
-   verification you need (or finished iterating), never leave the game running —
-   a live play session keeps ticking in the background (spawners, physics,
-   audio, rAF) and burns CPU/GPU indefinitely. Confirm `play_status` reports it
-   stopped before you report back to the user.
+4. **Fix** the first error, then repeat. You do NOT have to stop the game to edit: write the fix
+   (its result carries the `verify` block — read it), then `play_restart` — one call picks up the
+   fresh build. Reach for `play_stop` only in the rare case where something must be edited with
+   nothing ticking.
+5. **Leave the game the way the mode expects.**
+   - **Studio**: the user did not ask for a running game, so once you have the verification you
+     need (or have finished iterating), `play_stop`. A live session keeps ticking in the background
+     (spawners, physics, audio, rAF) and burns CPU/GPU indefinitely. Confirm `play_status` reports
+     it stopped before you report back.
+   - **Flow**: the stage plays continuously next to the chat. You did not start it and you must not
+     stop it — leave it running (`flow-increment` §8). A stopped stage is a black screen for the
+     user.
 
 ## Input channels: what proves what
 

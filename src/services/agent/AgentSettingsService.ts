@@ -67,6 +67,14 @@ export interface AgentPreferences {
   /** Max LLM ⇄ tool-call round trips per agent turn (safety cap on the agentic loop). */
   maxToolIterations: number;
   /**
+   * When on (the default), a write to a project script answers with the harness's own compile
+   * verdict instead of costing the agent another round trip to ask for it — see
+   * {@link import('./verify-rider').buildScriptWriteRider}. Off trades that saved hop for a script
+   * write that touches nothing but the file: the escape hatch if the automatic check ever costs
+   * more than the hop it replaces (its `elapsedMs` rides in the result, so that stays measurable).
+   */
+  autoVerify: boolean;
+  /**
    * When on, the Agent panel exposes the raw wire-format conversation log, the resolved system
    * prompt, and per-response timing / tokens-per-second, and {@link AgentChatService} logs each
    * request and response to the browser devtools console.
@@ -444,6 +452,7 @@ export class AgentSettingsService {
       advisorModelId: '',
       advisorPinned: false,
       maxToolIterations: DEFAULT_MAX_TOOL_ITERATIONS,
+      autoVerify: true,
       debugMode: false,
       soulId: DEFAULT_SOUL_ID,
       customSoulName: '',
@@ -508,6 +517,8 @@ export class AgentSettingsService {
             ? parsed.advisorPinned
             : Boolean(parsed.advisorProviderId),
         maxToolIterations: clampToolIterations(parsed.maxToolIterations),
+        autoVerify:
+          typeof parsed.autoVerify === 'boolean' ? parsed.autoVerify : defaults.autoVerify,
         debugMode: typeof parsed.debugMode === 'boolean' ? parsed.debugMode : defaults.debugMode,
         soulId:
           typeof parsed.soulId === 'string' && parsed.soulId ? parsed.soulId : defaults.soulId,

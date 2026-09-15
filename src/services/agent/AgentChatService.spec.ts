@@ -259,6 +259,47 @@ describe('AgentChatService', () => {
     expect(secondCallMessages).toHaveLength(3);
   });
 
+  /**
+   * The loop half of the batching premise (`.plans/agent-one-shot-generation.md` §4.2): nothing here
+   * forbids several `tool-use` blocks in one assistant message, and the measured `{0:1, 1:54}`
+   * distribution is the lane's doing, not ours. Pin it, because the whole `batch` design rests on
+   * it: every call executes, in order, and ALL results come back in ONE user message — anything else
+   * breaks the tool_use/tool_result pairing every provider validates.
+   */
+  it('executes every tool call of one assistant message and answers them in a single user turn', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        content: [
+          { type: 'tool-use', id: 'call-1', name: 'scene_tree', input: {} },
+          { type: 'tool-use', id: 'call-2', name: 'fs_read', input: { path: 'a.ts' } },
+          { type: 'tool-use', id: 'call-3', name: 'play_status', input: {} },
+        ],
+        stopReason: 'tool_use',
+      })
+      .mockResolvedValueOnce(textResult('done'));
+    const execute = vi.fn(async (name: string) => ({ ran: name }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('do three things');
+
+    expect(execute.mock.calls.map(call => call[0])).toEqual([
+      'scene_tree',
+      'fs_read',
+      'play_status',
+    ]);
+
+    const state = service.getState();
+    // user, assistant(3 tool-use), user(3 tool-result), assistant(text) — one message, not three.
+    expect(state.messages).toHaveLength(4);
+    const results = state.messages[2].content as unknown as Array<{
+      type: string;
+      toolUseId: string;
+    }>;
+    expect(results.map(block => block.toolUseId)).toEqual(['call-1', 'call-2', 'call-3']);
+    expect(results.every(block => block.type === 'tool-result')).toBe(true);
+  });
+
   it('turns a tool handler failure into an isError result and keeps looping', async () => {
     const chat = vi
       .fn()
@@ -677,6 +718,203 @@ describe('AgentChatService', () => {
 
     expect(chat).toHaveBeenCalledTimes(3);
     expect(JSON.stringify(service.getState().messages)).not.toMatch(/changed game logic/);
+  });
+
+  /**
+   * `batch` is a construct of the chat loop, not a registry handler, for exactly this reason: every
+   * inner step must reach the same guards. Declared as an ordinary tool it would walk past all of
+   * them at once — the verify-gate would see the name "batch", which is not a game-logic mutation
+   * and not a proof, so an increment could be built and closed without ever running the game.
+   *
+   * These two cases pin both directions of that: a batch that only WRITES still owes a proof, and a
+   * batch that ends in a real `game_run` discharges it — in one round trip.
+   */
+  it('a batch that only changes game logic still owes the verify-gate a proof', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('batch', 'b1', {
+          steps: [
+            { tool: 'fs_write', args: { path: 'scripts/Car.ts', content: 'x' } },
+            { tool: 'set_property', args: { nodeId: 'n1', propertyName: 'speed', value: 4 } },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(textResult('done'))
+      .mockResolvedValueOnce(textResult('I could not prove it'));
+    const execute = vi.fn(async (name: string) => ({ ok: true, name }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('make the car faster');
+
+    expect(execute.mock.calls.map(call => call[0])).toEqual(['fs_write', 'set_property']);
+    expect(JSON.stringify(service.getState().messages)).toMatch(/changed game logic/);
+  });
+
+  /**
+   * The measured reason `batch` stayed at one call per turn: the rule said "a step whose result you
+   * must read does not go in a batch", and a read is by definition that. So an agent that had ALREADY
+   * chosen four files read them in four round trips. The wording is fixed; this is the harness half —
+   * it counts the run across iterations, because the lane emits one call per message, and says it
+   * once.
+   */
+  it('points at batch after a run of single reads, once per turn', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('fs_read', 'c1', { path: 'a.ts' }))
+      .mockResolvedValueOnce(toolCallResult('fs_read', 'c2', { path: 'b.ts' }))
+      .mockResolvedValueOnce(toolCallResult('fs_read', 'c3', { path: 'c.ts' }))
+      .mockResolvedValueOnce(toolCallResult('fs_read', 'c4', { path: 'd.ts' }))
+      .mockResolvedValueOnce(textResult('read them'));
+    const execute = vi.fn(async () => ({ ok: true, content: 'x' }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('read the scripts');
+
+    const history = JSON.stringify(service.getState().messages);
+    expect(history).toMatch(/round trips on fs_read/);
+    // Once, not once per read.
+    expect(history.match(/round trips on fs_read/g)).toHaveLength(1);
+  });
+
+  it('does not nudge when the reads were interrupted by real work', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(toolCallResult('fs_read', 'c1', { path: 'a.ts' }))
+      .mockResolvedValueOnce(toolCallResult('fs_read', 'c2', { path: 'b.ts' }))
+      .mockResolvedValueOnce(
+        toolCallResult('set_property', 'c3', { nodeId: 'n', propertyPath: 'x', value: 1 })
+      )
+      .mockResolvedValueOnce(toolCallResult('fs_read', 'c4', { path: 'c.ts' }))
+      .mockResolvedValueOnce(textResult('done'));
+    const execute = vi.fn(async () => ({ ok: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('poke at it');
+
+    expect(JSON.stringify(service.getState().messages)).not.toMatch(/round trips on/);
+  });
+
+  it('a batch that ends in a passing game_run closes the verify debt in one round trip', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('batch', 'b1', {
+          steps: [
+            { tool: 'fs_write', args: { path: 'scripts/Car.ts', content: 'x' } },
+            { tool: 'play_restart', args: {} },
+            {
+              tool: 'game_run',
+              args: { until: [{ kind: 'gameStateChanged', path: 'score', by: 1 }] },
+            },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(textResult('score rose on frame 47'));
+    const execute = vi.fn(async (name: string) =>
+      name === 'game_run'
+        ? { ok: true, verdict: 'PASS until[0] score +1 (frame 47)', outcome: { kind: 'until' } }
+        : { ok: true }
+    );
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('make scoring work');
+
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(service.getState().messages)).not.toMatch(/changed game logic/);
+  });
+
+  it('reports every step, stops at the first failure and lists what it skipped', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('batch', 'b1', {
+          steps: [
+            { tool: 'create_node', args: { type: 'Sprite2D' }, label: 'coin' },
+            { tool: 'set_property', args: { nodeId: 'nope' } },
+            { tool: 'play_restart', args: {} },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(textResult('fixing'));
+    const execute = vi.fn(async (name: string) => {
+      if (name === 'set_property') throw new Error('no such node');
+      return { ok: true, nodeId: 'node-7' };
+    });
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('build it');
+
+    expect(execute.mock.calls.map(call => call[0])).toEqual(['create_node', 'set_property']);
+    const results = service.getState().messages[2].content as unknown as Array<{
+      toolUseId: string;
+      content: string;
+    }>;
+    // ONE tool-result for the batch: the tool_use/tool_result pairing providers validate is intact.
+    expect(results).toHaveLength(1);
+    expect(results[0].toolUseId).toBe('b1');
+    const body = JSON.parse(results[0].content) as {
+      ok: boolean;
+      completed: number;
+      stoppedAt: number;
+      skipped: Array<{ tool: string }>;
+      steps: Array<{ tool: string; ok: boolean; result: string }>;
+    };
+    expect(body.ok).toBe(false);
+    expect(body.completed).toBe(1);
+    expect(body.stoppedAt).toBe(1);
+    expect(body.skipped.map(entry => entry.tool)).toEqual(['play_restart']);
+    expect(body.steps[1].result).toMatch(/no such node/);
+  });
+
+  it('passes an id from one step to the next through a $ref', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('batch', 'b1', {
+          steps: [
+            { tool: 'create_node', args: { type: 'Sprite2D' } },
+            {
+              tool: 'add_component',
+              args: { nodeId: '$0.nodeId', componentType: 'core:PunchScale' },
+            },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(textResult('done'));
+    const execute = vi.fn(async (name: string) =>
+      name === 'create_node' ? { ok: true, nodeId: 'node-7' } : { ok: true }
+    );
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('add a coin that punches');
+
+    expect(execute).toHaveBeenNthCalledWith(2, 'add_component', {
+      nodeId: 'node-7',
+      componentType: 'core:PunchScale',
+    });
+  });
+
+  it('refuses a step whose result the model has to read, naming the rule', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('batch', 'b1', {
+          steps: [
+            { tool: 'fs_write', args: { path: 'a.ts', content: 'x' } },
+            { tool: 'ask_user', args: {} },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(textResult('ok, one at a time'));
+    const execute = vi.fn(async () => ({ ok: true }));
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('write and ask');
+
+    // Validation happens before anything runs — a refused plan must not half-apply.
+    expect(execute).not.toHaveBeenCalled();
+    expect(JSON.stringify(service.getState().messages)).toMatch(/ask_user cannot be batched/);
   });
 
   it('a game_run that was already true at frame 0 proves nothing, so the gate still fires', async () => {

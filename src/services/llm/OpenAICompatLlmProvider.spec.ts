@@ -22,6 +22,83 @@ const bodyOf = (fetchImpl: ReturnType<typeof vi.fn>): Record<string, unknown> =>
 describe('OpenAICompatLlmProvider', () => {
   const provider = new OpenAICompatLlmProvider();
 
+  /**
+   * Batching (`.plans/agent-one-shot-generation.md` §4.2) needs every lane to survive N tool calls
+   * in ONE response. OpenAI puts them in a `tool_calls` ARRAY, and the round trip is where this
+   * shape breaks: each call must come back as its own `role: "tool"` message carrying the matching
+   * `tool_call_id`, or the provider rejects the next request outright.
+   */
+  it('parses a tool_calls array and replays every result with its own tool_call_id', async () => {
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        choices: [
+          {
+            message: {
+              content: 'building',
+              tool_calls: [
+                {
+                  id: 'call_a',
+                  type: 'function',
+                  function: { name: 'create_node', arguments: '{"type":"Sprite2D"}' },
+                },
+                {
+                  id: 'call_b',
+                  type: 'function',
+                  function: { name: 'set_property', arguments: '{"value":3}' },
+                },
+              ],
+            },
+            finish_reason: 'tool_calls',
+          },
+        ],
+      })
+    );
+
+    const result = await provider.chat(
+      { messages: [{ role: 'user', content: 'build' }] },
+      { apiKey: 'sk-1', modelId: 'gpt-4.1', baseUrl: BASE, fetchImpl }
+    );
+
+    const calls = result.content.filter(block => block.type === 'tool-use');
+    expect(calls).toHaveLength(2);
+    expect(calls[0]).toMatchObject({
+      id: 'call_a',
+      name: 'create_node',
+      input: { type: 'Sprite2D' },
+    });
+    expect(calls[1]).toMatchObject({ id: 'call_b', name: 'set_property', input: { value: 3 } });
+    expect(result.stopReason).toBe('tool_use');
+
+    const replay = vi.fn(async () =>
+      okJson({ choices: [{ message: { content: 'done' }, finish_reason: 'stop' }] })
+    );
+    const history: LlmMessage[] = [
+      { role: 'user', content: 'build' },
+      { role: 'assistant', content: result.content },
+      {
+        role: 'user',
+        content: [
+          { type: 'tool-result', toolUseId: 'call_a', content: 'node created' },
+          { type: 'tool-result', toolUseId: 'call_b', content: 'property set' },
+        ],
+      },
+    ];
+    await provider.chat(
+      { messages: history },
+      { apiKey: 'sk-1', modelId: 'gpt-4.1', baseUrl: BASE, fetchImpl: replay }
+    );
+
+    const [, replayInit] = replay.mock.calls[0] as unknown as [string, RequestInit];
+    const sent = JSON.parse(replayInit.body as string) as {
+      messages: Array<{ role: string; tool_call_id?: string; tool_calls?: unknown[] }>;
+    };
+    const assistant = sent.messages.find(message => message.role === 'assistant');
+    expect(assistant?.tool_calls).toHaveLength(2);
+    expect(
+      sent.messages.filter(message => message.role === 'tool').map(message => message.tool_call_id)
+    ).toEqual(['call_a', 'call_b']);
+  });
+
   it('maps system + user + tools to Chat Completions with a Bearer key', async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({ choices: [{ message: { content: 'hi' }, finish_reason: 'stop' }] })

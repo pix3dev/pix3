@@ -107,6 +107,18 @@ import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import type { CanvasScreenshot } from '@/core/canvas-screenshot';
 import { AgentAdvisorService } from '@/services/agent/AgentAdvisorService';
 import { AgentSkillsService } from '@/services/agent/AgentSkillsService';
+import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { MAX_BATCH_STEPS, NEVER_BATCHABLE } from '@/services/agent/tool-batch';
+import {
+  emojiAsArtError,
+  findEmojiArtInSceneYaml,
+  emojiAsArtRefusal,
+} from '@/services/agent/emoji-as-art';
+import {
+  buildScriptWriteRider,
+  isCompilableScriptPath,
+  type VerifyRider,
+} from '@/services/agent/verify-rider';
 import { ProjectDiagnosticsService } from '@/services/scripting/ProjectDiagnosticsService';
 import type { LlmImageBlock } from '@/services/llm/LlmTypes';
 import { UpdateObjectPropertyCommand } from '@/features/properties/UpdateObjectPropertyCommand';
@@ -536,6 +548,13 @@ export class AgentToolRegistry {
 
   @inject(AgentSkillsService)
   private readonly skills!: AgentSkillsService;
+
+  /**
+   * Read for one preference only — {@link AgentPreferences.autoVerify}, the escape hatch on the
+   * verify rider. The registry never picks a provider or a model; that stays with the chat service.
+   */
+  @inject(AgentSettingsService)
+  private readonly settings!: AgentSettingsService;
 
   @inject(ProjectDiagnosticsService)
   private readonly diagnostics!: ProjectDiagnosticsService;
@@ -1159,7 +1178,7 @@ export class AgentToolRegistry {
       },
       {
         name: 'fs_write',
-        description: `Write (create or overwrite) a project text file. Missing parent directories ARE created, and the ones it had to create come back in \`createdDirectories\` — read that list: it is where a typo in a path segment shows up, since a mistyped folder is created just as happily as the one you meant (fs_delete it and write again under the right path). Use it to CREATE files; to change an existing one, use str_replace. Overwriting an existing file larger than ${FS_WRITE_GUARD_CHARS} characters is REFUSED unless you pass overwrite:true plus a reason — a full rewrite silently drops edits you made earlier in the session (measured: a model rewrote the same large file three times with identical content, believing it had changed a constant). Writing the ACTIVE scene file replaces the scene wholesale (the editor auto-reloads it): components previously attached via add_component are lost unless your YAML includes them — verify with node_inspect afterwards. For a BINARY file (image, font, audio) pass \`encoding:'base64'\` and put the base64 bytes in \`content\` — that is how you deliver an asset you did not make with generate_asset.`,
+        description: `Write (create or overwrite) a project text file. Missing parent directories ARE created, and the ones it had to create come back in \`createdDirectories\` — read that list: it is where a typo in a path segment shows up, since a mistyped folder is created just as happily as the one you meant (fs_delete it and write again under the right path). Use it to CREATE files; to change an existing one, use str_replace. Overwriting an existing file larger than ${FS_WRITE_GUARD_CHARS} characters is REFUSED unless you pass overwrite:true plus a reason — a full rewrite silently drops edits you made earlier in the session (measured: a model rewrote the same large file three times with identical content, believing it had changed a constant). Writing the ACTIVE scene file replaces the scene wholesale (the editor auto-reloads it): components previously attached via add_component are lost unless your YAML includes them — verify with node_inspect afterwards. For a BINARY file (image, font, audio) pass \`encoding:'base64'\` and put the base64 bytes in \`content\` — that is how you deliver an asset you did not make with generate_asset. A write to a script under \`scripts/\` comes back with a \`verify\` block — the harness compiled and type-checked it for you, so do NOT follow the write with compile_scripts; read \`verify.compile\` instead. \`verify.unverified\` names what that check does NOT cover: a green \`verify.compile\` is never a substitute for running the game.`,
         inputSchema: {
           type: 'object',
           properties: {
@@ -1187,17 +1206,19 @@ export class AgentToolRegistry {
           required: ['path', 'content'],
           additionalProperties: false,
         },
-        handler: args =>
-          this.fsWrite(asString(args.path), asString(args.content), {
-            overwrite: args.overwrite === true,
-            reason: typeof args.reason === 'string' ? args.reason.trim() : '',
-            base64: args.encoding === 'base64',
-          }),
+        handler: async args =>
+          this.withScriptWriteVerify(
+            await this.fsWrite(asString(args.path), asString(args.content), {
+              overwrite: args.overwrite === true,
+              reason: typeof args.reason === 'string' ? args.reason.trim() : '',
+              base64: args.encoding === 'base64',
+            })
+          ),
       },
       {
         name: 'str_replace',
         description:
-          'Make a TARGETED edit to an existing project text file: replace an exact `old_string` with `new_string`, leaving everything else byte-for-byte. PREFER THIS over fs_write for changing existing code — a full rewrite can silently drop or revert other parts of the file (a real session regressed a working fix that way). `old_string` must match the file EXACTLY (indentation and whitespace included) and be UNIQUE — include a few surrounding lines to pin it down. It makes NO change and returns an error if `old_string` is not found or matches more than once; read the error, widen the context, and retry. Pass replace_all:true to replace every occurrence. Use fs_write only to CREATE a file or rewrite it wholesale. Editing the active .pix3scene reloads it (same as fs_write). On success the result carries `context` — the surrounding lines of the file AS IT NOW IS (verbatim, with `startLine`/`endLine`) — plus the new `totalLines`. Anchor your NEXT edit on that text instead of re-reading the file: line numbers shift after every edit, the returned context does not.',
+          'Make a TARGETED edit to an existing project text file: replace an exact `old_string` with `new_string`, leaving everything else byte-for-byte. PREFER THIS over fs_write for changing existing code — a full rewrite can silently drop or revert other parts of the file (a real session regressed a working fix that way). `old_string` must match the file EXACTLY (indentation and whitespace included) and be UNIQUE — include a few surrounding lines to pin it down. It makes NO change and returns an error if `old_string` is not found or matches more than once; read the error, widen the context, and retry. Pass replace_all:true to replace every occurrence. Use fs_write only to CREATE a file or rewrite it wholesale. Editing the active .pix3scene reloads it (same as fs_write). On success the result carries `context` — the surrounding lines of the file AS IT NOW IS (verbatim, with `startLine`/`endLine`) — plus the new `totalLines`. Anchor your NEXT edit on that text instead of re-reading the file: line numbers shift after every edit, the returned context does not. A write to a script under `scripts/` comes back with a `verify` block — the harness compiled and type-checked it for you, so do NOT follow the write with compile_scripts; read `verify.compile` instead. `verify.unverified` names what that check does NOT cover: a green `verify.compile` is never a substitute for running the game.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -1218,13 +1239,55 @@ export class AgentToolRegistry {
           required: ['path', 'old_string', 'new_string'],
           additionalProperties: false,
         },
-        handler: args =>
-          this.strReplace(
-            asString(args.path),
-            asString(args.old_string),
-            asString(args.new_string),
-            args.replace_all === true
+        handler: async args =>
+          this.withScriptWriteVerify(
+            await this.strReplace(
+              asString(args.path),
+              asString(args.old_string),
+              asString(args.new_string),
+              args.replace_all === true
+            )
           ),
+      },
+      {
+        name: 'batch',
+        description: `Run up to ${MAX_BATCH_STEPS} tool calls as ONE call — the whole mechanical part of an increment in a single round trip instead of one per step. Each step is {tool, args, label?} and runs IN ORDER through exactly the same machinery as a normal call (same undo entries, same verify-gate, same guards), so a batch of create_node → add_component → set_property is identical in effect to making those calls one at a time, minus the waiting. The result reports EVERY step separately: {ok, completed, stoppedAt, steps:[{step, tool, ok, result}]} — read it, a batch that stops halfway says exactly where. \`onError\` is "stop" (default: the remaining steps are skipped and listed) or "continue". PASS A VALUE FROM ONE STEP TO A LATER ONE with a reference that is the WHOLE argument: "$0.nodeId" is the nodeId from step 0's result, "$prev.nodeId" from the step before — that is how you use an id that does not exist until the batch runs. No interpolation ("node-$0.nodeId" is not a reference), and no nested batch. THE TEST for whether calls belong in one batch: did you already decide to make ALL of them before seeing any of their results? If yes — batch them, including reads. Four fs_read/engine_read of paths you already know are ONE batch, not four round trips; so are create_node → add_component → set_property, and so is a fix followed by play_restart and the game_run that proves it. Only when the ANSWER to one call is what picks the next (a search whose result shapes the next query) do they stay separate. DO NOT batch a step whose answer you need before you can choose the next one: ${[...NEVER_BATCHABLE].filter(name => name !== 'batch').join(', ')} are refused for that reason. The natural shape of an increment is one batch that ends with compile/play_restart and a game_run proving what you built.`,
+        inputSchema: {
+          type: 'object',
+          properties: {
+            steps: {
+              type: 'array',
+              description: `The calls to run, in order (1–${MAX_BATCH_STEPS}).`,
+              items: {
+                type: 'object',
+                properties: {
+                  tool: { type: 'string', description: 'Tool name, as listed above.' },
+                  args: { type: 'object', description: "That tool's own arguments." },
+                  label: {
+                    type: 'string',
+                    description: 'Short label for this step, shown to the user while it runs.',
+                  },
+                },
+                required: ['tool'],
+              },
+            },
+            onError: {
+              type: 'string',
+              enum: ['stop', 'continue'],
+              description:
+                'What to do when a step fails. "stop" (default) skips the rest — right when later steps build on earlier ones. "continue" runs them all.',
+            },
+          },
+          required: ['steps'],
+          additionalProperties: false,
+        },
+        // Never reached: `AgentChatService` expands a `batch` call before dispatch, so that every
+        // inner step passes through the loop's own per-call guards. See `tool-batch.ts`.
+        handler: () => {
+          throw new Error(
+            'batch is expanded by the chat loop and must not be dispatched as a tool.'
+          );
+        },
       },
       {
         name: 'fs_delete',
@@ -1247,7 +1310,7 @@ export class AgentToolRegistry {
       {
         name: 'check_scripts',
         description:
-          'Type-check ALL project scripts WITHOUT rebuilding, returning { file, line, column, message, category, code } problems. compile_scripts already runs this check and reports the same diagnostics, so after an edit just compile — reach for this only to re-check untouched code (e.g. why a script misbehaves when you changed nothing).',
+          'Type-check ALL project scripts WITHOUT rebuilding, returning { file, line, column, message, category, code } problems. After an edit you already have this: the verify.compile block on the write itself carries the same diagnostics (and so does compile_scripts, when you had to call it yourself). Reach for this only to re-check untouched code — e.g. why a script misbehaves when you changed nothing.',
         inputSchema: { type: 'object', properties: {}, additionalProperties: false },
         handler: () => this.checkScripts(),
       },
@@ -2562,6 +2625,10 @@ export class AgentToolRegistry {
     // wants {x,y}); a wrong shape like the array [x,y] slips straight through as a silent no-op,
     // which misleads models into concluding "the engine ignores this property" (observed in eval:
     // waypoints set with [x,y] stayed at 0,0 and the model then hardcoded them in script).
+    const emojiArt = emojiAsArtError(propertyPath, value);
+    if (emojiArt) {
+      return { ok: false, error: emojiArt };
+    }
     const coerced = this.coercePropertyValue(nodeId, propertyPath, value);
     if ('error' in coerced) {
       return { ok: false, error: coerced.error };
@@ -2626,6 +2693,11 @@ export class AgentToolRegistry {
       return { ok: false, error: 'No active scene — open a scene first.' };
     }
     const nodeType = asString(args.nodeType);
+    // `text` becomes the node's rendered label, so it is the same rule as set_property's.
+    const textEmojiArt = emojiAsArtError('text', args.text);
+    if (textEmojiArt) {
+      return { ok: false, error: textEmojiArt };
+    }
     const options: CreateNodeOptions = {
       name: typeof args.name === 'string' ? args.name : undefined,
       parentNodeId: typeof args.parentId === 'string' ? args.parentId : undefined,
@@ -3259,6 +3331,10 @@ export class AgentToolRegistry {
     value: unknown,
     temporary = false
   ): Promise<{ ok: boolean; error?: string; temporaryNote?: string }> {
+    const emojiArt = emojiAsArtError(propertyName, value);
+    if (emojiArt) {
+      return { ok: false, error: emojiArt };
+    }
     // Journal BEFORE the write — after it the original value is gone.
     if (temporary) {
       this.recordTemporaryComponentEdit(nodeId, componentId, propertyName);
@@ -3459,6 +3535,27 @@ export class AgentToolRegistry {
     };
   }
 
+  /**
+   * Ride a compile verdict back with a script write — `verify-rider.ts` explains why the harness
+   * runs that check itself instead of waiting for the agent to think of it.
+   *
+   * Nothing here may turn a good write red: the file is already on disk by the time this runs, so a
+   * compiler that cannot load, a preference that cannot be read, or a project with no scripts at
+   * all simply drops the rider and says nothing.
+   */
+  private async withScriptWriteVerify<T extends object>(result: T): Promise<T> {
+    const path = (result as { path?: unknown }).path;
+    if ((result as { ok?: unknown }).ok !== true || typeof path !== 'string') return result;
+    if (!isCompilableScriptPath(path)) return result;
+    try {
+      if (this.settings.getPreferences().autoVerify !== true) return result;
+      const verify: VerifyRider | null = buildScriptWriteRider(await this.compileScripts());
+      return verify === null ? result : { ...result, verify };
+    } catch {
+      return result;
+    }
+  }
+
   private async fsWrite(
     path: string,
     content: string,
@@ -3511,6 +3608,20 @@ export class AgentToolRegistry {
         path: safe,
         existingChars: existing?.length ?? 0,
         error: `Refused: overwrite:true on ${safe} also needs a \`reason\` describing why the whole file must be replaced instead of edited with str_replace.`,
+      };
+    }
+    const sceneEmojiArt = safe.toLowerCase().endsWith('.pix3scene')
+      ? findEmojiArtInSceneYaml(content)
+      : [];
+    if (sceneEmojiArt.length > 0) {
+      const [first] = sceneEmojiArt;
+      return {
+        ok: false,
+        path: safe,
+        existingChars: existing?.length ?? 0,
+        error: `${emojiAsArtRefusal(first.property, first.value)} Found in this scene: ${sceneEmojiArt
+          .map(entry => `${entry.property}: ${entry.value}`)
+          .join(', ')}. Nothing was written — fix every one of them and write again.`,
       };
     }
     const createdDirectories = existing === null ? await this.ensureParentDirectories(safe) : [];
@@ -3685,6 +3796,17 @@ export class AgentToolRegistry {
     const updated = replaceAll
       ? content.split(oldString).join(newString)
       : content.slice(0, at) + newString + content.slice(at + oldString.length);
+    // A targeted edit reaches the same scene YAML an fs_write does, so it answers to the same rule.
+    // Judged on what the edit INTRODUCES, not on the whole file: a scene that already carries emoji
+    // art must not block every unrelated repair until someone fixes it.
+    const introduced = findEmojiArtInSceneYaml(newString);
+    if (safe.toLowerCase().endsWith('.pix3scene') && introduced.length > 0) {
+      const [first] = introduced;
+      return {
+        ok: false,
+        error: `${emojiAsArtRefusal(first.property, first.value)} Nothing was written.`,
+      };
+    }
     await this.storage.writeTextFile(safe, updated);
     const reloadedScene = await this.reloadSceneIfOpen(safe);
     const context = sliceEditContext(updated, at, at + newString.length);
@@ -3772,6 +3894,9 @@ export class AgentToolRegistry {
   // -- compile ---------------------------------------------------------------
 
   private async compileScripts(): Promise<Record<string, unknown>> {
+    // Timed because the verify rider runs this on every script write: an automatic check whose cost
+    // nobody can see is how a harness quietly gets slower than the hops it saved.
+    const startedAt = performance.now();
     const files = await this.collectScriptFiles();
     if (files.size === 0) {
       return {
@@ -3811,6 +3936,7 @@ export class AgentToolRegistry {
         bundled: true,
         registered: true,
         fileCount: files.size,
+        elapsedMs: Math.round(performance.now() - startedAt),
         bytes: result.code.length,
         warnings: result.warnings,
         ...typeCheck.report,
@@ -3824,6 +3950,7 @@ export class AgentToolRegistry {
       const compileError = error as CompilationError;
       return {
         ok: false,
+        elapsedMs: Math.round(performance.now() - startedAt),
         error: typeof compileError?.message === 'string' ? compileError.message : String(error),
         file: compileError?.file,
         line: compileError?.line,

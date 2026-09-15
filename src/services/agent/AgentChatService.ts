@@ -8,6 +8,16 @@ import {
   FLOW_MIN_TOOL_ITERATIONS,
 } from '@/services/agent/AgentSettingsService';
 import { resolveSoul } from '@/services/agent/AgentSouls';
+import {
+  BATCH_BUDGET_MS,
+  INDEPENDENT_READ_TOOLS,
+  READ_RUN_NUDGE_AT,
+  compactBatchReport,
+  parseBatchPlan,
+  readRunNudge,
+  resolveStepRefs,
+  type BatchStepReport,
+} from '@/services/agent/tool-batch';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import {
@@ -222,6 +232,41 @@ const isGameLogicMutation = (toolName: string, input: unknown): boolean => {
     return typeof path === 'string' && /\.(ts|pix3scene)$/i.test(path);
   }
   return false;
+};
+
+/**
+ * Per-iteration bookkeeping shared by every tool call of one assistant message.
+ *
+ * It exists so that {@link AgentChatService.runToolCall} can be one method rather than an inline
+ * block — which is what lets a `batch` step run through the identical path. Everything here used to
+ * be a `let` in `runLoop`; `unverifiedGameMutation` and `forcedOverwrites` outlive the iteration and
+ * are written back to the loop's own variables when the pass is done.
+ */
+interface ToolCallPass {
+  readonly signal: AbortSignal;
+  readonly lastResultBySignature: Map<string, string>;
+  readonly repeatCountBySignature: Map<string, number>;
+  readonly knobTweaks: Map<string, number>;
+  readonly images: LlmImageBlock[];
+  readonly repeatedCalls: string[];
+  /** Consecutive single reads of already-chosen targets — the shape `batch` exists to collapse. */
+  readRun: string[];
+  /** One read-run nudge per turn; repeating it would be its own kind of noise. */
+  readRunNudged: boolean;
+  stuckReason: string | null;
+  askedQuestion: AgentPendingQuestion | null;
+  allToolsErrored: boolean;
+  unverifiedGameMutation: boolean;
+  forcedOverwrites: number;
+}
+
+/** Tool results are JSON by convention but not by contract; a non-JSON one simply has no `$ref`s. */
+const safeParseJson = (text: string): unknown => {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return undefined;
+  }
 };
 
 /** How many times one property may be retuned in a turn before it counts as thrash. */
@@ -1124,6 +1169,13 @@ export class AgentChatService {
     // Forced whole-file rewrites (fs_write overwrite:true past the size guard) — measured in eval
     // S4 as the signature of a model that has lost the thread of what it already changed.
     let forcedOverwrites = 0;
+    /** One "these reads were a batch" nudge per turn. */
+    let readRunNudged = false;
+    /**
+     * Consecutive single reads, counted ACROSS iterations: the lane emits one tool call per message,
+     * so a run of reads is a run of whole round trips, which is exactly what makes it worth saying.
+     */
+    let readRun: string[] = [];
     let escalations = 0;
     // Fire the "you ended with no reply" nudge at most once, so an empty↔nudge exchange can't loop.
     let emptyAnswerNudged = false;
@@ -1285,96 +1337,36 @@ export class AgentChatService {
       }
 
       const results: LlmToolResultBlock[] = [];
-      const images: LlmImageBlock[] = [];
-      const repeatedCalls: string[] = [];
-      // First "you are stuck" signal seen this iteration (repeat / errors / forced rewrites).
-      let stuckReason: string | null = null;
-      let askedQuestion: AgentPendingQuestion | null = null;
-      let allToolsErrored = true;
+      const pass: ToolCallPass = {
+        signal,
+        lastResultBySignature,
+        repeatCountBySignature,
+        knobTweaks,
+        images: [],
+        repeatedCalls: [],
+        readRun,
+        readRunNudged,
+        stuckReason: null,
+        askedQuestion: null,
+        allToolsErrored: true,
+        unverifiedGameMutation,
+        forcedOverwrites,
+      };
       for (const call of calls) {
-        if (signal.aborted) {
-          throw new LlmError('aborted', 'The request was cancelled.');
-        }
-        // Flow only: Studio has a user watching who may well WANT a screenshot mid-turn.
-        if (
-          appState.ui.workspaceMode === 'flow' &&
-          unverifiedGameMutation &&
-          VISUAL_TOOLS.has(call.name) &&
-          !hasVisualReason(call.input)
-        ) {
-          results.push({
-            type: 'tool-result',
-            toolUseId: call.id,
-            content: visualToolRefusal(call.name),
-            isError: true,
-          });
-          continue;
-        }
-        this.setState({ activeTool: call.name });
-        const executed = await this.executeToolCall(call);
-        results.push(executed.result);
-        images.push(...executed.images);
-        const signature = `${call.name}:${JSON.stringify(call.input ?? {})}`;
-        const resultText =
-          typeof executed.result.content === 'string'
-            ? executed.result.content
-            : JSON.stringify(executed.result.content);
-        if (lastResultBySignature.get(signature) === resultText) {
-          repeatedCalls.push(call.name);
-          const repeats = (repeatCountBySignature.get(signature) ?? 0) + 1;
-          repeatCountBySignature.set(signature, repeats);
-          if (repeats >= 2 && !stuckReason) {
-            stuckReason = `you have now made the same ${call.name} call ${repeats + 1} times and gotten the identical result`;
-          }
-        }
-        lastResultBySignature.set(signature, resultText);
-        // Tuning the SAME knob over and over is thrash even when no two calls are identical — the
-        // measured case retuned one component property eight times with a different value each
-        // time, so the byte-equality check above never fired and the turn burned its whole
-        // iteration budget. The knob's identity, not its value, is what repeats.
-        const knob = tuningKnobSignature(call.name, call.input);
-        if (knob) {
-          const tweaks = (knobTweaks.get(knob) ?? 0) + 1;
-          knobTweaks.set(knob, tweaks);
-          if (tweaks >= KNOB_TWEAK_LIMIT && !stuckReason) {
-            stuckReason = `you have now set ${knob.split(':').slice(1).join('.')} ${tweaks} times in this turn — the value is not what is wrong`;
-          }
-        }
-        // A successful state change makes every OTHER remembered result stale: re-running the same
-        // observation now CAN return something different, so the nudge's own claim ("repeating it
-        // will not change anything") would be false. This call's own signature is kept, so a
-        // mutating tool that truly repeats itself verbatim is still caught.
-        if (STATE_CHANGING_TOOLS.has(call.name) && executed.result.isError !== true) {
-          const ownRepeats = repeatCountBySignature.get(signature);
-          lastResultBySignature.clear();
-          repeatCountBySignature.clear();
-          lastResultBySignature.set(signature, resultText);
-          if (ownRepeats !== undefined) {
-            repeatCountBySignature.set(signature, ownRepeats);
-          }
-        }
-        if (executed.result.isError !== true) {
-          allToolsErrored = false;
-        }
-        // The fs_write guard reports a forced wholesale rewrite so the loop can count it — a full
-        // rewrite of an existing file is a stuck signal, not a normal edit (see AgentToolRegistry).
-        if (/"forcedOverwrite"\s*:\s*true/.test(resultText)) {
-          forcedOverwrites += 1;
-        }
-        // A game-logic change is a script/scene write or a component edit; a design/progress .md
-        // write or an asset op is not. A successful game_run/game_input/game_observe clears the
-        // debt (see GAME_PROOF_TOOLS for why game_controls/game_time do not).
-        if (isGameLogicMutation(call.name, call.input)) {
-          unverifiedGameMutation = true;
-        } else if (clearsGameVerifyDebt(call.name, resultText)) {
-          unverifiedGameMutation = false;
-        } else if (call.name === 'ask_user') {
-          askedQuestion = parseAskUser(call.input);
-          // A turn that honestly ends in a question is NOT an unverified turn — otherwise the
-          // verify-gate would drag an agent that hit a real fork into pointless verification.
-          unverifiedGameMutation = false;
-        }
+        results.push(
+          call.name === 'batch'
+            ? await this.runBatch(call, pass)
+            : await this.runToolCall(call, pass)
+        );
       }
+      const images = pass.images;
+      const repeatedCalls = pass.repeatedCalls;
+      let stuckReason = pass.stuckReason;
+      const askedQuestion = pass.askedQuestion;
+      const allToolsErrored = pass.allToolsErrored;
+      unverifiedGameMutation = pass.unverifiedGameMutation;
+      forcedOverwrites = pass.forcedOverwrites;
+      readRun = pass.readRun;
       this.setState({ activeTool: null });
       // Tool-emitted images ride in the same user turn, after the results — all providers accept
       // mixed tool-result + image content there. They are always kept in history (so the UI shows
@@ -1387,6 +1379,11 @@ export class AgentChatService {
         this.appendMessage({ role: 'user', content: resultContent });
         this.setState({ pendingQuestion: askedQuestion });
         return;
+      }
+      if (pass.readRun.length >= READ_RUN_NUDGE_AT && !pass.readRunNudged) {
+        pass.readRunNudged = true;
+        readRunNudged = true;
+        resultContent.push({ type: 'text', text: readRunNudge(pass.readRun) });
       }
       if (repeatedCalls.length > 0) {
         resultContent.push({
@@ -1735,6 +1732,204 @@ export class AgentChatService {
    * Images a handler returns under {@link AGENT_TOOL_IMAGES_KEY} are lifted out of the JSON and
    * handed back as real image blocks (so the model sees pixels, not base64 text).
    */
+  /**
+   * One tool call, with every guard the loop has learned to apply.
+   *
+   * Extracted from `runLoop` so that a `batch` step can go through EXACTLY this path rather than a
+   * shortcut around it (see `tool-batch.ts` for the nine counters a registry-level `batch` would
+   * have walked past). The bookkeeping it mutates lives in {@link ToolCallPass}, which the loop owns.
+   */
+  private async runToolCall(
+    call: LlmToolUseBlock,
+    pass: ToolCallPass
+  ): Promise<LlmToolResultBlock> {
+    if (pass.signal.aborted) {
+      throw new LlmError('aborted', 'The request was cancelled.');
+    }
+    // Flow only: Studio has a user watching who may well WANT a screenshot mid-turn.
+    if (
+      appState.ui.workspaceMode === 'flow' &&
+      pass.unverifiedGameMutation &&
+      VISUAL_TOOLS.has(call.name) &&
+      !hasVisualReason(call.input)
+    ) {
+      return {
+        type: 'tool-result',
+        toolUseId: call.id,
+        content: visualToolRefusal(call.name),
+        isError: true,
+      };
+    }
+    this.setState({ activeTool: call.name });
+    const executed = await this.executeToolCall(call);
+    pass.images.push(...executed.images);
+    const signature = `${call.name}:${JSON.stringify(call.input ?? {})}`;
+    const resultText =
+      typeof executed.result.content === 'string'
+        ? executed.result.content
+        : JSON.stringify(executed.result.content);
+    if (pass.lastResultBySignature.get(signature) === resultText) {
+      pass.repeatedCalls.push(call.name);
+      const repeats = (pass.repeatCountBySignature.get(signature) ?? 0) + 1;
+      pass.repeatCountBySignature.set(signature, repeats);
+      if (repeats >= 2 && !pass.stuckReason) {
+        pass.stuckReason = `you have now made the same ${call.name} call ${repeats + 1} times and gotten the identical result`;
+      }
+    }
+    pass.lastResultBySignature.set(signature, resultText);
+    // Tuning the SAME knob over and over is thrash even when no two calls are identical — the
+    // measured case retuned one component property eight times with a different value each
+    // time, so the byte-equality check above never fired and the turn burned its whole
+    // iteration budget. The knob's identity, not its value, is what repeats.
+    const knob = tuningKnobSignature(call.name, call.input);
+    if (knob) {
+      const tweaks = (pass.knobTweaks.get(knob) ?? 0) + 1;
+      pass.knobTweaks.set(knob, tweaks);
+      if (tweaks >= KNOB_TWEAK_LIMIT && !pass.stuckReason) {
+        pass.stuckReason = `you have now set ${knob.split(':').slice(1).join('.')} ${tweaks} times in this turn — the value is not what is wrong`;
+      }
+    }
+    // A successful state change makes every OTHER remembered result stale: re-running the same
+    // observation now CAN return something different, so the nudge's own claim ("repeating it
+    // will not change anything") would be false. This call's own signature is kept, so a
+    // mutating tool that truly repeats itself verbatim is still caught.
+    if (STATE_CHANGING_TOOLS.has(call.name) && executed.result.isError !== true) {
+      const ownRepeats = pass.repeatCountBySignature.get(signature);
+      pass.lastResultBySignature.clear();
+      pass.repeatCountBySignature.clear();
+      pass.lastResultBySignature.set(signature, resultText);
+      if (ownRepeats !== undefined) {
+        pass.repeatCountBySignature.set(signature, ownRepeats);
+      }
+    }
+    if (executed.result.isError !== true) {
+      pass.allToolsErrored = false;
+    }
+    // A run of single reads is the shape `batch` exists to collapse, and the measured turn spent 5
+    // round trips reading 4 files it had already chosen. Counted here, on the REAL tool name, so a
+    // batch's own inner steps never look like a run of singles.
+    if (INDEPENDENT_READ_TOOLS.has(call.name)) {
+      pass.readRun.push(call.name);
+    } else {
+      pass.readRun = [];
+    }
+    // The fs_write guard reports a forced wholesale rewrite so the loop can count it — a full
+    // rewrite of an existing file is a stuck signal, not a normal edit (see AgentToolRegistry).
+    if (/"forcedOverwrite"\s*:\s*true/.test(resultText)) {
+      pass.forcedOverwrites += 1;
+    }
+    // A game-logic change is a script/scene write or a component edit; a design/progress .md
+    // write or an asset op is not. A successful game_run/game_input/game_observe clears the
+    // debt (see GAME_PROOF_TOOLS for why game_controls/game_time do not).
+    if (isGameLogicMutation(call.name, call.input)) {
+      pass.unverifiedGameMutation = true;
+    } else if (clearsGameVerifyDebt(call.name, resultText)) {
+      pass.unverifiedGameMutation = false;
+    } else if (call.name === 'ask_user') {
+      pass.askedQuestion = parseAskUser(call.input);
+      // A turn that honestly ends in a question is NOT an unverified turn — otherwise the
+      // verify-gate would drag an agent that hit a real fork into pointless verification.
+      pass.unverifiedGameMutation = false;
+    }
+    return executed.result;
+  }
+
+  /**
+   * Expand a `batch` call into its steps and report on each one.
+   *
+   * Every step runs through {@link runToolCall}, so the verify debt, the loop-breaker, the knob
+   * counter and the Flow visual gate all see the REAL tool names in execution order — the whole
+   * reason `batch` is a construct of this loop and not a registry handler. Undo stays per step: a
+   * batch is an agent affordance, and the user's Ctrl+Z must not suddenly roll back twenty nodes.
+   */
+  private async runBatch(call: LlmToolUseBlock, pass: ToolCallPass): Promise<LlmToolResultBlock> {
+    const plan = parseBatchPlan(call.input);
+    if ('error' in plan) {
+      return {
+        type: 'tool-result',
+        toolUseId: call.id,
+        content: JSON.stringify({ ok: false, error: plan.error }),
+        isError: true,
+      };
+    }
+
+    const reports: BatchStepReport[] = [];
+    const resolvedResults: unknown[] = [];
+    const startedAt = Date.now();
+    let stoppedAt: number | null = null;
+    let stopReason: string | null = null;
+
+    for (const [index, step] of plan.steps.entries()) {
+      if (Date.now() - startedAt > BATCH_BUDGET_MS) {
+        stoppedAt = index;
+        stopReason = `the batch ran past its ${Math.round(BATCH_BUDGET_MS / 1000)}s budget`;
+        break;
+      }
+      const substituted = resolveStepRefs(step.args, resolvedResults, index);
+      if ('error' in substituted) {
+        reports.push({
+          step: index,
+          tool: step.tool,
+          ...(step.label ? { label: step.label } : {}),
+          ok: false,
+          result: JSON.stringify({ ok: false, error: substituted.error }),
+        });
+        resolvedResults.push(undefined);
+        if (plan.onError === 'stop') {
+          stoppedAt = index;
+          stopReason = `step ${index} could not resolve a $ref`;
+          break;
+        }
+        continue;
+      }
+
+      this.setState({ activeTool: step.label ? `${step.tool} · ${step.label}` : step.tool });
+      const result = await this.runToolCall(
+        { type: 'tool-use', id: `${call.id}#${index}`, name: step.tool, input: substituted.args },
+        pass
+      );
+      const text =
+        typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
+      const ok = result.isError !== true;
+      reports.push({
+        step: index,
+        tool: step.tool,
+        ...(step.label ? { label: step.label } : {}),
+        ok,
+        result: text,
+      });
+      resolvedResults.push(ok ? safeParseJson(text) : undefined);
+      if (!ok && plan.onError === 'stop') {
+        stoppedAt = index;
+        stopReason = `step ${index} (${step.tool}) failed`;
+        break;
+      }
+    }
+
+    const skipped = plan.steps
+      .slice(stoppedAt === null ? plan.steps.length : stoppedAt + 1)
+      .map((step, offset) => ({
+        step: (stoppedAt ?? 0) + 1 + offset,
+        tool: step.tool,
+      }));
+    const body = {
+      ok: stoppedAt === null && reports.every(report => report.ok),
+      completed: reports.filter(report => report.ok).length,
+      of: plan.steps.length,
+      ...(stoppedAt === null ? {} : { stoppedAt, stopReason }),
+      ...(skipped.length > 0
+        ? { skipped, note: 'These steps did not run. Re-issue the ones you still want.' }
+        : {}),
+      steps: compactBatchReport(reports),
+    };
+    return {
+      type: 'tool-result',
+      toolUseId: call.id,
+      content: JSON.stringify(body),
+      isError: stoppedAt !== null,
+    };
+  }
+
   private async executeToolCall(
     call: LlmToolUseBlock
   ): Promise<{ result: LlmToolResultBlock; images: LlmImageBlock[] }> {
@@ -1828,10 +2023,19 @@ export class AgentChatService {
       '- Rotation units differ by surface: set_property and the runtime (rotationZ) use RADIANS, but the .pix3scene `transform.rotation` field is DEGREES. If you ever do edit the scene YAML by hand, write degrees (90), not radians (1.5708).',
       '- If a node property is recomputed every frame by a script/component (e.g. a controller that drives position along a path), a one-off scene/property edit will NOT hold at runtime — configure the script instead (set_component_property on its exposed fields). If the behaviour genuinely needs a script code change, make it and say so in your reply.',
       '- To give a node behaviour, attach a component: call list_component_types, then add_component (built-in "core:*" behaviours or a project "user:*" script), then configure it with set_component_property. Never hand-edit scene files to add a component.',
-      '- For custom logic, write a Script subclass with fs_write under scripts/, run compile_scripts, then attach it with add_component using its "user:<ExportName>" type.',
-      '- After editing scripts with fs_write, run compile_scripts: it builds, registers AND type-checks in one call, returning any type diagnostics itself. Never chase it with check_scripts.',
-      '- Verify behaviour when it matters: play_start / play_status, then read_errors and read_logs.',
+      '- For custom logic, write a Script subclass with fs_write under scripts/, then attach it with add_component using its "user:<ExportName>" type.',
+      '- A script write (fs_write or str_replace under scripts/) comes back with a `verify` block: the editor already compiled and type-checked it and reports the verdict in `verify.compile` (including whether the build reached the running game, as `registered`), so do NOT follow the write with compile_scripts. Call compile_scripts yourself only when a write came back WITHOUT that block. Never chase either with check_scripts.',
+      '- `verify.unverified` lists what that check did not cover. A green compile is not a working game: to close that gap you have to run it.',
+      // The skills branch on the workspace mode (verify-and-fix step 5: stop the game in Studio,
+      // never in Flow), and until now nothing in the prompt told the agent which one it was in —
+      // a fork the reader cannot decide is a fork that gets guessed.
+      appState.ui.workspaceMode === 'flow'
+        ? '- You are in FLOW mode: the game plays continuously on the stage beside the chat. You did not start it and must not stop it — pick up a new build with play_restart, and never end a turn with the stage stopped (that is a black screen for the user).'
+        : '- You are in STUDIO mode: the editor is open in front of the user and nothing is playing unless it was started. When you are done running the game, play_stop — a live session keeps ticking and burning CPU/GPU.',
+      '- Group the mechanical part of a change into ONE batch call instead of one round trip per step: batch {steps:[{tool,args,label},…]} runs them in order through the same undo, guards and verify-gate as separate calls, and "$0.nodeId" / "$prev.nodeId" passes an id from an earlier step to a later one. The natural shape of an increment is a single batch ending in compile/play_restart and the game_run that proves it. Keep out of a batch anything whose result you must read before choosing the next step — it refuses those by name.',
+      '- Verify behaviour after any change to game logic: play_start / play_status, then read_errors and read_logs.',
       '- Debugging by changing a value you do not want to keep (cranking gravity, disabling a rule, widening a hitbox)? Pass `temporary: true` to set_property / set_component_property. The old value is journalled and restored when the turn ends — even if the turn is force-stopped at the iteration cap — so you can experiment right up to the last iteration without shipping debug values. Call revert_temporary_edits when the experiment is over if you want them back sooner.',
+      '- NEVER use an emoji as artwork. A label/text that is nothing but emoji (a 🪙 coin, a ⭐ star, a 🚀 ship) is a picture standing in for a sprite, and the editor refuses it: every platform draws a different glyph, it cannot be recoloured, atlased, animated or art-directed, and a device missing the codepoint shows a hollow box. Make a real sprite with generate_asset, or use a plain ColorRect2D placeholder — which at least reads as unfinished. An emoji inside a sentence ("Счёт: 10 🪙") is ordinary text and is fine.',
       '- File paths are relative to the project root.',
       "- When a task matches a skill below and you are not already sure of this editor's exact tools/steps for it, read it with read_skill. Follow its tool/format specifics exactly, but treat its process as adaptable guidance — override it when you have a better plan for the task.",
       '- Budget your exploration: read what you need in order to act, then act, then verify. Do not spend iterations surveying the project — a cheap model burned ~15 iterations on reconnaissance and hit the cap before changing anything. Prefer one targeted read over a directory sweep, and stop reading as soon as you can make the change.',

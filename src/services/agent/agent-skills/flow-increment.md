@@ -179,6 +179,39 @@ fs_write { path: "scripts/PlayerController.ts", content: "…",
 Do not go looking for a way around the refusal, and do not rebuild the file through a dozen
 `str_replace` calls.
 
+## 7½. One batch per increment
+
+Every tool call costs a full model round trip, and a measured Flow turn spends its whole 60-iteration
+budget on them — the verification was 7 of those 60, the rest was one mechanical step at a time. So
+put the mechanical part of an increment in ONE `batch`:
+
+```jsonc
+batch { "steps": [
+  { "tool": "fs_write",   "args": { "path": "scripts/CoinTap.ts", "content": "…" }, "label": "tap script" },
+  { "tool": "create_node", "args": { "type": "Sprite2D", "name": "Coin" },          "label": "coin" },
+  { "tool": "add_component", "args": { "nodeId": "$prev.nodeId", "componentType": "user:CoinTap" } },
+  { "tool": "play_restart" },
+  { "tool": "game_run",   "args": { "until": [{ "kind": "gameStateChanged", "path": "score", "by": 1 }] } }
+] }
+```
+
+- **It is not a shortcut around anything.** Each step runs through the same guards, the same undo
+  entries and the same verify-gate as a separate call, and the result reports every step on its own
+  (`{ok, completed, stoppedAt, steps:[…]}`) — a batch that stops halfway says exactly where.
+- **`$0.nodeId` / `$prev.nodeId`** passes a value from an earlier step, which is how you use an id
+  that does not exist until the batch runs. The reference must be the WHOLE argument.
+- **`onError`** is `"stop"` by default (later steps build on earlier ones); pass `"continue"` for
+  genuinely independent steps.
+- **The test for what goes in:** *did you already decide to make all these calls before seeing any
+  of their results?* If yes, they are one batch — **including reads**. Four `fs_read`/`engine_read`
+  of paths you already know are one batch, not four round trips. Only when the ANSWER to one call
+  picks the next (a search whose result shapes the next query) do they stay separate.
+- **What stays out:** steps whose answer you need before you can choose the next one — questions,
+  the advisor, screenshots, asset generation. It refuses those by name, so you cannot get it wrong
+  silently.
+- **Ending the batch with `play_restart` + a `game_run` that states what success IS** is what closes
+  the turn's verify debt in a single round trip.
+
 ## 8. The stage is already running
 
 In Flow the game plays continuously next to the chat — you did not start it and you should not
@@ -186,6 +219,8 @@ stop it.
 
 - `play_start` while it is running returns `alreadyRunning: true`. That is success. Do NOT
   `play_stop` just so `play_start` can "work".
-- To pick up a fresh script build: `compile_scripts`, then **`play_restart`** (one call).
+- To pick up a fresh script build: **`play_restart`** — one call. The build itself already
+  happened when you wrote the file (`verify.compile` in that result); only reach for
+  `compile_scripts` first if the write came back without one.
 - `play_stop` is for the rare case where you must edit with nothing ticking — start it again
   before you finish, because a stopped stage is a black screen for the user.

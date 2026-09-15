@@ -69,6 +69,8 @@ describe('PeekService', () => {
     appState.scenes.peekSoloByScene = {};
     appState.scenes.descriptors = {};
     appState.scenes.activeSceneId = null;
+    // The mask is keyed by project + scene path; without a project nothing is persisted at all.
+    appState.project.id = 'project-a';
   });
 
   afterEach(() => {
@@ -301,11 +303,36 @@ describe('PeekService', () => {
       activate('s', 'res://scenes/main.pix3scene');
       makeService().setHiddenNodeIds(['hud']);
 
-      // A fresh session: same scene path, a brand-new service and no in-memory state.
+      // A fresh session: same project, same scene path, a brand-new service and no in-memory state.
       appState.scenes.peekHiddenByScene = {};
       activate('other-session-id', 'res://scenes/main.pix3scene');
 
       expect(makeService().getHiddenNodeIds()).toEqual(['hud']);
+    });
+
+    /**
+     * The path alone was not enough, and it failed silently. Every template project puts its scene
+     * at `scenes/main.pix3scene`, so one key was shared by all of them and hiding the HUD once hid
+     * it in every project created afterwards — measured on three freshly generated prototypes in a
+     * row, each with a full HUD in its scene and none of it on the stage.
+     */
+    it('does not carry a mask into a DIFFERENT project that uses the same scene path', () => {
+      activate('s', 'res://scenes/main.pix3scene');
+      makeService().setHiddenNodeIds(['hud']);
+
+      appState.project.id = 'project-b';
+      appState.scenes.peekHiddenByScene = {};
+      activate('s-in-b', 'res://scenes/main.pix3scene');
+
+      expect(makeService().getHiddenNodeIds()).toEqual([]);
+    });
+
+    it('persists nothing when no project is open, rather than writing a shared key', () => {
+      activate('s', 'res://scenes/main.pix3scene');
+      appState.project.id = null;
+      makeService().setHiddenNodeIds(['hud']);
+
+      expect(Object.keys(localStorage).filter(key => key.startsWith('pix3.peek'))).toEqual([]);
     });
 
     it('survives a localStorage that throws (private window, blocked site data)', () => {

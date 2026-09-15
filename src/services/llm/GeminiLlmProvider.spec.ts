@@ -138,6 +138,49 @@ describe('GeminiLlmProvider', () => {
     expect(props.flip).toMatchObject({ type: 'string', enum: ['horizontal', 'vertical'] });
   });
 
+  /**
+   * Batching (`.plans/agent-one-shot-generation.md` §4.2) needs every lane to survive N tool calls
+   * in ONE response — the editor's loop already executes them all, and the bridge was fixed to stop
+   * deadlocking on them. Gemini puts each call in its own `functionCall` part of the same message,
+   * and the ids we hand back are synthetic, so the thing to pin is that they stay DISTINCT: one id
+   * reused twice would make two results collide on replay.
+   */
+  it('parses several functionCall parts from one response, with distinct ids', async () => {
+    const provider2 = new GeminiLlmProvider();
+    const fetchImpl = vi.fn(async () =>
+      okJson({
+        candidates: [
+          {
+            content: {
+              parts: [
+                { text: 'building the scene' },
+                { functionCall: { name: 'create_node', args: { type: 'Sprite2D' } } },
+                { functionCall: { name: 'create_node', args: { type: 'Label2D' } } },
+                { functionCall: { name: 'play_restart', args: {} } },
+              ],
+            },
+            finishReason: 'STOP',
+          },
+        ],
+      })
+    );
+
+    const result = await provider2.chat(
+      { messages: [{ role: 'user', content: 'build' }] },
+      { apiKey: 'k', modelId: 'gemini-flash-latest', baseUrl: BASE, fetchImpl }
+    );
+
+    const calls = result.content.filter(block => block.type === 'tool-use');
+    expect(calls).toHaveLength(3);
+    expect(calls.map(call => (call as { name: string }).name)).toEqual([
+      'create_node',
+      'create_node',
+      'play_restart',
+    ]);
+    expect(new Set(calls.map(call => (call as { id: string }).id)).size).toBe(3);
+    expect(result.stopReason).toBe('tool_use');
+  });
+
   it('round-trips the functionCall thought signature (captured on parse, echoed on replay)', async () => {
     const provider2 = new GeminiLlmProvider();
     const fetchImpl = vi.fn(async () =>

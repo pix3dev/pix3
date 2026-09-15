@@ -59,6 +59,33 @@ const MCP_SERVER_NAME = 'pix3';
 const MCP_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
 /** Hard cap on how long one `/v1/messages` request may wait for the model. */
 const RESPONSE_TIMEOUT_MS = 20 * 60 * 1000;
+/**
+ * Ceiling on {@link BridgeSession.orphanResults}. One assistant message cannot hold more tool_use
+ * blocks than this in any sane run; the cap only stops a confused client from growing the map
+ * without bound.
+ */
+const MAX_ORPHAN_RESULTS = 64;
+
+/**
+ * Tokens in the content this response actually carries, ~4 characters each.
+ *
+ * Needed because the SDK under-reports its own output for tool calls: measured, an assistant message
+ * whose only block was `read_file {"path":"a.json"}` came back with `output_tokens: 2`, and a whole
+ * 51-hop turn reported 473 output tokens for 51 tool calls — under ten tokens per call, less than
+ * the JSON arguments of one of them. pix3's panel rendered that as "0 tok/s · 2↓" next to a 112K
+ * prompt, which reads as "we sent everything and got nothing back" on a step where the model thought
+ * for fourteen seconds. The bridge is the only party that knows what it is returning, so it counts.
+ */
+const estimateOutputTokens = (blocks: readonly WireBlock[]): number => {
+  const chars = blocks.reduce((total, block) => {
+    if (block.type === 'text')
+      return total + (typeof block.text === 'string' ? block.text.length : 0);
+    if (block.type === 'tool_use')
+      return total + JSON.stringify(block.input ?? {}).length + toolUseName(block).length;
+    return total;
+  }, 0);
+  return Math.max(1, Math.ceil(chars / 4));
+};
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
 export const MAX_SESSIONS = 4;
 /**
@@ -207,6 +234,23 @@ export class BridgeSession implements ManagedSession {
   private readonly input = new AsyncQueue<SDKUserMessage>();
   private readonly toolNames: Set<string>;
   private readonly pending: PendingCall[] = [];
+  /**
+   * Tool results pix3 returned for a `tool_use` the SDK has not invoked yet, keyed by tool_use id.
+   *
+   * The SDK runs MCP tools one at a time, so when the model emits several `tool_use` blocks in one
+   * assistant message, pix3 executes and answers ALL of them while only the first has reached
+   * {@link onToolCall}. Dropping the rest (which is what this used to do) left the later calls with
+   * no answer and wedged the turn until the 20-minute timeout.
+   */
+  private readonly orphanResults = new Map<string, CallToolResult>();
+  /**
+   * `tool_use` blocks already sent to pix3 whose MCP call the SDK has not invoked yet.
+   *
+   * {@link respond} clears {@link buffer}, so without this a call invoked AFTER its response could
+   * never be matched to its block — and an unmatched call can never be handed its (already
+   * delivered) result. This is the memory that makes {@link orphanResults} reachable.
+   */
+  private unparkedBlocks: WireBlock[] = [];
   /** Assistant content blocks accumulated since the last HTTP response. */
   private buffer: WireBlock[] = [];
   private readonly seenToolUseIds = new Set<string>();
@@ -214,6 +258,8 @@ export class BridgeSession implements ManagedSession {
   private waitingTimer: NodeJS.Timeout | null = null;
   private requestLen = 0;
   private lastUsage: Record<string, unknown> | null = null;
+  /** Output tokens summed over every assistant message of the CURRENT http turn — see `respond`. */
+  private turnOutputTokens = 0;
   private lastSystem: string;
   private pendingContextRefresh: string | null = null;
   /** Set after an interrupt: the interrupted turn's late `result` must not answer a new request. */
@@ -225,7 +271,12 @@ export class BridgeSession implements ManagedSession {
   /** Set when a long turn failed with no model output at all; cleared by a real answer. */
   private wedgedSince: number | null = null;
 
-  constructor(request: WireMessagesRequest, log: Logger) {
+  /**
+   * @param startQuery seam for tests only: the SDK entry point. The real session spawns a Claude
+   * Code CLI here, which a unit test cannot do — and the tool_use plumbing below (buffering,
+   * parking, when the HTTP response may flush) is exactly the part worth testing without one.
+   */
+  constructor(request: WireMessagesRequest, log: Logger, startQuery: typeof query = query) {
     this.log = log;
     this.model = request.model;
     this.lastSystem = systemToText(request.system);
@@ -233,7 +284,7 @@ export class BridgeSession implements ManagedSession {
     this.toolNames = new Set(tools.map(tool => tool.name));
     this.effort = effortOf(request);
 
-    this.q = query({
+    this.q = startQuery({
       prompt: this.input,
       options: {
         model: request.model,
@@ -243,7 +294,11 @@ export class BridgeSession implements ManagedSession {
         ...(this.effort === undefined ? {} : { effort: this.effort }),
         // pix3's tools, exposed verbatim (JSON Schema and all) via an in-process MCP server.
         mcpServers: {
-          [MCP_SERVER_NAME]: { type: 'sdk', name: MCP_SERVER_NAME, instance: this.buildMcpServer(tools) },
+          [MCP_SERVER_NAME]: {
+            type: 'sdk',
+            name: MCP_SERVER_NAME,
+            instance: this.buildMcpServer(tools),
+          },
         },
         strictMcpConfig: true,
         // No built-in tools: the bridge process must never touch the local FS/shell/web on the
@@ -363,6 +418,7 @@ export class BridgeSession implements ManagedSession {
     this.requestLen = request.messages.length;
     this.turnStartedAt = Date.now();
     this.producedInTurn = false;
+    this.turnOutputTokens = 0;
     this.waitingTimer = setTimeout(() => {
       if (this.waiting === waiting) {
         this.waiting = null;
@@ -404,14 +460,44 @@ export class BridgeSession implements ManagedSession {
 
   private resolveToolResults(results: WireToolResult[]): void {
     for (const result of results) {
-      let index = this.pending.findIndex(call => call.toolUseId === result.toolUseId);
-      if (index < 0) index = this.pending.findIndex(call => call.toolUseId === undefined);
-      if (index < 0) {
-        this.log(`[${this.id}] no pending tool call for result ${result.toolUseId} — dropped`);
+      const index = this.pending.findIndex(call => call.toolUseId === result.toolUseId);
+      if (index >= 0) {
+        const [call] = this.pending.splice(index, 1);
+        call.resolve(toCallToolResult(result));
         continue;
       }
-      const [call] = this.pending.splice(index, 1);
-      call.resolve(toCallToolResult(result));
+      // Not parked yet. If it is a block we really emitted, the SDK simply has not got round to
+      // invoking it — hold the answer for {@link drainOrphanResults}. An id we never emitted falls
+      // back to the oldest unassigned call, which is how a matching failure used to be survived.
+      if (!this.seenToolUseIds.has(result.toolUseId)) {
+        const loose = this.pending.findIndex(call => call.toolUseId === undefined);
+        if (loose >= 0) {
+          const [call] = this.pending.splice(loose, 1);
+          call.resolve(toCallToolResult(result));
+          continue;
+        }
+      }
+      if (this.orphanResults.size >= MAX_ORPHAN_RESULTS) {
+        this.log(`[${this.id}] orphan result buffer full — dropping ${result.toolUseId}`);
+        continue;
+      }
+      this.orphanResults.set(result.toolUseId, toCallToolResult(result));
+    }
+    this.drainOrphanResults();
+  }
+
+  /** Hand every held result to its call, once that call has been parked and matched to its block. */
+  private drainOrphanResults(): void {
+    if (this.orphanResults.size === 0) return;
+    for (let index = this.pending.length - 1; index >= 0; index -= 1) {
+      const call = this.pending[index];
+      const toolUseId = call.toolUseId;
+      if (toolUseId === undefined) continue;
+      const result = this.orphanResults.get(toolUseId);
+      if (result === undefined) continue;
+      this.orphanResults.delete(toolUseId);
+      this.pending.splice(index, 1);
+      call.resolve(result);
     }
   }
 
@@ -445,7 +531,13 @@ export class BridgeSession implements ManagedSession {
     void this.q.interrupt().catch(() => {});
   }
 
+  private clearOrphanResults(): void {
+    this.orphanResults.clear();
+    this.unparkedBlocks = [];
+  }
+
   private cancelPendingCalls(message: string): void {
+    this.clearOrphanResults();
     for (const call of this.pending.splice(0)) {
       call.resolve({ content: [{ type: 'text', text: message }], isError: true });
     }
@@ -498,17 +590,29 @@ export class BridgeSession implements ManagedSession {
           this.onAssistantMessage(message.message as unknown as Record<string, unknown>);
         } else if (message.type === 'result') {
           this.onResult(message as unknown as Record<string, unknown>);
-        } else if (message.type === 'system' && (message as { subtype?: string }).subtype === 'init') {
-          this.log(`[${this.id}] Claude Code session ${(message as { session_id?: string }).session_id ?? '?'} (${this.model})`);
+        } else if (
+          message.type === 'system' &&
+          (message as { subtype?: string }).subtype === 'init'
+        ) {
+          this.log(
+            `[${this.id}] Claude Code session ${(message as { session_id?: string }).session_id ?? '?'} (${this.model})`
+          );
         }
       }
       if (!this.closed) this.close('CLI stream ended');
     } catch (error) {
-      this.log(`[${this.id}] pump error: ${error instanceof Error ? error.message : String(error)}`);
+      this.log(
+        `[${this.id}] pump error: ${error instanceof Error ? error.message : String(error)}`
+      );
       if (!this.closed) {
         this.closed = true;
         this.cancelPendingCalls('The session crashed.');
-        this.failWaiting(new HttpError(502, `Claude Code error: ${error instanceof Error ? error.message : String(error)}`));
+        this.failWaiting(
+          new HttpError(
+            502,
+            `Claude Code error: ${error instanceof Error ? error.message : String(error)}`
+          )
+        );
       }
     }
   }
@@ -524,7 +628,16 @@ export class BridgeSession implements ManagedSession {
       }
       this.buffer.push(block);
     }
-    if (isRecord(message.usage)) this.lastUsage = message.usage;
+    if (isRecord(message.usage)) {
+      this.lastUsage = message.usage;
+      // One http turn can span several assistant messages (thinking, then the tool call). Input and
+      // cache counts describe the PROMPT and are the same each time, so the last one wins; output is
+      // produced fresh by each message, so it sums.
+      const produced = message.usage.output_tokens;
+      if (typeof produced === 'number' && Number.isFinite(produced)) {
+        this.turnOutputTokens += produced;
+      }
+    }
     this.tryAssignAndFlush();
   }
 
@@ -535,7 +648,9 @@ export class BridgeSession implements ManagedSession {
       return;
     }
     if (result.subtype !== 'success') {
-      const errors = Array.isArray(result.errors) ? result.errors.join('; ') : String(result.subtype);
+      const errors = Array.isArray(result.errors)
+        ? result.errors.join('; ')
+        : String(result.subtype);
       this.failWaiting(new HttpError(502, `Claude Code stopped: ${errors}`));
       this.buffer = [];
       return;
@@ -547,9 +662,10 @@ export class BridgeSession implements ManagedSession {
     if (this.buffer.length === 0 && typeof result.result === 'string' && result.result) {
       this.buffer.push({ type: 'text', text: result.result });
     }
-    const stop = result.stop_reason === 'max_tokens' || result.stop_reason === 'refusal'
-      ? (result.stop_reason as string)
-      : 'end_turn';
+    const stop =
+      result.stop_reason === 'max_tokens' || result.stop_reason === 'refusal'
+        ? (result.stop_reason as string)
+        : 'end_turn';
     this.respond(stop);
   }
 
@@ -569,29 +685,41 @@ export class BridgeSession implements ManagedSession {
    * and every buffered pix3 tool_use has its parked call — answer it with `stop_reason: tool_use`.
    */
   private tryAssignAndFlush(): void {
-    const toolUseBlocks = this.buffer.filter(
+    const buffered = this.buffer.filter(
       block => block.type === 'tool_use' && toolUseName(block).startsWith(MCP_PREFIX)
     );
+    // A call may be invoked long after its block was sent, so blocks stay assignable past the
+    // response that carried them. Only `buffered` decides whether to flush.
+    const assignable = [...buffered, ...this.unparkedBlocks];
     const assigned = new Set(
       this.pending.map(call => call.toolUseId).filter((id): id is string => id !== undefined)
     );
     for (const call of this.pending) {
       if (call.toolUseId) continue;
-      const candidates = toolUseBlocks.filter(
-        block =>
-          !assigned.has(String(block.id)) && stripPrefix(toolUseName(block)) === call.name
+      const candidates = assignable.filter(
+        block => !assigned.has(String(block.id)) && stripPrefix(toolUseName(block)) === call.name
       );
-      const match = candidates.find(block => sameJson(block.input ?? {}, call.input)) ?? candidates[0];
+      const match =
+        candidates.find(block => sameJson(block.input ?? {}, call.input)) ?? candidates[0];
       if (match) {
         call.toolUseId = String(match.id);
         assigned.add(call.toolUseId);
+        this.unparkedBlocks = this.unparkedBlocks.filter(
+          block => String(block.id) !== call.toolUseId
+        );
       }
     }
-    if (!this.waiting || toolUseBlocks.length === 0) return;
-    const allParked = toolUseBlocks.every(block =>
+    this.drainOrphanResults();
+    if (!this.waiting || buffered.length === 0) return;
+    // ONE parked call is enough, and waiting for all of them was a deadlock: the SDK invokes MCP
+    // tools one at a time and will not call the second until the first resolves, while the first
+    // resolves only once pix3 posts its result — which needs this very response. The reply carries
+    // every buffered block regardless, and results that arrive before their call is invoked are
+    // held by {@link orphanResults}, so this is correct whether the SDK serializes or not.
+    const anyParked = buffered.some(block =>
       this.pending.some(call => call.toolUseId === String(block.id))
     );
-    if (allParked) this.respond('tool_use');
+    if (anyParked) this.respond('tool_use');
   }
 
   private respond(stopReason: string): void {
@@ -607,16 +735,30 @@ export class BridgeSession implements ManagedSession {
           (block.type === 'tool_use' && toolUseName(block).startsWith(MCP_PREFIX))
       )
       .map(block =>
-        block.type === 'tool_use'
-          ? { ...block, name: stripPrefix(toolUseName(block)) }
-          : block
+        block.type === 'tool_use' ? { ...block, name: stripPrefix(toolUseName(block)) } : block
       );
+    const stillUnparked = this.buffer.filter(
+      block =>
+        block.type === 'tool_use' &&
+        toolUseName(block).startsWith(MCP_PREFIX) &&
+        !this.pending.some(call => call.toolUseId === String(block.id))
+    );
+    this.unparkedBlocks = [...this.unparkedBlocks, ...stillUnparked].slice(-MAX_ORPHAN_RESULTS);
     this.buffer = [];
     this.waiting = null;
     // A real answer is proof of life: clear any wedge suspicion raised by earlier failed turns.
     this.turnStartedAt = 0;
     this.wedgedSince = null;
     this.transcriptLen = this.requestLen + 1;
+    // The SDK's own count is kept for everything it gets right (prompt size, cache); only `output`
+    // is replaced, and only upward — a lane that genuinely produced less than it returned does not
+    // exist, so max() cannot make an honest number worse.
+    const reportedOutput =
+      typeof this.lastUsage?.output_tokens === 'number' ? this.lastUsage.output_tokens : 0;
+    const usage = {
+      ...(this.lastUsage ?? {}),
+      output_tokens: Math.max(this.turnOutputTokens, reportedOutput, estimateOutputTokens(content)),
+    };
     waiting.resolve({
       status: 200,
       body: {
@@ -626,7 +768,7 @@ export class BridgeSession implements ManagedSession {
         model: this.model,
         content,
         stop_reason: stopReason,
-        usage: this.lastUsage ?? {},
+        usage,
       },
     });
   }
@@ -701,8 +843,11 @@ export class SessionManager {
 
   constructor(log: Logger, options: SessionManagerOptions = {}) {
     this.log = log;
-    this.stallTimeoutMs = normalizeStallTimeoutMs(options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS);
-    this.factory = options.createSession ?? ((request, logger) => new BridgeSession(request, logger));
+    this.stallTimeoutMs = normalizeStallTimeoutMs(
+      options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS
+    );
+    this.factory =
+      options.createSession ?? ((request, logger) => new BridgeSession(request, logger));
     this.now = options.now ?? (() => Date.now());
     if (options.autoSweep === false) {
       this.sweeper = null;
@@ -797,7 +942,9 @@ export class SessionManager {
       this.safeClose(session, `reset requested by the editor (${scope})`, true);
     }
     this.dropClosed();
-    const stalled = this.sessions.filter(session => this.stalledReason(session, now) !== null).length;
+    const stalled = this.sessions.filter(
+      session => this.stalledReason(session, now) !== null
+    ).length;
     this.log(
       `reset (${scope}): closed ${victims.length}, ${this.sessions.length} session(s) remain` +
         (stalled > 0 ? `, ${stalled} still stalled` : '')

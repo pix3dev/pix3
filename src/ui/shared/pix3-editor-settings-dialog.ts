@@ -264,6 +264,9 @@ export class EditorSettingsDialog extends ComponentBase {
   private llmModelsMessage: string | null = null;
 
   @state()
+  private llmAutoVerify = true;
+
+  @state()
   private llmDebugMode = false;
 
   @state()
@@ -410,6 +413,7 @@ export class EditorSettingsDialog extends ComponentBase {
     this.llmModelId = this.agentSettings.getSelectedModelId(this.llmProviderId) ?? '';
     this.llmBaseUrl = agentPrefs.customBaseUrl;
     this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
+    this.llmAutoVerify = agentPrefs.autoVerify;
     this.llmDebugMode = agentPrefs.debugMode;
     this.llmMaxIterations = agentPrefs.maxToolIterations;
     this.soulId = agentPrefs.soulId;
@@ -939,6 +943,26 @@ export class EditorSettingsDialog extends ComponentBase {
             >iterations per turn (${MIN_TOOL_ITERATIONS}–${MAX_TOOL_ITERATIONS})</span
           >
         </div>
+      </div>
+
+      <div class="settings-field">
+        <div class="field-head">
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              .checked=${this.llmAutoVerify}
+              @change=${this.onLlmAutoVerifyChange}
+            />
+            <span>Verify edits automatically</span>
+          </label>
+          ${this.renderInfo('llm-auto-verify')}
+        </div>
+        ${this.renderNote(
+          'llm-auto-verify',
+          html`When the Agent writes a project script, the editor compiles and type-checks it right
+          away and hands the verdict back with the write, instead of the Agent spending another
+          round trip asking for it. Turn it off if you would rather every check be an explicit step.`
+        )}
       </div>
 
       <div class="settings-field">
@@ -1614,6 +1638,11 @@ export class EditorSettingsDialog extends ComponentBase {
       : DEFAULT_MAX_TOOL_ITERATIONS;
     input.value = String(this.llmMaxIterations);
     this.agentSettings.updatePreferences({ maxToolIterations: this.llmMaxIterations });
+  }
+
+  private onLlmAutoVerifyChange(e: Event): void {
+    this.llmAutoVerify = (e.target as HTMLInputElement).checked;
+    this.agentSettings.updatePreferences({ autoVerify: this.llmAutoVerify });
   }
 
   private onLlmDebugModeChange(e: Event): void {

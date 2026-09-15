@@ -133,6 +133,13 @@ export function attachComponentDefinitions(
 }
 
 /**
+ * Whether an `Object3D` in the tree is one of ours. Structural rather than `instanceof NodeBase`:
+ * this module is imported BY the node classes, so a value import of NodeBase would close the cycle.
+ */
+const isNodeBase = (child: unknown): child is NodeBase =>
+  Array.isArray((child as NodeBase | undefined)?.pendingComponents);
+
+/**
  * Second chance for {@link NodeBase.pendingComponents}: walk a subtree and attach every parked
  * definition whose type has since been registered. Called by the editor after project scripts
  * compile, which is exactly when `user:*` types appear.
@@ -151,7 +158,16 @@ export function resolvePendingComponents(
       continue;
     }
     for (const child of node.children) {
-      stack.push(child);
+      // `NodeBase.children` is DECLARED as NodeBase[] but is three.js's own `Object3D.children`, and
+      // a node's visuals live there too — `Sprite2D` does `this.add(this.mesh)`. So a plain Mesh,
+      // with no `pendingComponents` of its own, is a child of a NodeBase in every real scene, and
+      // walking into it used to throw. That mattered far beyond this function: `add_component`
+      // resolves pending components before it attaches anything, so a single sprite anywhere in the
+      // scene broke component attach for the whole project (measured: an agent burned 15 of its 60
+      // iterations on add_component calls that could never succeed, and the turn died on the cap).
+      if (isNodeBase(child)) {
+        stack.push(child);
+      }
     }
     if (node.pendingComponents.length === 0) {
       continue;

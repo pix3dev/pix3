@@ -229,7 +229,12 @@ const providerMonogram = (label: string): string => {
 const formatMetric = (metric: AgentTurnMetric): string => {
   const parts = [`${(metric.elapsedMs / 1000).toFixed(1)}s`];
   if (metric.outputTokens && metric.elapsedMs > 0) {
-    parts.push(`${Math.round(metric.outputTokens / (metric.elapsedMs / 1000))} tok/s`);
+    // One decimal below 10: an agentic step spends most of its wall clock thinking and waiting, not
+    // generating, so the honest throughput is often a fraction — and `Math.round` turned every one
+    // of those into a flat "0 tok/s", which reads as "the model produced nothing" next to a 112K
+    // prompt. It never produced nothing; the rate was 1.8.
+    const rate = metric.outputTokens / (metric.elapsedMs / 1000);
+    parts.push(`${rate >= 10 ? Math.round(rate) : rate.toFixed(1)} tok/s`);
   }
   if (metric.inputTokens || metric.outputTokens) {
     parts.push(`${metric.inputTokens ?? 0}↑ ${metric.outputTokens ?? 0}↓`);

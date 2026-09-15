@@ -540,10 +540,22 @@ export class PeekService {
     }
   }
 
-  /** Keyed by file path so the mask follows the scene, not the session's scene-id assignment. */
+  /**
+   * Keyed by PROJECT + file path: the mask follows the scene rather than the session's scene-id
+   * assignment, and it stops at the project boundary.
+   *
+   * The path alone was not enough, and the failure was silent. Every template project puts its scene
+   * at `scenes/main.pix3scene`, so one key — `pix3.peek.hidden:res://scenes/main.pix3scene` — was
+   * shared by all of them: hiding the HUD once, in one project, hid the HUD in every project created
+   * afterwards. Measured: three freshly generated prototypes in a row came up with no score, no
+   * timer and no lives bar on the stage, all three scenes containing those nodes, because a mask
+   * left over from an unrelated project was still being applied. A project with no id (nothing
+   * open) persists nothing rather than falling back to the shared key.
+   */
   private storageKey(sceneId: string): string | null {
     const filePath = appState.scenes.descriptors[sceneId]?.filePath;
-    return filePath ? `${STORAGE_PREFIX}${filePath}` : null;
+    const projectId = appState.project.id;
+    return filePath && projectId ? `${STORAGE_PREFIX}${projectId}:${filePath}` : null;
   }
 
   /**

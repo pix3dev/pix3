@@ -39,6 +39,16 @@ const buildRegistry = (overrides: Record<string, unknown> = {}): AgentToolRegist
         : value;
     Object.defineProperty(registry, key, { value: stub, configurable: true });
   }
+  // A script write rides a compile verdict back with it (see verify-rider.ts), which would make
+  // every fs_write/str_replace case here about the compile too. Default the preference off so the
+  // write assertions stay about the write; the rider's own cases pass a settings double that says
+  // autoVerify: true.
+  if (!('settings' in overrides)) {
+    Object.defineProperty(registry, 'settings', {
+      value: { getPreferences: () => ({ autoVerify: false }) },
+      configurable: true,
+    });
+  }
   // The screenshot tools ask this service to build Vibe's missing viewport before they give up.
   // A spec has no editor shell, so default it to "nothing to mount" rather than let the tools
   // resolve the real (WebGL-backed) service out of the container.
@@ -3348,6 +3358,223 @@ describe('AgentToolRegistry', () => {
     };
     expect(result.ok).toBe(true);
     expect(result.typeCheck).toBe('unavailable');
+  });
+
+  /**
+   * Emoji are never artwork. Measured: an agent shipped a coin-tapper whose coin was a `Button2D`
+   * with `label: 🪙` at 140px on a stock button skin — content by the letter of the old chrome-only
+   * rule, a placeholder by every other measure. These pin that the refusal covers every write path,
+   * so it cannot be reached around by picking a different tool, AND that it stops at text: an emoji
+   * inside a sentence is what a person writes, not a sprite substitute.
+   */
+  describe('emoji as artwork', () => {
+    it('refuses an emoji-only label on set_property and names the alternative', async () => {
+      const dispatcher = { execute: vi.fn(async () => true) };
+      const registry = buildRegistry({ dispatcher, sceneManager: activeSceneManager() });
+
+      const result = (await registry.execute('set_property', {
+        nodeId: 'coin',
+        propertyPath: 'label',
+        value: '🪙',
+      })) as { ok: boolean; error?: string };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/generate_asset/);
+      expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+
+    it('refuses the same value on create_node and set_component_property', async () => {
+      const dispatcher = { execute: vi.fn(async () => true) };
+      const registry = buildRegistry({ dispatcher, sceneManager: activeSceneManager() });
+
+      const created = (await registry.execute('create_node', {
+        nodeType: 'Label2D',
+        text: '⭐',
+      })) as { ok: boolean; error?: string };
+      const component = (await registry.execute('set_component_property', {
+        nodeId: 'n1',
+        componentId: 'c1',
+        propertyName: 'label',
+        value: '🚀',
+      })) as { ok: boolean; error?: string };
+
+      expect(created.ok).toBe(false);
+      expect(component.ok).toBe(false);
+      expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+
+    it('lets an emoji inside real text through — that is a sentence, not a sprite', async () => {
+      const dispatcher = { execute: vi.fn(async () => true) };
+      const registry = buildRegistry({ dispatcher, sceneManager: activeSceneManager() });
+
+      const result = (await registry.execute('set_property', {
+        nodeId: 'score',
+        propertyPath: 'label',
+        value: 'Счёт: 10 🪙',
+      })) as { ok: boolean };
+
+      expect(result.ok).toBe(true);
+      expect(dispatcher.execute).toHaveBeenCalled();
+    });
+
+    /** Writing the scene file wholesale is the path around every property setter. */
+    it('refuses a scene write that carries emoji art, listing every occurrence', async () => {
+      const writeTextFile = vi.fn(async () => undefined);
+      const registry = buildRegistry({
+        storage: {
+          writeTextFile,
+          listDirectory: async () => [],
+          readTextFile: async () => {
+            throw new Error('no');
+          },
+        },
+      });
+
+      const result = (await registry.execute('fs_write', {
+        path: 'scenes/main.pix3scene',
+        content:
+          'root:\n  - id: coin\n    properties:\n      label: 🪙\n  - id: star\n    properties:\n      text: "⭐"\n',
+      })) as { ok: boolean; error?: string };
+
+      expect(result.ok).toBe(false);
+      expect(result.error).toMatch(/label: 🪙/);
+      expect(result.error).toMatch(/text: ⭐/);
+      expect(writeTextFile).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * The verify rider: a script write answers with the compile the agent would have spent its next
+   * hop asking for (39 % of a measured Flow increment went to that ceremony — see
+   * `.plans/agent-one-shot-generation.md`). What these cases pin is the part that can go wrong
+   * quietly: what it fires on, and that it can never make a completed write look failed.
+   */
+  describe('verify rider on script writes', () => {
+    const files = new Map<string, string>([
+      ['scripts/Car.ts', 'export class Car extends Script {}'],
+    ]);
+    const makeScriptStorage = () => ({
+      listDirectory: vi.fn(async (dir: string) =>
+        dir === 'scripts'
+          ? [{ name: 'Car.ts', kind: 'file' as const, path: 'scripts/Car.ts', size: 1 }]
+          : []
+      ),
+      readTextFile: vi.fn(async (path: string) => {
+        const content = files.get(path);
+        if (content === undefined) throw new Error('not found');
+        return content;
+      }),
+      writeTextFile: vi.fn(async (path: string, content: string) => {
+        files.set(path, content);
+      }),
+    });
+    const verifyingRegistry = (over: Record<string, unknown> = {}) =>
+      buildRegistry({
+        storage: makeScriptStorage(),
+        compiler: { bundle: vi.fn(async () => ({ code: 'js', warnings: [] })) },
+        projectScriptLoader: {
+          syncAndBuild: vi.fn(async () => undefined),
+          ensureReady: vi.fn(async () => undefined),
+        },
+        diagnostics: {
+          checkProject: vi.fn(async () => ({
+            filesChecked: 1,
+            errorCount: 0,
+            warningCount: 0,
+            diagnostics: [],
+          })),
+        },
+        settings: { getPreferences: () => ({ autoVerify: true }) },
+        ...over,
+      });
+
+    it('fs_write of a script answers with the compile verdict and what it did not check', async () => {
+      const result = (await verifyingRegistry().execute('fs_write', {
+        path: 'scripts/Car.ts',
+        content: 'export class Car extends Script {}',
+      })) as { ok: boolean; verify?: { compile?: { ok: boolean }; unverified?: string[] } };
+
+      expect(result.ok).toBe(true);
+      expect(result.verify?.compile?.ok).toBe(true);
+      expect(result.verify?.unverified).toHaveLength(2);
+    });
+
+    it('str_replace of a script gets the same rider — the documented edit path is not the blind one', async () => {
+      const result = (await verifyingRegistry().execute('str_replace', {
+        path: 'scripts/Car.ts',
+        old_string: 'Car extends',
+        new_string: 'Truck extends',
+      })) as { ok: boolean; verify?: { compile?: { ok: boolean } } };
+
+      expect(result.ok).toBe(true);
+      expect(result.verify?.compile?.ok).toBe(true);
+    });
+
+    it('does not compile for a write that changes nothing the compiler reads', async () => {
+      const compiler = { bundle: vi.fn(async () => ({ code: 'js', warnings: [] })) };
+      const result = (await verifyingRegistry({ compiler }).execute('fs_write', {
+        path: 'design/plan.md',
+        content: '# plan',
+      })) as { ok: boolean; verify?: unknown };
+
+      expect(result.ok).toBe(true);
+      expect(result.verify).toBeUndefined();
+      expect(compiler.bundle).not.toHaveBeenCalled();
+    });
+
+    it('stays out of the way when the user turned it off', async () => {
+      const compiler = { bundle: vi.fn(async () => ({ code: 'js', warnings: [] })) };
+      const result = (await verifyingRegistry({
+        compiler,
+        settings: { getPreferences: () => ({ autoVerify: false }) },
+      }).execute('fs_write', {
+        path: 'scripts/Car.ts',
+        content: 'export class Car extends Script {}',
+      })) as { ok: boolean; verify?: unknown };
+
+      expect(result.verify).toBeUndefined();
+      expect(compiler.bundle).not.toHaveBeenCalled();
+    });
+
+    /**
+     * The file is already on disk when the rider runs. A compiler that throws must therefore cost
+     * the agent its verdict and nothing else — reporting the write as failed would send it
+     * rewriting a file that is already correct.
+     */
+    it('never turns a completed write red when the check itself breaks', async () => {
+      const result = (await verifyingRegistry({
+        projectScriptLoader: {
+          syncAndBuild: vi.fn(async () => {
+            throw new Error('esbuild.wasm missing');
+          }),
+          ensureReady: vi.fn(async () => undefined),
+        },
+      }).execute('fs_write', {
+        path: 'scripts/Car.ts',
+        content: 'export class Car extends Script {}',
+      })) as { ok: boolean; path: string; verify?: { compile?: { ok: boolean } } };
+
+      expect(result.ok).toBe(true);
+      expect(result.path).toBe('scripts/Car.ts');
+      // The bundle threw, so the rider reports the failure — as a compile verdict, not as a write.
+      expect(result.verify?.compile?.ok).toBe(false);
+    });
+
+    it('survives a settings service that cannot be read at all', async () => {
+      const result = (await verifyingRegistry({
+        settings: {
+          getPreferences: () => {
+            throw new Error('no storage');
+          },
+        },
+      }).execute('fs_write', {
+        path: 'scripts/Car.ts',
+        content: 'export class Car extends Script {}',
+      })) as { ok: boolean; verify?: unknown };
+
+      expect(result.ok).toBe(true);
+      expect(result.verify).toBeUndefined();
+    });
   });
 
   /**

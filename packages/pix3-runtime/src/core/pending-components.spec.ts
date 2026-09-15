@@ -174,6 +174,46 @@ root:
     expect((hud?.components[0] as GameRules).lives).toBe(7);
   });
 
+  /**
+   * The walk descends `Object3D.children`, and a node's own VISUALS live there: `Sprite2D` does
+   * `this.add(this.mesh)`, so a plain `THREE.Mesh` — which has no `pendingComponents` — is a child
+   * of a NodeBase in every real scene. Reading `.length` off it threw
+   * `Cannot read properties of undefined (reading 'length')`, and because `add_component` resolves
+   * pending components before attaching anything, ONE sprite in the scene broke component attach
+   * for the whole project. Measured live: an agent spent 15 of its 60 iterations retrying
+   * `add_component` on four different nodes with two different component types, every one of them
+   * failing with that message, and the turn died on the iteration cap with the mechanic unbuilt.
+   */
+  it('walks past a node visual that is not a NodeBase', async () => {
+    const { loader, registry } = makeStack();
+
+    const withSprite = `version: '1.0.0'
+root:
+  - id: game-root
+    type: Group2D
+    name: GameRoot
+    components:
+      - id: game-rules
+        type: 'user:GameRules'
+        enabled: true
+        config:
+          lives: 4
+    children:
+      - id: coin
+        type: Sprite2D
+        name: Coin
+`;
+
+    const graph = await loader.parseScene(withSprite, { filePath: 'res://scenes/main.pix3scene' });
+    const coin = graph.nodeMap.get('coin');
+    // Guard the premise: if node visuals ever stop being three.js children, this test is moot.
+    expect(coin?.children.some(child => (child as { pendingComponents?: unknown }).pendingComponents === undefined)).toBe(true);
+
+    registerGameRules(registry);
+    expect(() => loader.resolvePendingComponents(graph.rootNodes)).not.toThrow();
+    expect(graph.nodeMap.get('game-root')?.components).toHaveLength(1);
+  });
+
   it('keeps a live component and a parked one side by side when saving', async () => {
     const { loader, saver, registry } = makeStack();
     registerGameRules(registry);

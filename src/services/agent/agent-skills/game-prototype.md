@@ -64,10 +64,9 @@ against — every line written that day was still a suspect. The point of an inc
 tidiness, it is that when a run fails there is exactly one new thing in it.
 
 After each increment: `play_start`, then `play_status` and `read_errors`. Fix errors before
-moving on. Stop play mode (`play_stop`) before large edits — and once the increment is
-verified and you're done running it, STOP it (`play_stop`) rather than leaving it running: a
-live play session keeps ticking (spawners, physics, audio) and burns CPU/GPU in the
-background. When an increment is verified,
+moving on. You do not need to stop the game to edit — `play_restart` picks up a fresh build in one
+call — and where you leave it at the end depends on the mode: in Studio stop it, in Flow never
+(see `verify-and-fix` step 5, which says it in full). When an increment is verified,
 mark it `[x]` in `design/progress.md` — and add a Notes line for anything you tried that did
 NOT work (wrong property shape, a trap from §4½), so a resumed session does not repeat it.
 
@@ -105,8 +104,10 @@ signal to the mechanic:
   `core:*` behaviour or a project `user:*` script), then `set_component_property` to
   configure it. Never hand-edit a scene file just to add a component.
 - **Tweak a property** on an existing node → `set_property` (undoable).
-- **Custom logic** → `fs_write` a `Script` subclass under `scripts/`, run `compile_scripts`
-  (it type-checks too — no separate `check_scripts`), then `add_component` with its `user:<ExportName>`
+- **Custom logic** → `fs_write` a `Script` subclass under `scripts/` (the write answers with its own
+  `verify.compile` — built, registered and type-checked, so no `compile_scripts` and no
+  `check_scripts` after it; call `compile_scripts` yourself only if the write came back WITHOUT that
+  block), then `add_component` with its `user:<ExportName>`
   type. See the `pix3-game-dev` skill / the project `AGENTS.md` for the Script shape and the
   engine API (`this.scene`, `this.input`, `this.node`, `this.findNode(...)`).
 - **New scene structure** (nodes that don't exist yet) → edit the `.pix3scene` YAML with
@@ -127,7 +128,7 @@ signal to the mechanic:
 
 ## 4½. Engine API traps (these compile clean and then break at runtime)
 
-Every one of these passes `compile_scripts` clean — including its type-check, if you cast to
+Every one of these compiles clean — including the type-check, if you cast to
 `any` — then throws or silently does nothing on the first frame:
 
 - **`position` / `rotation` / `scale` are read-only references** (three.js). Never assign
@@ -148,8 +149,25 @@ Every one of these passes `compile_scripts` clean — including its type-check, 
 - **Never cast `this.node as any`** — it disables exactly the type-checking that would have
   caught the read-only assignment above. If a property seems missing from the type, look up
   the real API (`read_skill`, `node_inspect`) instead of casting.
-- **Write each script once.** Think the design through, then write the file and immediately
-  `compile_scripts`. Rewriting the same file 3–4 times burns your iteration budget.
+- **Write each script once.** Think the design through, then write the file and read the
+  `verify.compile` that comes back with it. Rewriting the same file 3–4 times burns your iteration
+  budget.
+
+## 4⅔. Placeholders: a rectangle, never an emoji
+
+An emoji is not a placeholder, it is a **different picture on every device** — the same codepoint is
+a different coin on Apple, Google, Samsung and Windows, and a hollow box where the font lacks it. It
+cannot be recoloured, scaled cleanly, atlased, animated or art-directed, so it is not a step toward
+the real art either: it is a dead end that has to be thrown away. The editor **refuses** a `label` /
+`text` that is nothing but emoji, on `set_property`, `create_node`, `set_component_property` and on
+a scene write.
+
+- **Real art** → `generate_asset` a sprite, put it on a `Sprite2D`, or on a `Button2D`'s
+  `textureNormal` / `textureHover` / `texturePressed`.
+- **Honest placeholder** → a `ColorRect2D` of the right size and colour. It reads as unfinished,
+  which is exactly what you want a placeholder to do.
+- **Emoji inside a sentence** (`Счёт: 10 🪙`, `Ход 3 ⏳`) is ordinary text and is fine. The rule is
+  about a label used AS a picture.
 
 ## 4¾. Physics: 2D is built in, Rapier is only for 3D
 
