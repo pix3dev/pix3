@@ -303,6 +303,19 @@ export interface Navigation2DSettings {
 export type GameAspectRatio = 'free' | '16:9-landscape' | '16:9-portrait' | '4:3';
 
 /**
+ * Shape Vibe letterboxes its game stage to.
+ *
+ * Deliberately its own setting rather than a second reader of {@link GameAspectRatio}: the two
+ * differ in what "no opinion" means. Studio defaults to `free` (stretch to fill the panel, which is
+ * what a dock full of tabs wants); Vibe defaults to `project` — the authored `viewportBaseSize` —
+ * because what Vibe shows is meant to be the shape the exported HTML will have. Sharing one value
+ * would let a `16:9-landscape` picked once in the Game tab silently letterbox a 1080x1920 game into
+ * a wide box, which is the bug the stage's fit logic used to guard against by ignoring the setting
+ * outright.
+ */
+export type FlowStageAspect = 'project' | 'free' | '16:9-landscape' | '16:9-portrait' | '4:3';
+
+/**
  * Details of the most recent runtime/script failure raised while the game was
  * launching or playing. Surfaced in the Game tab and the Logs panel so a broken
  * script no longer fails silently. Ephemeral UI state — never part of undo
@@ -399,6 +412,11 @@ export interface UIState {
   pauseRenderingOnUnfocus: boolean;
   /** Preferred aspect ratio for the runtime preview surface */
   gameAspectRatio: GameAspectRatio;
+  /**
+   * Shape Vibe's game stage is letterboxed to. Persisted alongside the other editor settings —
+   * a deliberate, visible choice about the game's shape should outlive the session that made it.
+   */
+  flowStageAspect: FlowStageAspect;
   /** True when the scene is in play mode (scripts running) */
   isPlaying: boolean;
   /** True when a dedicated external game preview window is open */
@@ -665,6 +683,7 @@ export const createInitialAppState = (): AppState => ({
     warnOnUnsavedUnload: true,
     pauseRenderingOnUnfocus: true,
     gameAspectRatio: 'free',
+    flowStageAspect: 'project',
     isPlaying: false,
     isGamePopoutOpen: false,
     playModeStatus: 'stopped',

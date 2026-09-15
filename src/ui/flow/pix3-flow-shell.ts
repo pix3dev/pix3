@@ -1,6 +1,7 @@
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { subscribe } from 'valtio/vanilla';
 import { appState } from '@/state';
+import type { FlowStageAspect } from '@/state/AppState';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
 import { DialogService } from '@/services/editor/DialogService';
@@ -22,6 +23,24 @@ import './pix3-flow-shell.ts.css';
 import '@/ui/shared/pix3-peek-strip';
 
 const EMPTY_PLAN: FlowPlan = { pitch: null, title: null, steps: [] };
+
+interface StageAspectPreset {
+  readonly value: FlowStageAspect;
+  readonly label: string;
+  readonly title: string;
+}
+
+/**
+ * The shapes the stage offers. `project` leads because it is the honest one — the others are a
+ * "what would this look like on…" check, not a change to the game.
+ */
+const STAGE_ASPECT_PRESETS: readonly StageAspectPreset[] = [
+  { value: 'project', label: 'Project', title: 'The shape this project is authored at' },
+  { value: '16:9-portrait', label: '9:16', title: '9:16 portrait — phone held upright' },
+  { value: '16:9-landscape', label: '16:9', title: '16:9 landscape — phone turned, or desktop' },
+  { value: '4:3', label: '4:3', title: '4:3 — tablet' },
+  { value: 'free', label: 'Fill', title: 'Free aspect — stretch to fill the panel' },
+];
 
 /** Chat/stage split: the chat needs room to read, the stage room to play. */
 const MIN_CHAT_WIDTH = 300;
@@ -159,6 +178,10 @@ export class Pix3FlowShell extends ComponentBase {
   @state()
   private transitionError: string | null = null;
 
+  /** Shape the stage is letterboxed to. Mirrors `appState.ui.flowStageAspect`. */
+  @state()
+  private stageAspect: FlowStageAspect = appState.ui.flowStageAspect;
+
   private chatWidth = loadChatWidth();
   private stageHost?: HTMLElement;
   private stageFrame?: HTMLElement;
@@ -211,6 +234,7 @@ export class Pix3FlowShell extends ComponentBase {
       this.isPlaying = appState.ui.isPlaying;
       this.isPaused = appState.ui.playModeStatus === 'paused';
       this.stageError = appState.ui.playModeError?.message ?? null;
+      this.stageAspect = appState.ui.flowStageAspect;
       if (wasPlaying !== this.isPlaying) {
         this.syncViewToPlayState(wasPlaying);
       }
@@ -343,30 +367,86 @@ export class Pix3FlowShell extends ComponentBase {
 
     const target = this.resolveStageAspect();
     let width = available.width;
-    let height = width / target;
-    if (height > available.height) {
-      height = available.height;
-      width = height * target;
+    let height = available.height;
+    if (target !== null) {
+      height = width / target;
+      if (height > available.height) {
+        height = available.height;
+        width = height * target;
+      }
     }
     host.style.width = `${Math.floor(width)}px`;
     host.style.height = `${Math.floor(height)}px`;
   }
 
   /**
-   * The aspect to fit: the project's own authored viewport, always.
+   * The aspect to fit, or `null` to fill the frame without letterboxing.
    *
-   * Deliberately NOT `appState.ui.gameAspectRatio` — that is a Studio affordance (the Game tab's
-   * aspect picker) with no control anywhere in Flow, so a stale "16:9 landscape" left over from
-   * some earlier session silently rendered a 1080×1920 game into a wide box: the field floated in
-   * the middle and the anchored HUD flew off to the edges of a viewport the game was never
-   * designed for. In Flow what you see is the shape the exported HTML will have.
+   * Reads Vibe's OWN setting, never `appState.ui.gameAspectRatio`. That one belongs to the Game
+   * tab, and while Flow had no picker it could only arrive here as a stale value from some earlier
+   * Studio session — which silently rendered a 1080×1920 game into a wide box: the field floated in
+   * the middle and the anchored HUD flew off to the edges of a viewport the game was never designed
+   * for. `flowStageAspect` defaults to `project`, so the default is still "what you see is the
+   * shape the exported HTML will have"; anything else here is a shape the user deliberately picked
+   * and can see is picked.
    */
-  private resolveStageAspect(): number {
+  private resolveStageAspect(): number | null {
+    switch (this.stageAspect) {
+      case 'free':
+        return null;
+      case '16:9-landscape':
+        return 16 / 9;
+      case '16:9-portrait':
+        return 9 / 16;
+      case '4:3':
+        return 4 / 3;
+      case 'project':
+        return this.resolveProjectAspect();
+    }
+  }
+
+  private resolveProjectAspect(): number {
     const base = appState.project.manifest?.viewportBaseSize;
     if (base && base.width > 0 && base.height > 0) {
       return base.width / base.height;
     }
     return 16 / 9;
+  }
+
+  /**
+   * Switch the stage's shape. Goes through the service (and so through the operation gateway)
+   * rather than writing `appState.ui` here: this is a persisted preference, not view-local posture.
+   *
+   * `fitStage` is not called directly — the valtio subscription above hears the write and refits.
+   */
+  private setStageAspect(aspect: FlowStageAspect): void {
+    void this.playSession.setFlowStageAspect(aspect);
+  }
+
+  private renderStageAspectPicker() {
+    const base = appState.project.manifest?.viewportBaseSize;
+    return html`
+      <div class="flow-stage__aspects" role="group" aria-label="Stage aspect ratio">
+        ${STAGE_ASPECT_PRESETS.map(preset => {
+          const title =
+            preset.value === 'project' && base && base.width > 0 && base.height > 0
+              ? `${preset.title} — ${base.width}×${base.height}`
+              : preset.title;
+          const active = this.stageAspect === preset.value;
+          return html`
+            <button
+              class="flow-stage__aspect ${active ? 'flow-stage__aspect--active' : ''}"
+              type="button"
+              title=${title}
+              aria-pressed=${String(active)}
+              @click=${() => this.setStageAspect(preset.value)}
+            >
+              ${preset.label}
+            </button>
+          `;
+        })}
+      </div>
+    `;
   }
 
   private async onProjectChanged(): Promise<void> {
@@ -996,6 +1076,7 @@ export class Pix3FlowShell extends ComponentBase {
                 : html`<span>Live</span>`
               : html`<span>Stopped</span>`}
         </span>
+        ${this.renderStageAspectPicker()}
         <button
           class="flow-stage__button"
           type="button"

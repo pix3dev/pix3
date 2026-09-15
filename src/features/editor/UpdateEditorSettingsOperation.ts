@@ -4,13 +4,14 @@ import type {
   OperationInvokeResult,
   OperationMetadata,
 } from '@/core/Operation';
-import type { GameAspectRatio, Navigation2DSettings } from '@/state/AppState';
+import type { FlowStageAspect, GameAspectRatio, Navigation2DSettings } from '@/state/AppState';
 
 export interface UpdateEditorSettingsParams {
   warnOnUnsavedUnload?: boolean;
   pauseRenderingOnUnfocus?: boolean;
   navigation2D?: Partial<Navigation2DSettings>;
   gameAspectRatio?: GameAspectRatio;
+  flowStageAspect?: FlowStageAspect;
 }
 
 export interface EditorSettingsSnapshot {
@@ -18,12 +19,17 @@ export interface EditorSettingsSnapshot {
   pauseRenderingOnUnfocus: boolean;
   navigation2D: Navigation2DSettings;
   gameAspectRatio: GameAspectRatio;
+  flowStageAspect: FlowStageAspect;
 }
 
 const isGameAspectRatio = (value: unknown): value is GameAspectRatio => {
   return (
     value === 'free' || value === '16:9-landscape' || value === '16:9-portrait' || value === '4:3'
   );
+};
+
+const isFlowStageAspect = (value: unknown): value is FlowStageAspect => {
+  return value === 'project' || isGameAspectRatio(value);
 };
 
 export const EDITOR_SETTINGS_STORAGE_KEY = 'pix3.editorSettings:v1';
@@ -55,6 +61,9 @@ export const loadEditorSettings = (): Partial<EditorSettingsSnapshot> | null => 
       }
       if (isGameAspectRatio(parsed.gameAspectRatio)) {
         result.gameAspectRatio = parsed.gameAspectRatio;
+      }
+      if (isFlowStageAspect(parsed.flowStageAspect)) {
+        result.flowStageAspect = parsed.flowStageAspect;
       }
       return result;
     }
@@ -100,12 +109,16 @@ export class UpdateEditorSettingsOperation implements Operation<OperationInvokeR
     const prevGameAspectRatio = snapshot.ui.gameAspectRatio;
     const nextGameAspectRatio = this.params.gameAspectRatio ?? prevGameAspectRatio;
 
+    const prevFlowStageAspect = snapshot.ui.flowStageAspect;
+    const nextFlowStageAspect = this.params.flowStageAspect ?? prevFlowStageAspect;
+
     const hasChanges =
       nextWarn !== prevWarn ||
       nextPause !== prevPause ||
       nextNav2D.panSensitivity !== prevNav2D.panSensitivity ||
       nextNav2D.zoomSensitivity !== prevNav2D.zoomSensitivity ||
-      nextGameAspectRatio !== prevGameAspectRatio;
+      nextGameAspectRatio !== prevGameAspectRatio ||
+      nextFlowStageAspect !== prevFlowStageAspect;
 
     if (!hasChanges) {
       return { didMutate: false };
@@ -115,20 +128,25 @@ export class UpdateEditorSettingsOperation implements Operation<OperationInvokeR
     state.ui.pauseRenderingOnUnfocus = nextPause;
     state.ui.navigation2D = nextNav2D;
     state.ui.gameAspectRatio = nextGameAspectRatio;
+    state.ui.flowStageAspect = nextFlowStageAspect;
 
     const serialize = (
       w: boolean,
       p: boolean,
       n: Navigation2DSettings,
-      g: GameAspectRatio
+      g: GameAspectRatio,
+      f: FlowStageAspect
     ): EditorSettingsSnapshot => ({
       warnOnUnsavedUnload: w,
       pauseRenderingOnUnfocus: p,
       navigation2D: n,
       gameAspectRatio: g,
+      flowStageAspect: f,
     });
 
-    persistEditorSettings(serialize(nextWarn, nextPause, nextNav2D, nextGameAspectRatio));
+    persistEditorSettings(
+      serialize(nextWarn, nextPause, nextNav2D, nextGameAspectRatio, nextFlowStageAspect)
+    );
 
     return {
       didMutate: true,
@@ -139,14 +157,20 @@ export class UpdateEditorSettingsOperation implements Operation<OperationInvokeR
           state.ui.pauseRenderingOnUnfocus = prevPause;
           state.ui.navigation2D = prevNav2D;
           state.ui.gameAspectRatio = prevGameAspectRatio;
-          persistEditorSettings(serialize(prevWarn, prevPause, prevNav2D, prevGameAspectRatio));
+          state.ui.flowStageAspect = prevFlowStageAspect;
+          persistEditorSettings(
+            serialize(prevWarn, prevPause, prevNav2D, prevGameAspectRatio, prevFlowStageAspect)
+          );
         },
         redo: async () => {
           state.ui.warnOnUnsavedUnload = nextWarn;
           state.ui.pauseRenderingOnUnfocus = nextPause;
           state.ui.navigation2D = nextNav2D;
           state.ui.gameAspectRatio = nextGameAspectRatio;
-          persistEditorSettings(serialize(nextWarn, nextPause, nextNav2D, nextGameAspectRatio));
+          state.ui.flowStageAspect = nextFlowStageAspect;
+          persistEditorSettings(
+            serialize(nextWarn, nextPause, nextNav2D, nextGameAspectRatio, nextFlowStageAspect)
+          );
         },
       },
     };

@@ -530,6 +530,49 @@ pix3-flow-shell .flow-stage__status {
   gap: 6px;
 }
 
+/* Stage shape. A segmented control rather than a dropdown: the whole point is to flip between two
+   shapes and back while looking at the game, and a menu that closes on every pick makes that a
+   three-click loop. Sits left of the run controls with its own gap, so a mis-click lands on another
+   shape (harmless, reversible) and never on Stop. */
+pix3-flow-shell .flow-stage__aspects {
+  display: inline-flex;
+  align-items: center;
+  margin-right: 6px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  overflow: hidden;
+}
+
+pix3-flow-shell .flow-stage__aspect {
+  border: none;
+  border-left: 1px solid var(--line-2);
+  padding: 0 7px;
+  height: 24px;
+  background: transparent;
+  color: var(--fg-3);
+  font: inherit;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+}
+
+pix3-flow-shell .flow-stage__aspect:first-child {
+  border-left: none;
+}
+
+pix3-flow-shell .flow-stage__aspect:hover {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-flow-shell .flow-stage__aspect--active,
+pix3-flow-shell .flow-stage__aspect--active:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 @media (max-width: 900px) {
   /* THREE rows, not four: the splitter below is `display: none`, and a hidden grid item is not
      placed at all — so the tracks shifted by one and the stage inherited the splitter's 0 px row.
@@ -546,6 +589,12 @@ pix3-flow-shell .flow-stage__status {
   }
 
   pix3-flow-shell .flow-splitter {
+    display: none;
+  }
+
+  /* Run controls outrank shape presets when the bar runs out of room: keep Project/Fill (the two
+     that answer "is this the real shape?") and drop the comparison shapes. */
+  pix3-flow-shell .flow-stage__aspect:not(:first-child):not(:last-child) {
     display: none;
   }
 

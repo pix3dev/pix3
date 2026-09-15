@@ -32,6 +32,7 @@ class CommandDispatcherStub {
 class GamePlaySessionServiceStub {
   registerTabHost = vi.fn();
   unregisterTabHost = vi.fn();
+  setFlowStageAspect = vi.fn(async (_aspect: string) => undefined);
 }
 
 class IconServiceStub {
@@ -111,6 +112,7 @@ const mountShell = async (
   // the instance is shared across the tests in this file — reset it rather than assume a fresh one.
   playSession.registerTabHost.mockClear();
   playSession.unregisterTabHost.mockClear();
+  playSession.setFlowStageAspect.mockClear();
   const dialogs = container.getService<DialogServiceStub>(
     container.getOrCreateToken(DialogService)
   );
@@ -399,6 +401,67 @@ describe('Pix3FlowShell — prototype stage', () => {
     expect(shell.querySelector<HTMLElement>('.flow-stage')?.hidden).toBe(false);
     expect(shell.querySelector<HTMLElement>('.flow-doc')?.hidden).toBe(true);
     expect(playSession.registerTabHost).toHaveBeenCalledTimes(1);
+  });
+});
+
+/**
+ * Vibe's stage is letterboxed, so the shape it is letterboxed TO is a real editorial choice — and
+ * until this picker existed it could only be changed in Studio, where Vibe deliberately refused to
+ * read it.
+ */
+describe('Pix3FlowShell — the stage aspect picker', () => {
+  const presets = (shell: TestShell): HTMLButtonElement[] =>
+    Array.from(shell.querySelectorAll<HTMLButtonElement>('.flow-stage__aspect'));
+
+  it('offers the shapes, with the authored one selected by default', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+    const buttons = presets(shell);
+
+    expect(buttons.map(button => button.textContent?.trim())).toEqual([
+      'Project',
+      '9:16',
+      '16:9',
+      '4:3',
+      'Fill',
+    ]);
+    expect(buttons[0].getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('names the authored size on the Project preset', async () => {
+    const { shell } = await mountShell(
+      { projectName: 'Ant Wars' },
+      { viewportBaseSize: { width: 1080, height: 1920 } }
+    );
+
+    expect(presets(shell)[0].title).toContain('1080×1920');
+  });
+
+  it('routes a pick through the service, never straight into appState', async () => {
+    const { shell, playSession } = await mountShell({ projectName: 'Ant Wars' });
+
+    presets(shell)[1].click();
+    await settle(shell);
+
+    expect(playSession.setFlowStageAspect).toHaveBeenCalledWith('16:9-portrait');
+    // The stub never completes the write, so the button may only follow the STATE — a component
+    // that lit itself up on click would lie about a preference that failed to persist.
+    expect(presets(shell)[1].getAttribute('aria-pressed')).toBe('false');
+  });
+
+  it('follows the setting when it changes elsewhere', async () => {
+    const { shell } = await mountShell({ projectName: 'Ant Wars' });
+
+    appState.ui.flowStageAspect = 'free';
+    await settle(shell);
+
+    const buttons = presets(shell);
+    expect(buttons[0].getAttribute('aria-pressed')).toBe('false');
+    expect(buttons[4].getAttribute('aria-pressed')).toBe('true');
+  });
+
+  it('is absent at the idea stage, where there is no game to shape', async () => {
+    const { shell } = await mountShell({ flowStage: 'idea' });
+    expect(presets(shell)).toHaveLength(0);
   });
 });
 

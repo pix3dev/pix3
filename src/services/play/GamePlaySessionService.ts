@@ -12,7 +12,7 @@ import {
   setDirectionAxesEnabled,
 } from '@pix3/runtime';
 import { appState } from '@/state';
-import type { GameAspectRatio } from '@/state/AppState';
+import type { FlowStageAspect, GameAspectRatio } from '@/state/AppState';
 import {
   encodeCanvasScreenshot,
   type CanvasScreenshot,
@@ -199,6 +199,22 @@ export class GamePlaySessionService {
     this.initialize();
     await this.operationService.invoke(
       new UpdateEditorSettingsOperation({ gameAspectRatio: aspectRatio })
+    );
+  }
+
+  /**
+   * Vibe's own stage shape. A separate setting from {@link getAspectRatio} on purpose — see
+   * `FlowStageAspect`: Studio's default means "fill the panel", Vibe's means "the authored
+   * viewport", and one value cannot carry both defaults.
+   */
+  getFlowStageAspect(): FlowStageAspect {
+    return appState.ui.flowStageAspect;
+  }
+
+  async setFlowStageAspect(aspect: FlowStageAspect): Promise<void> {
+    this.initialize();
+    await this.operationService.invoke(
+      new UpdateEditorSettingsOperation({ flowStageAspect: aspect })
     );
   }
 
