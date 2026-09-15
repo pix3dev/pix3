@@ -3,7 +3,10 @@ import { appState } from '@/state';
 import { buildProjectMap } from '@/services/flow/flow-project-map';
 import { MAX_RECIPE_MD_CHARS } from '@/services/flow/recipe-contract';
 import { SceneManager, NodeBase } from '@pix3/runtime';
-import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import {
+  AgentSettingsService,
+  FLOW_MIN_TOOL_ITERATIONS,
+} from '@/services/agent/AgentSettingsService';
 import { resolveSoul } from '@/services/agent/AgentSouls';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
@@ -166,11 +169,6 @@ export interface AgentChatState {
 const AGENTS_FILES = ['AGENTS.md', 'agents.md', '.agents.md'] as const;
 /** Cap the AGENTS.md slice of the system prompt so a huge file can't dominate the context. */
 const MAX_AGENTS_MD_CHARS = 16_000;
-/**
- * Iteration floor for a Flow turn (the Studio default is 40, and users lower it). Below this a
- * turn cannot both build and prove an increment.
- */
-const FLOW_MIN_TOOL_ITERATIONS = 60;
 /** How many times a Flow turn is pushed to prove a gameplay change before it may close unproven. */
 const FLOW_VERIFY_ATTEMPTS = 3;
 /** Recipe contract written into every Flow project by the prototype expander. */

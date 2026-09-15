@@ -9,7 +9,13 @@ import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSet
 import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
 import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
 import { modelPickerLabel } from '@/services/image-gen/ImageGenTypes';
-import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import {
+  AgentSettingsService,
+  DEFAULT_MAX_TOOL_ITERATIONS,
+  FLOW_MIN_TOOL_ITERATIONS,
+  MAX_TOOL_ITERATIONS,
+  MIN_TOOL_ITERATIONS,
+} from '@/services/agent/AgentSettingsService';
 import {
   SOUL_PRESETS,
   CUSTOM_SOUL_ID,
@@ -260,6 +266,9 @@ export class EditorSettingsDialog extends ComponentBase {
   @state()
   private llmDebugMode = false;
 
+  @state()
+  private llmMaxIterations = DEFAULT_MAX_TOOL_ITERATIONS;
+
   // Souls: the agent's name + personality preset (or a user-authored custom soul).
   @state()
   private soulId = '';
@@ -402,6 +411,7 @@ export class EditorSettingsDialog extends ComponentBase {
     this.llmBaseUrl = agentPrefs.customBaseUrl;
     this.llmModelCustomMode = this.isLlmModelCustom(this.llmProviderId, this.llmModelId);
     this.llmDebugMode = agentPrefs.debugMode;
+    this.llmMaxIterations = agentPrefs.maxToolIterations;
     this.soulId = agentPrefs.soulId;
     this.customSoulName = agentPrefs.customSoulName;
     this.customSoulPrompt = agentPrefs.customSoulPrompt;
@@ -899,6 +909,37 @@ export class EditorSettingsDialog extends ComponentBase {
             />
           </div>`
         : null}
+
+      <div class="settings-field">
+        <div class="field-head">
+          <span class="field-title">Tool iteration limit</span>
+          ${this.renderInfo('llm-max-iterations')}
+        </div>
+        ${this.renderNote(
+          'llm-max-iterations',
+          html`How many LLM&nbsp;⇄&nbsp;tool round trips one Agent turn may spend before it is
+          force-stopped and asked to summarise. Raise it for long build tasks, lower it to keep a
+          metered provider's spend per turn predictable. Default ${DEFAULT_MAX_TOOL_ITERATIONS};
+          Flow mode raises the floor to ${FLOW_MIN_TOOL_ITERATIONS} because a Flow turn has to reach
+          a playable increment. A stopped turn is resumable — send a follow-up message to continue.`
+        )}
+        <div class="inline-row">
+          <input
+            class="iteration-input"
+            type="number"
+            inputmode="numeric"
+            min=${MIN_TOOL_ITERATIONS}
+            max=${MAX_TOOL_ITERATIONS}
+            step="1"
+            aria-label="Tool iteration limit"
+            .value=${String(this.llmMaxIterations)}
+            @change=${this.onLlmMaxIterationsChange}
+          />
+          <span class="field-note"
+            >iterations per turn (${MIN_TOOL_ITERATIONS}–${MAX_TOOL_ITERATIONS})</span
+          >
+        </div>
+      </div>
 
       <div class="settings-field">
         <div class="field-head">
@@ -1559,6 +1600,20 @@ export class EditorSettingsDialog extends ComponentBase {
     } catch {
       this.visionStatus = null;
     }
+  }
+
+  /**
+   * The cap is clamped here as well as in {@link AgentSettingsService} so the input snaps back to a
+   * usable number instead of leaving the field showing a value that was silently rejected.
+   */
+  private onLlmMaxIterationsChange(e: Event): void {
+    const input = e.target as HTMLInputElement;
+    const parsed = Number(input.value);
+    this.llmMaxIterations = Number.isFinite(parsed)
+      ? Math.min(Math.max(Math.round(parsed), MIN_TOOL_ITERATIONS), MAX_TOOL_ITERATIONS)
+      : DEFAULT_MAX_TOOL_ITERATIONS;
+    input.value = String(this.llmMaxIterations);
+    this.agentSettings.updatePreferences({ maxToolIterations: this.llmMaxIterations });
   }
 
   private onLlmDebugModeChange(e: Event): void {

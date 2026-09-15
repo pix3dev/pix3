@@ -108,7 +108,27 @@ const sanitizeReasoningEffortMap = (raw: unknown): Record<string, ReasoningEffor
 };
 // 25 proved too tight for build-scale tasks: cheap models spend ~15 iterations exploring and then
 // hit the cap right after play_start, before reading errors (see .plans/agent-eval-results.md).
-const DEFAULT_MAX_TOOL_ITERATIONS = 40;
+export const DEFAULT_MAX_TOOL_ITERATIONS = 40;
+
+/**
+ * Bounds for {@link AgentPreferences.maxToolIterations}. The Settings input, the persisted value and
+ * every programmatic write clamp to the same range, so a hand-edited localStorage entry or a debug
+ * bridge call can never hand the agentic loop an unbounded (or zero) budget.
+ */
+export const MIN_TOOL_ITERATIONS = 1;
+export const MAX_TOOL_ITERATIONS = 100;
+
+/**
+ * Iteration floor for a Flow turn (the Studio default is 40, and users lower it). Below this a turn
+ * cannot both build and prove an increment, so {@link import('./AgentChatService').AgentChatService}
+ * raises the user's cap to this value while the workspace is in Flow mode.
+ */
+export const FLOW_MIN_TOOL_ITERATIONS = 60;
+
+const clampToolIterations = (value: unknown): number =>
+  typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? Math.min(Math.max(Math.round(value), MIN_TOOL_ITERATIONS), MAX_TOOL_ITERATIONS)
+    : DEFAULT_MAX_TOOL_ITERATIONS;
 
 /**
  * Non-secret preferences for the in-editor LLM agent (selected provider/model, custom base URL, loop
@@ -148,6 +168,9 @@ export class AgentSettingsService {
     }
     if (patch.visionProviderId !== undefined && patch.visionPinned === undefined) {
       next.visionPinned = true;
+    }
+    if (patch.maxToolIterations !== undefined) {
+      next.maxToolIterations = clampToolIterations(patch.maxToolIterations);
     }
     if (patch.modelByProvider) {
       next.modelByProvider = { ...this.ensureLoaded().modelByProvider, ...patch.modelByProvider };
@@ -484,12 +507,7 @@ export class AgentSettingsService {
           typeof parsed.advisorPinned === 'boolean'
             ? parsed.advisorPinned
             : Boolean(parsed.advisorProviderId),
-        maxToolIterations:
-          typeof parsed.maxToolIterations === 'number' &&
-          Number.isFinite(parsed.maxToolIterations) &&
-          parsed.maxToolIterations > 0
-            ? Math.min(Math.round(parsed.maxToolIterations), 100)
-            : defaults.maxToolIterations,
+        maxToolIterations: clampToolIterations(parsed.maxToolIterations),
         debugMode: typeof parsed.debugMode === 'boolean' ? parsed.debugMode : defaults.debugMode,
         soulId:
           typeof parsed.soulId === 'string' && parsed.soulId ? parsed.soulId : defaults.soulId,

@@ -277,6 +277,18 @@ pix3-editor-settings-dialog .inline-row .inline-select:disabled {
   opacity: 0.5;
 }
 
+/* Numeric caps (agent tool-iteration limit): narrow, since the value is at most three digits. */
+pix3-editor-settings-dialog .inline-row input.iteration-input {
+  flex: 0 0 auto;
+  width: 5.5rem;
+  padding: 0.45rem 0.5rem;
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  border: 1px solid var(--line-1);
+  font-size: 0.9rem;
+}
+
 /* Square icon affordances sitting in a field header or an inline row. */
 pix3-editor-settings-dialog .icon-btn,
 pix3-editor-settings-dialog .info-toggle,
