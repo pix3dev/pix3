@@ -1,0 +1,50 @@
+version: 1.0.0
+metadata:
+  description: One white carrom man. Spawned into Board/Pieces by user:GameController.
+root:
+  - id: man-white-root
+    type: Sprite2D
+    name: Man White
+    properties:
+      texture:
+        type: texture
+        url: res://sprites/man_white.png
+      width: 40
+      height: 40
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: man-white-body
+        type: core:PhysicsBody2D
+        enabled: true
+        config:
+          bodyType: dynamic
+          gravityScale: 0
+          mass: 1
+          linearDamping: 0.6
+          angularDamping: 0.05
+          fixedRotation: true
+          bullet: false
+          canSleep: true
+          emitContacts: true
+      - id: man-white-shape
+        type: core:Collider2D
+        enabled: true
+        config:
+          shape: circle
+          radius: 20
+          offsetX: 0
+          offsetY: 0
+          friction: 0.05
+          restitution: 0.78
+          density: 1
+          sensor: false
+          group: man
+      - id: man-white-disc
+        type: user:Disc
+        enabled: true
+        config:
+          kind: white
+    children: []

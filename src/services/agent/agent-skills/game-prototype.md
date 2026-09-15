@@ -151,13 +151,44 @@ Every one of these passes `compile_scripts` clean — including its type-check, 
 - **Write each script once.** Think the design through, then write the file and immediately
   `compile_scripts`. Rewriting the same file 3–4 times burns your iteration budget.
 
-## 4¾. 3D rigid-body physics: Rapier is here, and `engine_search` cannot see it
+## 4¾. Physics: 2D is built in, Rapier is only for 3D
 
-`engine_search` searches `@pix3/runtime/src/**` and Rapier does not live there — the editor wires
-it and exposes it to project scripts through the runtime import map. So searching `rigidbody`,
-then `physics`, then `rapier`, and getting back only comment mentions is **not** evidence the
-engine has no physics: one session read it that way and hand-wrote a 505-line box solver. A
-project script imports it like `@pix3/runtime` or `three`:
+**Never hand-write a 2D solver.** The engine ships one, in the package `engine_search` reads, and
+it is the right answer for every top-down or side-on 2D game that needs collision *response* —
+carrom, pool, air hockey, pinball, breakout, a platformer.
+
+Three tiers. Pick the cheapest one that answers the question you actually have:
+
+| You need | Use |
+| --- | --- |
+| "Is anything here?" — overlaps, raycasts, line of sight, **no response** | `scene.collision2d` + `core:Hitbox2D` |
+| Movement and collision **response** in 2D — bouncing, pushing, sensors | `scene.physics2d` + `core:PhysicsBody2D` / `core:Collider2D` |
+| 3D rigid bodies | Rapier, from a project script (below) |
+
+Reaching for the hitbox tier when you need response is the same mistake as writing the solver
+yourself: it answers queries and applies no impulses, so you end up resolving contacts by hand.
+
+Author 2D physics Unity-style: `core:PhysicsBody2D` **and** `core:Collider2D` on the same node
+(`add_component` on both). A `core:Collider2D` with no body on it or any ancestor is static world
+geometry — that is the whole "wall" case, one component and no script. Shapes are `rect`, `circle`,
+`polygon` (concave allowed) and `capsule`; bodies are `static` / `kinematic` / `dynamic` and carry
+`mass`, `linearDamping`, `restitution`, `friction`, `fixedRotation`, `canSleep`, `bullet` (CCD) and
+`emitContacts`. Units are design pixels with **y up**, so gravity is a negative y — and a **top-down
+game sets gravity to (0, 0)**, either with `core:PhysicsWorld2D` on the scene root or
+`scene.physics2d.setGravity(0, 0)`.
+
+From a script: `scene.physics2d.getBody(node)` → `applyImpulse` / `setVelocity` / `teleport` /
+`isSleeping`, plus `raycast`, `overlapCircle` and `moveAndSlide` for characters. Bodies emit
+`body-entered` / `body-exited` (sensors) and, when `emitContacts` is on, `contact-started` /
+`contact-ended`. It steps in the runner's fixed-step slot, so hitstop and slow motion dilate it for
+free. Play mode draws collider wireframes when the editor's collider toggle is on.
+
+**3D is the exception, and the reason this section exists.** `engine_search` searches
+`@pix3/runtime/src/**` and Rapier does not live there — the editor wires it and exposes it to
+project scripts through the runtime import map. So searching `rigidbody`, then `physics`, then
+`rapier`, and getting back only comment mentions is **not** evidence the engine has no 3D physics:
+one session read it that way and hand-wrote a 505-line box solver. A project script imports it like
+`@pix3/runtime` or `three`:
 
 ```ts
 import RAPIER from '@dimforge/rapier3d-compat';
@@ -168,11 +199,11 @@ const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
 
 It is lazy-loaded — the editor fetches the wasm only once a compiled bundle mentions the module,
 so the import costs nothing until you write it — and the single-file playable export vendors it,
-so a game built on it still exports. Use it for **3D rigid-body work only**: 2D games stay on the
-engine's own collision (`Collision2DService`, the hitbox behaviours), which the editor and the
-verification tools already understand. Physics state is opaque to the editor by design; a game that
-wants collider wireframes registers them through the runtime's physics-debug hook
-(`registerPhysicsDebugSource`, alongside `registerGameDebug`).
+so a game built on it still exports. Use it for **3D rigid-body work only** — a 2D game that
+reaches for Rapier is paying ~2 MB of wasm for something the engine already does natively. Rapier's
+state is opaque to the editor by design; a game built on it registers collider wireframes through
+the runtime's physics-debug hook (`registerPhysicsDebugSource`, alongside `registerGameDebug`),
+which `core:Collider2D` does for you.
 
 ## 5. Art comes last, and placeholders come first
 

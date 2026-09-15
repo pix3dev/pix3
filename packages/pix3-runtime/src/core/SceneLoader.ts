@@ -1169,12 +1169,21 @@ export class SceneLoader {
       }
       case 'Node2D': {
         const props = baseProps.properties as Node2DProperties;
+        // `SceneSaver` writes a 2D node's placement ONLY inside `properties.transform`.
+        // Reading just the flat keys here (the one 2D branch that used to) meant a plain
+        // `Node2D` survived its first load and was then silently reset to the origin by the
+        // first save/load round trip — reopening the scene, entering play mode, or
+        // instantiating it as a prefab. Every sibling 2D branch reads `transform` first;
+        // this one has to as well.
+        const record = baseProps.properties as Record<string, unknown>;
+        const transform = this.asRecord(record.transform);
+        const rotation = transform?.rotation ?? props.rotation;
         return new Node2D({
           ...baseProps,
-          position: this.readVector2(props.position, ZERO_VECTOR2),
-          scale: this.readVector2(props.scale, UNIT_VECTOR2),
-          rotation: props.rotation ?? 0,
-          layout: this.parseNode2DLayout(baseProps.properties as Record<string, unknown>),
+          position: this.readVector2(transform?.position ?? props.position, ZERO_VECTOR2),
+          scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
+          rotation: typeof rotation === 'number' ? rotation : 0,
+          layout: this.parseNode2DLayout(record),
           opacity: this.asNumber(props.opacity, undefined),
         });
       }

@@ -184,6 +184,13 @@ export function resolveEnginePath(
  * details are deliberate: the note rides *alongside* whatever matches exist rather than replacing
  * them, and it fires on the **query**, not on the match count — the failure above did get hits
  * (comment mentions), so "zero matches" would have been too narrow a trigger.
+ *
+ * A note is a claim about the tree, so it goes stale the moment the tree grows. This one did: the
+ * 2D solver later landed *inside* the package, and until it was rewritten the note still said
+ * rigid-body physics was absent and sent 2D games to the query-only collision tier — steering
+ * every top-down physics game (carrom, pool, air hockey, pinball) straight into the hand-written
+ * solver it exists to prevent. The search is literal, so the natural-language query that finds
+ * nothing is exactly the query that gets only this note: it has to be right on its own.
  */
 export interface OffPackageTopic {
   id: string;
@@ -196,19 +203,25 @@ export const OFF_PACKAGE_TOPICS: readonly OffPackageTopic[] = [
   {
     id: 'rapier-physics',
     // `gravity` is deliberately absent: Particles3D has its own, so it would fire as pure noise.
-    pattern: /rigid.?bod|\bphysics\b|\brapier\b|\bcollider|\bsolver\b/i,
+    // `friction` / `restitution` are safe to add — nothing outside the physics files uses either.
+    pattern: /rigid.?bod|\bphysics\b|\brapier\b|\bcollider|\bsolver\b|\brestitution\b|\bfriction\b/i,
     note:
-      'Rigid-body physics is NOT in `@pix3/runtime/src`, so this search cannot see it — an empty ' +
-      'or comment-only result here is not evidence the engine has none. Rapier ships inside the ' +
-      'editor and reaches project scripts through the runtime import map: ' +
-      "`import RAPIER from '@dimforge/rapier3d-compat'`, then `await RAPIER.init()` (a resolved " +
-      'stub in the editor, real init in an export) and ' +
+      '**2D rigid-body physics IS in this package** and this search can see it — look for ' +
+      '`core:PhysicsBody2D` + `core:Collider2D` (authored together on one node, Unity-style) and ' +
+      'the `scene.physics2d` script API (`setGravity`, `getBody` → `applyImpulse` / `setVelocity` ' +
+      '/ `teleport`, `raycast`, `overlapCircle`, `moveAndSlide`). It is a real solver: circles and ' +
+      'polygons, static / kinematic / dynamic bodies, restitution, friction, linear damping, ' +
+      'sensors with enter/exit signals, sleeping and CCD. A top-down game sets gravity to (0, 0). ' +
+      'Do NOT hand-write a 2D solver, and do NOT settle for `Collision2DService` / `core:Hitbox2D` ' +
+      'when you need collision RESPONSE — that tier only answers "is anything here?" and has no ' +
+      'impulses. **3D** rigid bodies are the exception this note originally existed for: Rapier ' +
+      'does not live in `@pix3/runtime/src`, so an empty result for a 3D physics query is not ' +
+      'evidence the engine has none. It ships inside the editor and reaches project scripts ' +
+      "through the runtime import map: `import RAPIER from '@dimforge/rapier3d-compat'`, then " +
+      '`await RAPIER.init()` (a resolved stub in the editor, real init in an export) and ' +
       '`new RAPIER.World({ x: 0, y: -9.81, z: 0 })`. It is lazy-loaded (nothing downloads until a ' +
       'compiled bundle mentions the module) and the single-file playable export vendors it, so a ' +
-      'game built on it still exports. Use it for 3D rigid bodies only: 2D games stay on the ' +
-      "engine's own `Collision2DService` + the `core:Hitbox2D` behaviour, which the editor and the " +
-      'verification tools already understand. Do NOT hand-write a solver. Full detail: ' +
-      "read_skill('game-prototype', 'Rapier').",
+      "game built on it still exports. Full detail: read_skill('game-prototype', 'Physics').",
   },
 ];
 

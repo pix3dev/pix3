@@ -1,0 +1,1000 @@
+version: 1.0.0
+metadata:
+  author: Pix3 Agent
+  description: >-
+    Carrom prototype. Board, cushions, pockets, striker, aim guide and the HUD.
+    Every coordinate here is mirrored by scripts/carrom-geometry.ts and by the
+    baked board art; if the three ever disagree, this file is the one that is
+    wrong. Board space == 2D world space (the board is centred on the root).
+root:
+  - id: game-root
+    type: Group2D
+    name: GameRoot
+    properties:
+      width: 1080
+      height: 1920
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    components:
+      - id: physics-world
+        type: core:PhysicsWorld2D
+        enabled: true
+        config:
+          gravityX: 0
+          gravityY: 0
+      - id: game-controller
+        type: user:GameController
+        enabled: true
+        config:
+          aiEnabled: true
+          aiDifficulty: 0.6
+          aiThinkSec: 0.9
+          hitstopMs: 40
+          settleHoldSec: 0.35
+          settleTimeoutSec: 8
+          decelPxPerSec2: 220
+          stopSnapSpeed: 6
+          bannerSec: 0.9
+      - id: shot-input
+        type: user:ShotInput
+        enabled: true
+      - id: carrom-ai
+        type: user:CarromAI
+        enabled: true
+        config:
+          aimJitterDegrees: 2.5
+          fallbackPower: 0.45
+    children:
+      - id: camera-2d
+        type: Camera2D
+        name: Camera2D
+        properties:
+          priority: 10
+          zoom: 1
+          shakeAmplitude: 6
+          shakeFrequency: 26
+          shakeDuration: 0.2
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: board
+        type: Group2D
+        name: Board
+        properties:
+          width: 1000
+          height: 1000
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: board-art
+            type: Sprite2D
+            name: BoardArt
+            properties:
+              texture:
+                type: texture
+                url: res://sprites/board.jpg
+              width: 1000
+              height: 1000
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: cushions
+            type: Group2D
+            name: Cushions
+            properties:
+              width: 1000
+              height: 1000
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: cushion-top
+                type: Group2D
+                name: CushionTop
+                properties:
+                  width: 1000
+                  height: 80
+                  transform:
+                    position: [0, 480]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: cushion-top-shape
+                    type: core:Collider2D
+                    enabled: true
+                    config:
+                      shape: rect
+                      width: 1000
+                      height: 80
+                      offsetX: 0
+                      offsetY: 0
+                      friction: 0.1
+                      restitution: 0.78
+                      density: 1
+                      sensor: false
+                      group: cushion
+                children: []
+              - id: cushion-bottom
+                type: Group2D
+                name: CushionBottom
+                properties:
+                  width: 1000
+                  height: 80
+                  transform:
+                    position: [0, -480]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: cushion-bottom-shape
+                    type: core:Collider2D
+                    enabled: true
+                    config:
+                      shape: rect
+                      width: 1000
+                      height: 80
+                      offsetX: 0
+                      offsetY: 0
+                      friction: 0.1
+                      restitution: 0.78
+                      density: 1
+                      sensor: false
+                      group: cushion
+                children: []
+              - id: cushion-left
+                type: Group2D
+                name: CushionLeft
+                properties:
+                  width: 80
+                  height: 1000
+                  transform:
+                    position: [-480, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: cushion-left-shape
+                    type: core:Collider2D
+                    enabled: true
+                    config:
+                      shape: rect
+                      width: 80
+                      height: 1000
+                      offsetX: 0
+                      offsetY: 0
+                      friction: 0.1
+                      restitution: 0.78
+                      density: 1
+                      sensor: false
+                      group: cushion
+                children: []
+              - id: cushion-right
+                type: Group2D
+                name: CushionRight
+                properties:
+                  width: 80
+                  height: 1000
+                  transform:
+                    position: [480, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                components:
+                  - id: cushion-right-shape
+                    type: core:Collider2D
+                    enabled: true
+                    config:
+                      shape: rect
+                      width: 80
+                      height: 1000
+                      offsetX: 0
+                      offsetY: 0
+                      friction: 0.1
+                      restitution: 0.78
+                      density: 1
+                      sensor: false
+                      group: cushion
+                children: []
+          - id: pockets
+            type: Group2D
+            name: Pockets
+            properties:
+              width: 880
+              height: 880
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: pocket-tl
+                type: Group2D
+                name: PocketTL
+                properties:
+                  width: 64
+                  height: 64
+                  transform:
+                    position: [-408, 408]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: pocket-tr
+                type: Group2D
+                name: PocketTR
+                properties:
+                  width: 64
+                  height: 64
+                  transform:
+                    position: [408, 408]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: pocket-bl
+                type: Group2D
+                name: PocketBL
+                properties:
+                  width: 64
+                  height: 64
+                  transform:
+                    position: [-408, -408]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: pocket-br
+                type: Group2D
+                name: PocketBR
+                properties:
+                  width: 64
+                  height: 64
+                  transform:
+                    position: [408, -408]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: pieces
+            type: Group2D
+            name: Pieces
+            properties:
+              width: 880
+              height: 880
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: trail
+            type: Group2D
+            name: Trail
+            properties:
+              width: 52
+              height: 52
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: trail-ghost-0
+                type: Sprite2D
+                name: Ghost0
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/striker.png
+                  width: 52
+                  height: 52
+                  opacity: 0
+                  blendMode: additive
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trail-ghost-1
+                type: Sprite2D
+                name: Ghost1
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/striker.png
+                  width: 52
+                  height: 52
+                  opacity: 0
+                  blendMode: additive
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trail-ghost-2
+                type: Sprite2D
+                name: Ghost2
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/striker.png
+                  width: 52
+                  height: 52
+                  opacity: 0
+                  blendMode: additive
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trail-ghost-3
+                type: Sprite2D
+                name: Ghost3
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/striker.png
+                  width: 52
+                  height: 52
+                  opacity: 0
+                  blendMode: additive
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trail-ghost-4
+                type: Sprite2D
+                name: Ghost4
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/striker.png
+                  width: 52
+                  height: 52
+                  opacity: 0
+                  blendMode: additive
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trail-ghost-5
+                type: Sprite2D
+                name: Ghost5
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/striker.png
+                  width: 52
+                  height: 52
+                  opacity: 0
+                  blendMode: additive
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trail-ghost-6
+                type: Sprite2D
+                name: Ghost6
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/striker.png
+                  width: 52
+                  height: 52
+                  opacity: 0
+                  blendMode: additive
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: trail-ghost-7
+                type: Sprite2D
+                name: Ghost7
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/striker.png
+                  width: 52
+                  height: 52
+                  opacity: 0
+                  blendMode: additive
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+          - id: striker
+            type: Sprite2D
+            name: Striker
+            properties:
+              texture:
+                type: texture
+                url: res://sprites/striker.png
+              width: 52
+              height: 52
+              transform:
+                position: [0, -346]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: striker-body
+                type: core:PhysicsBody2D
+                enabled: true
+                config:
+                  bodyType: dynamic
+                  gravityScale: 0
+                  mass: 2.4
+                  linearDamping: 0.6
+                  angularDamping: 0.05
+                  fixedRotation: true
+                  bullet: true
+                  canSleep: true
+                  emitContacts: true
+              - id: striker-shape
+                type: core:Collider2D
+                enabled: true
+                config:
+                  shape: circle
+                  radius: 26
+                  offsetX: 0
+                  offsetY: 0
+                  friction: 0.05
+                  restitution: 0.78
+                  density: 1
+                  sensor: false
+                  group: striker
+              - id: striker-disc
+                type: user:Disc
+                enabled: true
+                config:
+                  kind: striker
+              - id: striker-trail
+                type: user:StrikerTrail
+                enabled: true
+            children: []
+          - id: aim-guide
+            type: Group2D
+            name: AimGuide
+            properties:
+              width: 880
+              height: 880
+              visible: false
+              zIndex: 10
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: aim-guide-script
+                type: user:AimGuide
+                enabled: true
+            children:
+              - id: guide-dot-0
+                type: Sprite2D
+                name: Dot0
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-1
+                type: Sprite2D
+                name: Dot1
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-2
+                type: Sprite2D
+                name: Dot2
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-3
+                type: Sprite2D
+                name: Dot3
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-4
+                type: Sprite2D
+                name: Dot4
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-5
+                type: Sprite2D
+                name: Dot5
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-6
+                type: Sprite2D
+                name: Dot6
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-7
+                type: Sprite2D
+                name: Dot7
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-8
+                type: Sprite2D
+                name: Dot8
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-9
+                type: Sprite2D
+                name: Dot9
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-10
+                type: Sprite2D
+                name: Dot10
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-dot-11
+                type: Sprite2D
+                name: Dot11
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/dot.png
+                  width: 12
+                  height: 12
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-band
+                type: ColorRect2D
+                name: RubberBand
+                properties:
+                  width: 6
+                  height: 100
+                  color: "#f43f5e"
+                  opacity: 0.7
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-ghost
+                type: Sprite2D
+                name: Ghost
+                properties:
+                  texture:
+                    type: texture
+                    url: res://sprites/striker_ring.png
+                  width: 52
+                  height: 52
+                  opacity: 0.4
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+              - id: guide-deflect
+                type: ColorRect2D
+                name: Deflect
+                properties:
+                  width: 4
+                  height: 80
+                  color: "#ffffff"
+                  opacity: 0.6
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []
+  - id: hud-root
+    type: CanvasLayer2D
+    name: HUD
+    properties:
+      width: 1080
+      height: 1920
+      layout:
+        enabled: true
+        horizontalAlign: stretch
+        verticalAlign: stretch
+      transform:
+        position: [0, 0]
+        scale: [1, 1]
+        rotation: 0
+    children:
+      - id: hud-top-panel
+        type: ColorRect2D
+        name: TopPanel
+        properties:
+          width: 1080
+          height: 300
+          color: "#14100d"
+          opacity: 0.85
+          transform:
+            position: [0, 810]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: hud-opponent-name
+        type: Label2D
+        name: OpponentName
+        properties:
+          label: "OPPONENT · BLACK"
+          labelFontSize: 40
+          labelColor: "#cfc6b8"
+          labelAlign: center
+          transform:
+            position: [-270, 870]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: hud-opponent-left
+        type: Label2D
+        name: OpponentLeft
+        properties:
+          label: "9 left"
+          labelFontSize: 64
+          labelColor: "#ffffff"
+          labelAlign: center
+          transform:
+            position: [-270, 800]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: hud-opponent-left-punch
+            type: core:PunchScale
+            enabled: true
+            config:
+              amount: 0.3
+              duration: 0.35
+              vibrato: 3
+              triggerEvent: bump
+              playOnStart: false
+        children: []
+      - id: hud-player-name
+        type: Label2D
+        name: PlayerName
+        properties:
+          label: "YOU · WHITE"
+          labelFontSize: 40
+          labelColor: "#cfc6b8"
+          labelAlign: center
+          transform:
+            position: [270, 870]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: hud-player-left
+        type: Label2D
+        name: PlayerLeft
+        properties:
+          label: "9 left"
+          labelFontSize: 64
+          labelColor: "#ffffff"
+          labelAlign: center
+          transform:
+            position: [270, 800]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: hud-player-left-punch
+            type: core:PunchScale
+            enabled: true
+            config:
+              amount: 0.3
+              duration: 0.35
+              vibrato: 3
+              triggerEvent: bump
+              playOnStart: false
+        children: []
+      - id: hud-queen-status
+        type: Label2D
+        name: QueenStatus
+        properties:
+          label: "Queen: on board"
+          labelFontSize: 34
+          labelColor: "#f5ae39"
+          labelAlign: center
+          transform:
+            position: [0, 720]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: hud-turn-banner
+        type: Label2D
+        name: TurnBanner
+        properties:
+          label: "YOUR TURN"
+          labelFontSize: 72
+          labelColor: "#ffffff"
+          labelAlign: center
+          glowColor: "#f5ae39"
+          glowStrength: 2
+          transform:
+            position: [0, 610]
+            scale: [1, 1]
+            rotation: 0
+        components:
+          - id: hud-turn-banner-popin
+            type: core:PopIn
+            enabled: true
+            config:
+              from: 0
+              duration: 0.4
+              easing: backOut
+              triggerEvent: show
+              playOnStart: false
+        children: []
+      - id: hud-toast
+        type: Label2D
+        name: Toast
+        properties:
+          label: ""
+          labelFontSize: 40
+          labelColor: "#ff6a5a"
+          labelAlign: center
+          outlineColor: "#000000"
+          outlineWidth: 3
+          transform:
+            position: [0, -600]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: hud-power-bar
+        type: Bar2D
+        name: PowerBar
+        properties:
+          width: 600
+          height: 22
+          value: 0
+          minValue: 0
+          maxValue: 1
+          barColor: "#f43f5e"
+          backBackgroundColor: "#2a2320"
+          visible: false
+          transform:
+            position: [0, -680]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: hud-help
+        type: Label2D
+        name: HelpLabel
+        properties:
+          label: "Drag the striker to place it · pull back anywhere to aim · release to shoot"
+          labelFontSize: 28
+          labelColor: "#9a8f82"
+          labelAlign: center
+          transform:
+            position: [0, -740]
+            scale: [1, 1]
+            rotation: 0
+        children: []
+      - id: hud-restart-button
+        type: Button2D
+        name: RestartButton
+        properties:
+          width: 300
+          height: 90
+          backgroundColor: "#3b2d24"
+          hoverColor: "#4a3a2f"
+          pressedColor: "#2b1f18"
+          transform:
+            position: [0, -850]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: hud-restart-label
+            type: Label2D
+            name: RestartLabel
+            properties:
+              label: "Restart"
+              labelFontSize: 40
+              labelColor: "#ffffff"
+              labelAlign: center
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+      - id: hud-end-overlay
+        type: Group2D
+        name: EndOverlay
+        properties:
+          width: 1080
+          height: 1920
+          visible: false
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+        children:
+          - id: end-dim
+            type: ColorRect2D
+            name: Dim
+            properties:
+              width: 1080
+              height: 1920
+              color: "#000000"
+              opacity: 0.6
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: end-panel
+            type: ColorRect2D
+            name: Panel
+            properties:
+              width: 820
+              height: 560
+              color: "#1b1410"
+              opacity: 0.95
+              transform:
+                position: [0, 0]
+                scale: [1, 1]
+                rotation: 0
+            components:
+              - id: end-panel-popin
+                type: core:PopIn
+                enabled: true
+                config:
+                  from: 0
+                  duration: 0.4
+                  easing: backOut
+                  triggerEvent: show
+                  playOnStart: true
+            children: []
+          - id: end-result-label
+            type: Label2D
+            name: ResultLabel
+            properties:
+              label: "YOU WIN"
+              labelFontSize: 96
+              labelColor: "#ffffff"
+              labelAlign: center
+              glowColor: "#f5ae39"
+              glowStrength: 2
+              transform:
+                position: [0, 140]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: end-score-label
+            type: Label2D
+            name: ScoreLabel
+            properties:
+              label: "Score 0"
+              labelFontSize: 48
+              labelColor: "#cfc6b8"
+              labelAlign: center
+              transform:
+                position: [0, 20]
+                scale: [1, 1]
+                rotation: 0
+            children: []
+          - id: end-play-again-button
+            type: Button2D
+            name: PlayAgainButton
+            properties:
+              width: 360
+              height: 110
+              backgroundColor: "#3b2d24"
+              hoverColor: "#4a3a2f"
+              pressedColor: "#2b1f18"
+              transform:
+                position: [0, -150]
+                scale: [1, 1]
+                rotation: 0
+            children:
+              - id: end-play-again-label
+                type: Label2D
+                name: PlayAgainLabel
+                properties:
+                  label: "Play again"
+                  labelFontSize: 44
+                  labelColor: "#ffffff"
+                  labelAlign: center
+                  transform:
+                    position: [0, 0]
+                    scale: [1, 1]
+                    rotation: 0
+                children: []

@@ -1,0 +1,16 @@
+version: 1.0.0
+viewportBaseSize:
+  width: 1080
+  height: 1920
+ambientOcclusion: "off"
+textureFiltering: linear
+projectType: 2d
+targetPlatform: mobile
+quality:
+  antialias: true
+  shadows: false
+  maxPixelRatio: 3
+metadata:
+  projectName: Carrom
+  templateId: empty-2d
+autoloads: []

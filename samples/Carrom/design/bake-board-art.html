@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Carrom art bake</title>
+<style>
+  body { background:#14100d; color:#cfc6b8; font:14px system-ui,sans-serif; margin:0; padding:24px; }
+  h1 { font-size:18px; font-weight:700; color:#f5ae39; margin:0 0 4px; }
+  p  { margin:0 0 20px; color:#9a8f82; }
+  .row { display:flex; flex-wrap:wrap; gap:20px; align-items:flex-start; }
+  figure { margin:0; }
+  figcaption { margin-top:6px; font-size:12px; color:#9a8f82; }
+  canvas { background:#242020; border:1px solid #3a322b; }
+  button { background:#3b2d24; color:#fff; border:1px solid #5a463a; border-radius:6px;
+           padding:8px 14px; font:inherit; cursor:pointer; }
+  button:hover { background:#4a3a2f; }
+</style>
+</head>
+<body>
+<h1>Carrom art bake</h1>
+<p>Every number below is the same constant the physics uses (see <code>.plans/carrom-prototype.md</code> section 3).
+   Board space is y-up; the canvas transform flips it, so the code reads exactly like the spec table.</p>
+<div class="row" id="out"></div>
+<p style="margin-top:20px"><button id="dl">Download all PNGs</button></p>
+
+<script>
+// ---------------------------------------------------------------- constants
+// Board geometry, design px, origin = board centre, +y up. Spec section 3.
+const BOARD_HALF    = 500;   // wood frame outer edge
+const FIELD_HALF    = 440;   // cushion face (playfield inner square)
+const POCKET_R      = 32;    // drawn hole radius
+const POCKET_C      = 408;   // pocket centre offset on both axes
+const BASE_FRONT    = 330;   // baseline nearer the centre
+const BASE_REAR     = 362;   // baseline nearer the player
+const BASE_MID      = 346;   // striker placement line
+const BASE_X        = 280;   // baseline half-extent / base-circle centre
+const BASE_CIRCLE_R = 19;
+const CENTRE_R      = 19;
+const RING_INNER    = 95;
+const RING_OUTER    = 170;
+const ARROW_FROM    = 150;
+const ARROW_TO      = 340;
+
+// ---------------------------------------------------------------- palette
+const CLOTH_IN = '#1e5fd6', CLOTH_MID = '#1a4fb8', CLOTH_OUT = '#132f75';
+const WOOD_HI = '#8a5a2b', WOOD_A = '#4a2a12', WOOD_B = '#2e1708', WOOD_BEVEL = '#6b3f1d';
+const LINE = 'rgba(255,255,255,0.55)';
+const RED_FILL = 'rgba(230,57,70,0.38)';
+
+const assets = {};
+
+/** Make a canvas whose drawing space is board space: origin centre, +y up. */
+function boardCanvas(sizePx, halfSpan) {
+  const c = document.createElement('canvas');
+  c.width = c.height = sizePx;
+  const g = c.getContext('2d');
+  const s = sizePx / (halfSpan * 2);
+  g.translate(sizePx / 2, sizePx / 2);
+  g.scale(s, -s);           // flip y so +y is up, like the engine
+  g.lineJoin = 'round';
+  g.lineCap = 'round';
+  return { c: c, g: g, s: s };
+}
+
+function show(name, canvas, note, mime, quality) {
+  const fig = document.createElement('figure');
+  const view = document.createElement('canvas');
+  const k = Math.min(1, 320 / canvas.width);
+  view.width = canvas.width * k;
+  view.height = canvas.height * k;
+  view.getContext('2d').drawImage(canvas, 0, 0, view.width, view.height);
+  const cap = document.createElement('figcaption');
+  cap.textContent = name + ' — ' + canvas.width + 'x' + canvas.height + (note ? ' · ' + note : '');
+  fig.appendChild(view);
+  fig.appendChild(cap);
+  document.getElementById('out').appendChild(fig);
+  // The board carries no alpha and is mostly gradient + grain, which is the
+  // worst case for PNG: the same image is 2.3 MB as PNG and ~0.2 MB as JPEG.
+  // Everything else needs transparency and stays PNG.
+  assets[name] = canvas.toDataURL(mime || 'image/png', quality === undefined ? 0.92 : quality);
+}
+
+function roundRectPath(g, x, y, w, h, r) {
+  g.beginPath();
+  g.moveTo(x + r, y);
+  g.lineTo(x + w - r, y);     g.quadraticCurveTo(x + w, y, x + w, y + r);
+  g.lineTo(x + w, y + h - r); g.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  g.lineTo(x + r, y + h);     g.quadraticCurveTo(x, y + h, x, y + h - r);
+  g.lineTo(x, y + r);         g.quadraticCurveTo(x, y, x + r, y);
+  g.closePath();
+}
+
+// ---------------------------------------------------------------- board
+function bakeBoard() {
+  const made = boardCanvas(1600, BOARD_HALF);
+  const g = made.g;
+  const px = 1 / made.s;                    // one output pixel, in board units
+
+  // --- wood frame (rounded outer corners, diagonal gradient)
+  const wood = g.createLinearGradient(-BOARD_HALF, BOARD_HALF, BOARD_HALF, -BOARD_HALF);
+  wood.addColorStop(0, WOOD_HI);
+  wood.addColorStop(0.18, WOOD_A);
+  wood.addColorStop(0.72, WOOD_B);
+  wood.addColorStop(1, '#1d0e04');
+  // Square outer corners: JPEG has no alpha, and a real board's frame is square.
+  g.beginPath();
+  g.rect(-BOARD_HALF, -BOARD_HALF, BOARD_HALF * 2, BOARD_HALF * 2);
+  g.fillStyle = wood;
+  g.fill();
+
+  // wood grain: long faint strokes across the frame
+  g.save();
+  g.clip();
+  for (let i = 0; i < 220; i++) {
+    const light = Math.random() > 0.5;
+    g.strokeStyle = 'rgba(' + (light ? '255,214,160' : '20,9,2') + ',' + (0.018 + Math.random() * 0.045) + ')';
+    g.lineWidth = (0.6 + Math.random() * 2.4) * px * 2;
+    const y = -BOARD_HALF + Math.random() * BOARD_HALF * 2;
+    g.beginPath();
+    g.moveTo(-BOARD_HALF, y);
+    g.bezierCurveTo(-150, y + (Math.random() - 0.5) * 14, 150, y + (Math.random() - 0.5) * 14, BOARD_HALF, y + (Math.random() - 0.5) * 8);
+    g.stroke();
+  }
+  g.restore();
+
+  // --- bevel: the frame's inner lip catching light from the top-left
+  g.save();
+  g.strokeStyle = WOOD_BEVEL;
+  g.lineWidth = 6;
+  g.strokeRect(-FIELD_HALF - 3, -FIELD_HALF - 3, (FIELD_HALF + 3) * 2, (FIELD_HALF + 3) * 2);
+  const lip = g.createLinearGradient(-FIELD_HALF, FIELD_HALF, FIELD_HALF, -FIELD_HALF);
+  lip.addColorStop(0, 'rgba(255,215,160,0.55)');
+  lip.addColorStop(0.5, 'rgba(255,215,160,0.06)');
+  lip.addColorStop(1, 'rgba(0,0,0,0.45)');
+  g.strokeStyle = lip;
+  g.lineWidth = 2.5;
+  g.strokeRect(-FIELD_HALF - 1.2, -FIELD_HALF - 1.2, (FIELD_HALF + 1.2) * 2, (FIELD_HALF + 1.2) * 2);
+  g.restore();
+
+  // --- cloth (the blue playing surface)
+  g.save();
+  g.beginPath();
+  g.rect(-FIELD_HALF, -FIELD_HALF, FIELD_HALF * 2, FIELD_HALF * 2);
+  g.clip();
+  const cloth = g.createRadialGradient(-90, 140, 40, 0, 0, FIELD_HALF * 1.5);
+  cloth.addColorStop(0, CLOTH_IN);
+  cloth.addColorStop(0.55, CLOTH_MID);
+  cloth.addColorStop(1, CLOTH_OUT);
+  g.fillStyle = cloth;
+  g.fillRect(-FIELD_HALF, -FIELD_HALF, FIELD_HALF * 2, FIELD_HALF * 2);
+
+  // Cloth grain. Deliberately COARSE and low-contrast: per-pixel speckle looks
+  // the same on screen but is incompressible - it took board.png to 3.5 MB,
+  // which a single-file playable export cannot carry.
+  for (let i = 0; i < 2600; i++) {
+    const x = -FIELD_HALF + Math.random() * FIELD_HALF * 2;
+    const y = -FIELD_HALF + Math.random() * FIELD_HALF * 2;
+    g.fillStyle = Math.random() > 0.5 ? 'rgba(255,255,255,0.028)' : 'rgba(0,0,20,0.04)';
+    g.fillRect(x, y, 3, 3);
+  }
+  // inner shadow: the frame casts onto the cloth
+  const vign = g.createLinearGradient(0, FIELD_HALF, 0, -FIELD_HALF);
+  vign.addColorStop(0, 'rgba(0,0,0,0.30)');
+  vign.addColorStop(0.16, 'rgba(0,0,0,0)');
+  vign.addColorStop(0.84, 'rgba(0,0,0,0)');
+  vign.addColorStop(1, 'rgba(0,0,0,0.18)');
+  g.fillStyle = vign;
+  g.fillRect(-FIELD_HALF, -FIELD_HALF, FIELD_HALF * 2, FIELD_HALF * 2);
+  const vign2 = g.createLinearGradient(-FIELD_HALF, 0, FIELD_HALF, 0);
+  vign2.addColorStop(0, 'rgba(0,0,0,0.26)');
+  vign2.addColorStop(0.16, 'rgba(0,0,0,0)');
+  vign2.addColorStop(0.84, 'rgba(0,0,0,0)');
+  vign2.addColorStop(1, 'rgba(0,0,0,0.26)');
+  g.fillStyle = vign2;
+  g.fillRect(-FIELD_HALF, -FIELD_HALF, FIELD_HALF * 2, FIELD_HALF * 2);
+  g.restore();
+
+  // --- line work
+  g.strokeStyle = LINE;
+
+  // centre: red spot + two rings
+  g.lineWidth = 2.5;
+  g.beginPath(); g.arc(0, 0, RING_OUTER, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.arc(0, 0, RING_INNER, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.arc(0, 0, CENTRE_R, 0, Math.PI * 2);
+  g.fillStyle = RED_FILL; g.fill(); g.stroke();
+
+  // corner arrows, pointing inward from each pocket
+  g.lineWidth = 3;
+  const signs = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
+  for (let i = 0; i < signs.length; i++) {
+    const sx = signs[i][0], sy = signs[i][1];
+    const fx = ARROW_FROM * sx, fy = ARROW_FROM * sy;
+    const tx = ARROW_TO * sx,   ty = ARROW_TO * sy;
+    g.beginPath(); g.moveTo(fx, fy); g.lineTo(tx, ty); g.stroke();
+    // arrowhead at the centre-facing end, as on a real board
+    const a = Math.atan2(fy - ty, fx - tx), head = 26, spread = 0.42;
+    g.beginPath();
+    g.moveTo(fx, fy);
+    g.lineTo(fx - Math.cos(a - spread) * head, fy - Math.sin(a - spread) * head);
+    g.moveTo(fx, fy);
+    g.lineTo(fx - Math.cos(a + spread) * head, fy - Math.sin(a + spread) * head);
+    g.stroke();
+  }
+
+  // the four baselines: a double line ending in a red base circle at each end
+  for (let side = 0; side < 4; side++) {
+    g.save();
+    g.rotate((side * Math.PI) / 2);        // 0 = bottom (human), then quarter turns
+    g.lineWidth = 3;
+    g.strokeStyle = LINE;
+    const ys = [-BASE_FRONT, -BASE_REAR];
+    for (let k = 0; k < ys.length; k++) {
+      g.beginPath(); g.moveTo(-BASE_X, ys[k]); g.lineTo(BASE_X, ys[k]); g.stroke();
+    }
+    const xs = [-BASE_X, BASE_X];
+    for (let k = 0; k < xs.length; k++) {
+      g.beginPath(); g.arc(xs[k], -BASE_MID, BASE_CIRCLE_R, 0, Math.PI * 2);
+      g.fillStyle = RED_FILL; g.fill();
+      g.strokeStyle = LINE; g.stroke();
+    }
+    g.restore();
+  }
+
+  // --- pockets, drawn last so they cut through the line work
+  for (let i = 0; i < signs.length; i++) {
+    const x = POCKET_C * signs[i][0], y = POCKET_C * signs[i][1];
+    // shadow the cloth around the rim
+    const halo = g.createRadialGradient(x, y, POCKET_R * 0.8, x, y, POCKET_R * 1.9);
+    halo.addColorStop(0, 'rgba(0,0,0,0.5)');
+    halo.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = halo;
+    g.beginPath(); g.arc(x, y, POCKET_R * 1.9, 0, Math.PI * 2); g.fill();
+    // the hole: deep, with a lit far wall so it reads as a cup, not a sticker
+    const hole = g.createRadialGradient(x - POCKET_R * 0.3, y + POCKET_R * 0.3, 1, x, y, POCKET_R);
+    hole.addColorStop(0, '#020409');
+    hole.addColorStop(0.72, '#07090f');
+    hole.addColorStop(1, '#141a25');
+    g.fillStyle = hole;
+    g.beginPath(); g.arc(x, y, POCKET_R, 0, Math.PI * 2); g.fill();
+    // metal rim
+    const rim = g.createLinearGradient(x - POCKET_R, y + POCKET_R, x + POCKET_R, y - POCKET_R);
+    rim.addColorStop(0, '#d5dae2');
+    rim.addColorStop(0.5, '#8e99a8');
+    rim.addColorStop(1, '#4d5663');
+    g.strokeStyle = rim;
+    g.lineWidth = 4;
+    g.beginPath(); g.arc(x, y, POCKET_R + 2, 0, Math.PI * 2); g.stroke();
+  }
+
+  show('board.jpg', made.c, 'Sprite2D 1000x1000 at 1.6x', 'image/jpeg', 0.92);
+}
+
+// ---------------------------------------------------------------- discs
+/** A turned wooden disc: bevelled rim, offset highlight, concentric rings. */
+function bakeDisc(name, body, edge, ring, opts) {
+  opts = opts || {};
+  const made = boardCanvas(128, 64);
+  const g = made.g;
+  const R = 60;
+  // contact shadow, so a man reads as sitting ON the cloth
+  const sh = g.createRadialGradient(1.5, -2, R * 0.6, 1.5, -2, R * 1.05);
+  sh.addColorStop(0, 'rgba(0,0,0,0.42)');
+  sh.addColorStop(1, 'rgba(0,0,0,0)');
+  g.fillStyle = sh;
+  g.beginPath(); g.arc(1.5, -2, R * 1.05, 0, Math.PI * 2); g.fill();
+
+  const face = g.createRadialGradient(-R * 0.34, R * 0.34, R * 0.06, 0, 0, R);
+  face.addColorStop(0, opts.hi || '#ffffff');
+  face.addColorStop(0.45, body);
+  face.addColorStop(1, edge);
+  g.fillStyle = face;
+  g.beginPath(); g.arc(0, 0, R, 0, Math.PI * 2); g.fill();
+
+  g.strokeStyle = edge;
+  g.lineWidth = R * 0.1;
+  g.beginPath(); g.arc(0, 0, R - R * 0.05, 0, Math.PI * 2); g.stroke();
+  if (opts.rimColor) {
+    g.strokeStyle = opts.rimColor;
+    g.lineWidth = R * 0.09;
+    g.beginPath(); g.arc(0, 0, R - R * 0.05, 0, Math.PI * 2); g.stroke();
+  }
+  g.strokeStyle = ring;
+  g.lineWidth = R * 0.045;
+  g.beginPath(); g.arc(0, 0, R * 0.66, 0, Math.PI * 2); g.stroke();
+  g.beginPath(); g.arc(0, 0, R * 0.42, 0, Math.PI * 2); g.stroke();
+
+  if (opts.hub) {
+    g.fillStyle = opts.hub;
+    g.beginPath(); g.arc(0, 0, R * 0.17, 0, Math.PI * 2); g.fill();
+  }
+
+  // specular arc on the upper-left rim. Dark bodies need far less of it:
+  // at 0.5 alpha a black disc reads as scratched rather than polished.
+  g.strokeStyle = 'rgba(255,255,255,' + (opts.spec === undefined ? 0.5 : opts.spec) + ')';
+  g.lineWidth = R * 0.05;
+  g.beginPath(); g.arc(0, 0, R * 0.86, Math.PI * 0.45, Math.PI * 0.95); g.stroke();
+
+  show(name, made.c, opts.note || '');
+}
+
+// ---------------------------------------------------------------- guide bits
+function bakeRing() {                       // ghost striker outline for the aim preview
+  const made = boardCanvas(128, 64);
+  const g = made.g;
+  g.strokeStyle = '#e8f6ff';
+  g.lineWidth = 5;
+  g.setLineDash([12, 9]);
+  g.beginPath(); g.arc(0, 0, 55, 0, Math.PI * 2); g.stroke();
+  show('striker_ring.png', made.c, 'aim ghost');
+}
+
+function bakeDot() {                        // trajectory dot
+  const made = boardCanvas(32, 16);
+  const g = made.g;
+  const grad = g.createRadialGradient(0, 0, 0, 0, 0, 14);
+  grad.addColorStop(0, '#ffffff');
+  grad.addColorStop(0.45, '#ffffff');
+  grad.addColorStop(0.75, 'rgba(255,255,255,0.55)');
+  grad.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grad;
+  g.beginPath(); g.arc(0, 0, 14, 0, Math.PI * 2); g.fill();
+  show('dot.png', made.c, 'tinted per sprite');
+}
+
+// ---------------------------------------------------------------- run
+bakeBoard();
+bakeDisc('man_white.png', '#f3e9d2', '#b89a6a', '#c9b283', { hi: '#fffdf6' });
+bakeDisc('man_black.png', '#2b2724', '#4a423b', '#7d7066', { hi: '#5f564e', spec: 0.18 });
+bakeDisc('queen.png',     '#c8202f', '#8c1520', '#f5ae39', { hi: '#f2717a', hub: '#ffd166' });
+bakeDisc('striker.png',   '#f7f3ea', '#c9c2b4', '#0ea5e9', { hi: '#ffffff', rimColor: '#0284c7', hub: '#0284c7' });
+bakeRing();
+bakeDot();
+
+window.__CARROM_ART__ = assets;
+
+document.getElementById('dl').addEventListener('click', function () {
+  const names = Object.keys(assets);
+  for (let i = 0; i < names.length; i++) {
+    const a = document.createElement('a');
+    a.href = assets[names[i]];
+    a.download = names[i];
+    a.click();
+  }
+});
+</script>
+</body>
+</html>
