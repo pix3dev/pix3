@@ -37,6 +37,7 @@ describe('bridge HTTP surface', () => {
   let child: ChildProcessByStdio<null, Readable, Readable>;
   let base = '';
   let token = '';
+  let mcpToken = '';
   let output = '';
 
   before(async () => {
@@ -49,6 +50,9 @@ describe('bridge HTTP surface', () => {
         HOME: home,
         USERPROFILE: home,
         PIX3_BRIDGE_STALL_TIMEOUT_MS: String(STALL_TIMEOUT_MS),
+        // Detection for the Antigravity lane spawns a real `agy`, which a hermetic HTTP test must
+        // not do — and would make these assertions depend on whatever is installed on the machine.
+        PIX3_AGY_DISABLED: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -70,8 +74,9 @@ describe('bridge HTTP surface', () => {
     }
     const config = JSON.parse(
       fs.readFileSync(path.join(home, '.pix3', 'agent-bridge.json'), 'utf8')
-    ) as { token: string };
+    ) as { token: string; mcpToken: string };
     token = config.token;
+    mcpToken = config.mcpToken;
     assert.ok(token, `bridge did not start; output:\n${output}`);
   });
 
@@ -145,6 +150,62 @@ describe('bridge HTTP surface', () => {
       stalled: 0,
       stallTimeoutMs: STALL_TIMEOUT_MS,
     });
+  });
+
+  it('lists local CLI agents in their own array, never among the proxied providers', async () => {
+    const res = await fetch(`${base}/v1/providers`, {
+      headers: { 'x-pix3-bridge-token': token },
+    });
+    const body = (await res.json()) as {
+      providers: Array<{ id: string }>;
+      agents: Array<{ id: string; kind: string; available: boolean; tools: string }>;
+    };
+    // An older editor maps an unknown `kind` in `providers` to 'openai' and would build a broken
+    // provider pointed at /providers/agy — which is exactly why this lane lives in `agents`.
+    assert.equal(body.providers.some(provider => provider.id === 'agy'), false);
+    const agy = body.agents.find(agent => agent.id === 'agy');
+    assert.ok(agy, 'the agy lane must be advertised even when it is unavailable');
+    assert.equal(agy.kind, 'agent-cli');
+    assert.equal(agy.available, false);
+    assert.equal(agy.tools, 'disabled');
+  });
+
+  it('answers /agents/agy/v1/models with a reason, not a stack trace, when agy is absent', async () => {
+    const res = await fetch(`${base}/agents/agy/v1/models`, {
+      headers: { 'x-pix3-bridge-token': token },
+    });
+    assert.equal(res.status, 503);
+    const body = (await res.json()) as { error: { message: string } };
+    assert.match(body.error.message, /disabled|not found|not available/i);
+  });
+
+  it('guards the MCP relay with its own token and refuses browsers outright', async () => {
+    const url = `${base}/agents/agy/mcp/whatever`;
+    const withoutToken = await fetch(url, { method: 'POST', body: '{"method":"tools/list"}' });
+    assert.equal(withoutToken.status, 401);
+
+    // The pairing token must NOT open the relay: they are separate secrets on purpose.
+    const wrongToken = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-pix3-mcp-token': token },
+      body: '{"method":"tools/list"}',
+    });
+    assert.equal(wrongToken.status, 401);
+
+    const fromBrowser = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-pix3-mcp-token': mcpToken, origin: 'http://localhost:8123' },
+      body: '{"method":"tools/list"}',
+    });
+    assert.equal(fromBrowser.status, 403);
+
+    // Correct token, unknown session → a plain 404 the shim turns into a JSON-RPC error.
+    const unknownSession = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-pix3-mcp-token': mcpToken },
+      body: '{"method":"tools/list"}',
+    });
+    assert.equal(unknownSession.status, 404);
   });
 
   it('keeps the unauthenticated health response unchanged', async () => {

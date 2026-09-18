@@ -7,7 +7,10 @@ It runs on `127.0.0.1` and does two things:
 
 1. **Claude Code (MAX) lane** — serves the agent from a real Claude Agent SDK session using your
    Claude Code Pro/MAX subscription (`claude login`). No API key, no per-token cost.
-2. **Provider proxy lane** — a credential-injecting reverse proxy for **OpenAI**, the **Anthropic
+2. **Antigravity (`agy`) lane** — the same thing for the [Antigravity CLI](https://antigravity.google),
+   driven as a subprocess. Also a subscription you already pay for, also $0 marginal cost. See
+   [Antigravity lane](#antigravity-agy-lane) below.
+3. **Provider proxy lane** — a credential-injecting reverse proxy for **OpenAI**, the **Anthropic
    API**, **OpenCode Zen**, and any **custom OpenAI-compatible** endpoint. The editor authenticates
    to the bridge with a pairing token; the bridge adds the real provider key and forwards the request
    to the provider. Your keys live only in `~/.pix3/agent-bridge.json`.
@@ -68,6 +71,40 @@ detects that instead of leaving the editor stuck on "the model did not respond":
   It is idempotent and closing zero sessions is a success. `GET /v1/providers` also reports
   `sessions: { total, busy, stalled, stallTimeoutMs }` so the editor can surface the state.
 
+## Antigravity (`agy`) lane
+
+If the [Antigravity CLI](https://antigravity.google) is installed and signed in, the bridge finds it
+(PATH, then `%LOCALAPPDATA%gyin` / `~/.local/bin` / `~/.agy/bin` / `/usr/local/bin` /
+`/opt/homebrew/bin`; override with `PIX3_AGY_BIN`) and serves it at `/agents/agy/v1/*`. Nothing to
+configure — it shows up in the editor's model picker as **Antigravity (agy)** with a live model list
+from `agy models`.
+
+```bash
+pix3-agent-bridge agy status                # installed? signed in? tools enabled?
+pix3-agent-bridge agy setup [--allow-tools] # register the pix3 MCP shim with agy
+pix3-agent-bridge agy unsetup               # undo it
+```
+
+**Editor tools are off until you opt in, and the opt-in has a real cost.** `agy` auto-denies every
+MCP call in print mode unless it is started with `--dangerously-skip-permissions` — measured; there
+is no narrower flag, and `--mode accept-edits` does not help. That same flag also un-gates agy's own
+shell, file and browser tools on this machine. So out of the box the lane is a **text-only** provider
+(excellent as the editor's *advisor* — a free second opinion), and `agy setup --allow-tools` is the
+deliberate step that turns the agent loop on. Without it the lane advertises `supportsTools: false`,
+so the editor never offers it tools it cannot run.
+
+How tools reach the editor once enabled: `agy setup` writes `~/.pix3/agy-mcp-shim.mjs` and registers
+it with agy as the `pix3` stdio MCP server. agy spawns that shim as a child, so it inherits the
+environment the bridge set on the agy process — which is how a tool call is tied to the chat that
+made it. The shim posts to `/agents/agy/mcp/<sessionId>`, guarded by a **separate** `mcpToken` (not
+the pairing token), and the bridge blocks that route for anything sending an `Origin` header.
+
+Chats survive a bridge restart here, unlike the Claude Code lane: agy persists its own conversations,
+so `~/.pix3/agy-sessions.json` maps a chat to an `agy` conversation id and the next turn resumes it
+with `--conversation` instead of replaying the transcript.
+
+Set `PIX3_AGY_DISABLED=1` to switch the lane off entirely (the bridge then never spawns `agy`).
+
 ## Manage providers
 
 ```bash
@@ -102,12 +139,19 @@ changes (a base-URL/kind change to a provider you're actively using is picked up
 - Outbound requests carry only `content-type` + the injected key — the pairing token, cookies and
   other inbound headers are stripped, so nothing leaks upstream.
 - The Claude Code session runs with zero built-in tools — the model can only call pix3 editor tools,
-  never this machine's shell or filesystem.
+  never this machine's shell or filesystem. The Antigravity lane is the one exception, and only when
+  you ask for it: `agy setup --allow-tools` lets `agy` use its own shell/file/browser tools too,
+  because that is the only way it will answer an MCP call at all. It runs in a throwaway working
+  directory and is told the project is not on this disk, but the capability is real — that is why it
+  is off by default.
+- The MCP relay has its own token (`mcpToken`), so the shim file on disk cannot spend provider keys
+  or the MAX subscription even if it is read by another local process.
 
 ## Config file
 
-`~/.pix3/agent-bridge.json` holds the pairing token, the provider table (kind, base URL, key,
-enabled) and optional `port` / `origins` / `stallTimeoutMs` overrides. It is migrated automatically
+`~/.pix3/agent-bridge.json` holds the pairing token, the MCP relay token, the provider table (kind,
+base URL, key, enabled) and optional `port` / `origins` / `stallTimeoutMs` / `agy` overrides
+(`agy.bin`, `agy.skipPermissions`, `agy.maxSessions`). It is migrated automatically
 from the old `claude-bridge.json` (the pairing token carries over) on first run.
 
 ## Develop

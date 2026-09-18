@@ -52,8 +52,11 @@ import {
   RESERVED_PROVIDER_IDS,
   type BridgeConfig,
 } from './config.ts';
-import { runProviderCommand, usage } from './cli.ts';
+import { runAgyCommand, runProviderCommand, usage } from './cli.ts';
 import { forwardToProvider } from './proxy.ts';
+import { AgyLane } from './agy-lane.ts';
+import { AGY_AGENT_ID } from './agy.ts';
+import { installShim } from './mcp-shim.ts';
 
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
 
@@ -161,8 +164,26 @@ const parseResetOptions = (raw: string): ResetOptions => {
   };
 };
 
+/** Body of a relay post from the MCP shim: one JSON-RPC call, already unwrapped. */
+const parseMcpBody = (raw: string): { method: string; params: Record<string, unknown> } => {
+  const parsed: unknown = JSON.parse(raw || '{}');
+  if (!isRecord(parsed) || typeof parsed.method !== 'string') {
+    throw new HttpError(400, 'MCP relay body needs a "method".');
+  }
+  return { method: parsed.method, params: isRecord(parsed.params) ? parsed.params : {} };
+};
+
 const startServer = (config: BridgeConfig): void => {
   const manager = new SessionManager(log, { stallTimeoutMs: config.stallTimeoutMs });
+  const agy = new AgyLane(config, log);
+  // Keep the on-disk shim in step with this bridge version. Registering it with agy stays a
+  // deliberate `agy setup`, but a stale shim serving an older relay protocol is nobody's intent.
+  try {
+    const shim = installShim();
+    if (shim.written) log(`wrote the agy MCP shim to ${shim.path}`);
+  } catch (error) {
+    log(`could not write the agy MCP shim: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   const withCors = (
     corsOrigin: string | null,
@@ -248,6 +269,41 @@ const startServer = (config: BridgeConfig): void => {
       return;
     }
 
+    /**
+     * MCP relay for the Antigravity lane: `POST /agents/agy/mcp/:sessionId`, called by the stdio
+     * shim that `agy` spawns — never by a browser.
+     *
+     * It sits above the pairing-token check on purpose: the shim authenticates with the separate
+     * `mcpToken`, so a leak of the file it reads cannot spend provider keys or the MAX subscription.
+     * A request that carries an `Origin` header is refused outright: a browser has no business here,
+     * and the MCP spec recommends exactly this against DNS-rebinding (the Host check above is the
+     * other half).
+     */
+    if (req.method === 'POST' && pathname.startsWith(`/agents/${AGY_AGENT_ID}/mcp/`)) {
+      if (origin) {
+        sendError(res, 403, 'The MCP relay does not serve browsers.', null);
+        return;
+      }
+      const mcpAuth = req.headers['x-pix3-mcp-token'];
+      if (mcpAuth !== config.mcpToken) {
+        sendError(res, 401, 'Invalid or missing MCP relay token.', null);
+        return;
+      }
+      const sessionId = decodeURIComponent(pathname.slice(`/agents/${AGY_AGENT_ID}/mcp/`.length));
+      try {
+        const { method, params } = parseMcpBody((await readBody(req)).toString('utf8'));
+        sendJson(res, 200, await agy.handleMcp(sessionId, method, params), null);
+      } catch (error) {
+        if (error instanceof HttpError) sendError(res, error.status, error.message, null);
+        else if (error instanceof SyntaxError) sendError(res, 400, 'MCP relay body is not valid JSON.', null);
+        else {
+          log(`agy MCP relay error: ${error instanceof Error ? error.message : String(error)}`);
+          sendError(res, 500, 'MCP relay failed.', null);
+        }
+      }
+      return;
+    }
+
     // Everything below requires the pairing token (dedicated header, x-api-key, or Authorization).
     const auth =
       (req.headers['x-pix3-bridge-token'] as string | undefined) ??
@@ -263,14 +319,65 @@ const startServer = (config: BridgeConfig): void => {
       const providers = Object.entries(config.providers)
         .filter(([, p]) => p.enabled && p.apiKey)
         .map(([id, p]) => ({ id, label: p.label, kind: p.kind, enabled: true }));
+      // Local CLI agents live in their OWN array, never in `providers`: an older editor maps an
+      // unknown `kind` to 'openai' and would build a broken provider pointed at /providers/agy.
+      const agents = [await agy.discoveryEntry()];
+      const sdkStats = manager.stats();
+      const agyStats = agy.manager.stats();
       // `sessions` is additive: older editors ignore it, newer ones can surface "1 stalled session"
       // and offer the reset below. Counts only — no ids, no content.
       sendJson(
         res,
         200,
-        { providers: [...providers, AGENT_SDK_PROVIDER], sessions: manager.stats() },
+        {
+          providers: [...providers, AGENT_SDK_PROVIDER],
+          agents,
+          sessions: {
+            total: sdkStats.total + agyStats.total,
+            busy: sdkStats.busy + agyStats.busy,
+            stalled: sdkStats.stalled + agyStats.stalled,
+            stallTimeoutMs: sdkStats.stallTimeoutMs,
+          },
+        },
         origin
       );
+      return;
+    }
+
+    // Antigravity lane: the same Anthropic wire shape, served from a local `agy` subscription.
+    if (req.method === 'GET' && pathname === `/agents/${AGY_AGENT_ID}/v1/models`) {
+      try {
+        sendJson(res, 200, { models: await agy.listModels() }, origin);
+      } catch (error) {
+        if (error instanceof HttpError) sendError(res, error.status, error.message, origin);
+        else {
+          log(`agy models failed: ${error instanceof Error ? error.message : String(error)}`);
+          sendError(res, 503, 'Could not list Antigravity models.', origin);
+        }
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === `/agents/${AGY_AGENT_ID}/v1/messages`) {
+      const abort = new AbortController();
+      res.on('close', () => {
+        if (!res.writableEnded) abort.abort();
+      });
+      try {
+        const request = parseMessagesRequest(JSON.parse((await readBody(req)).toString('utf8')));
+        const response = await agy.handleMessages(request, abort.signal);
+        sendJson(res, response.status, response.body, origin);
+      } catch (error) {
+        if (res.writableEnded || abort.signal.aborted) return;
+        if (error instanceof HttpError) {
+          sendError(res, error.status === 499 ? 400 : error.status, error.message, origin);
+        } else if (error instanceof SyntaxError) {
+          sendError(res, 400, 'Request body is not valid JSON.', origin);
+        } else {
+          log(`agy 500: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`);
+          sendError(res, 500, error instanceof Error ? error.message : 'Internal bridge error.', origin);
+        }
+      }
       return;
     }
 
@@ -282,7 +389,23 @@ const startServer = (config: BridgeConfig): void => {
     if (req.method === 'POST' && pathname === '/v1/sessions/reset') {
       try {
         const options = parseResetOptions((await readBody(req)).toString('utf8'));
-        sendJson(res, 200, manager.reset(options), origin);
+        // A `sessionKey` names one lane's session; anything broader ("close what looks wedged",
+        // "close everything") has to sweep both, or the editor's recovery would silently skip one.
+        const agyKey = options.sessionKey?.startsWith(`${AGY_AGENT_ID}-`)
+          ? options.sessionKey.slice(AGY_AGENT_ID.length + 1)
+          : undefined;
+        const sdkResult = agyKey ? null : manager.reset(options);
+        const agyResult = agy.manager.reset(agyKey ? { sessionKey: agyKey } : options);
+        const merged = sdkResult
+          ? {
+              closed: sdkResult.closed + agyResult.closed,
+              remaining: sdkResult.remaining + agyResult.remaining,
+              stalled: sdkResult.stalled + agyResult.stalled,
+              scope: sdkResult.scope,
+              ...(sdkResult.note && agyResult.note ? { note: sdkResult.note } : {}),
+            }
+          : agyResult;
+        sendJson(res, 200, merged, origin);
       } catch (error) {
         if (error instanceof HttpError) {
           sendError(res, error.status, error.message, origin);
@@ -393,6 +516,16 @@ const startServer = (config: BridgeConfig): void => {
     );
     console.log('');
     console.log('  Agent-SDK (MAX) lane auth comes from your Claude Code login (`claude login`).');
+    void agy.getStatus(true).then(status => {
+      if (!status.available) {
+        console.log('  Antigravity (agy) lane: not available — `pix3-agent-bridge agy status` says why.');
+        return;
+      }
+      console.log(
+        `  Antigravity (agy) lane: ${status.version ?? 'installed'}, auth ${status.auth}, ` +
+          `editor tools ${status.toolsEnabled ? 'enabled' : 'disabled (pix3-agent-bridge agy setup --allow-tools)'}.`
+      );
+    });
     console.log(
       `  Wedged-session watchdog: ${Math.round(config.stallTimeoutMs / 1000)}s (--stall-timeout-ms / PIX3_BRIDGE_STALL_TIMEOUT_MS).`
     );
@@ -402,6 +535,7 @@ const startServer = (config: BridgeConfig): void => {
   const shutdown = (): void => {
     log('shutting down');
     manager.closeAll('bridge shutting down');
+    agy.closeAll('bridge shutting down');
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 2000).unref();
   };
@@ -415,6 +549,10 @@ const main = (): void => {
 
   if (command === 'provider') {
     runProviderCommand(argv.slice(1));
+    return;
+  }
+  if (command === 'agy') {
+    void runAgyCommand(argv.slice(1));
     return;
   }
   if (command === 'help' || command === '--help' || command === '-h') {

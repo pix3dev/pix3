@@ -6,6 +6,8 @@ import {
   BRIDGE_TOKEN_SECRET_ID,
   DEFAULT_BRIDGE_URL,
   createBridgeProvider,
+  type BridgeAgentDiagnostic,
+  type BridgeAgentStatus,
   type BridgeProviderEntry,
   type BridgeProviderKind,
 } from './BridgeProviders';
@@ -47,26 +49,84 @@ export const stripPairingTokenFromHash = (hash: string): string => {
   return kept.length > 0 ? `#${kept.join('&')}` : '';
 };
 
-const VALID_KINDS: readonly BridgeProviderKind[] = ['openai', 'anthropic', 'agent-sdk'];
+const VALID_KINDS: readonly BridgeProviderKind[] = [
+  'openai',
+  'anthropic',
+  'agent-sdk',
+  'agent-cli',
+];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
 
-const parseEntries = (payload: unknown): BridgeProviderEntry[] => {
-  const list = isRecord(payload) && Array.isArray(payload.providers) ? payload.providers : [];
+const asDiagnostics = (raw: unknown): BridgeAgentDiagnostic[] =>
+  (Array.isArray(raw) ? raw : [])
+    .filter(isRecord)
+    .filter(entry => typeof entry.message === 'string')
+    .map(entry => ({
+      reason: typeof entry.reason === 'string' ? entry.reason : 'unknown',
+      severity: entry.severity === 'error' ? 'error' : 'warning',
+      message: String(entry.message),
+      ...(typeof entry.detail === 'string' ? { detail: entry.detail } : {}),
+    }));
+
+const asAgentStatus = (item: Record<string, unknown>): BridgeAgentStatus => {
+  const diagnostics = asDiagnostics(item.diagnostics);
+  return {
+    available: item.available !== false,
+    ...(typeof item.version === 'string' ? { version: item.version } : {}),
+    auth: item.auth === 'ok' || item.auth === 'missing' ? item.auth : 'unknown',
+    mcp: item.mcp === 'registered' ? 'registered' : 'missing',
+    tools: item.tools === 'enabled' ? 'enabled' : 'disabled',
+    ...(diagnostics.length > 0 ? { diagnostics } : {}),
+  };
+};
+
+/**
+ * Read the bridge's discovery payload.
+ *
+ * `providers` are keyed upstreams the bridge proxies; `agents` are local CLI agents it drives as
+ * subprocesses. They are separate arrays on purpose — an entry whose `kind` this editor does not
+ * understand is SKIPPED rather than coerced. Coercing is what the old code did (everything unknown
+ * became `'openai'`), and it would have built a broken provider pointed at `/providers/agy` the
+ * moment the bridge grew a lane that is not a proxied upstream at all.
+ *
+ * Order matters downstream: `LlmProviderRegistry.getPreferred()` takes the first entry, so proxied
+ * providers and the Claude Code lane stay ahead of any CLI agent.
+ */
+export const parseEntries = (payload: unknown): BridgeProviderEntry[] => {
   const entries: BridgeProviderEntry[] = [];
-  for (const item of list) {
-    if (!isRecord(item)) continue;
-    if (typeof item.id !== 'string' || !item.id) continue;
-    const kind = VALID_KINDS.includes(item.kind as BridgeProviderKind)
-      ? (item.kind as BridgeProviderKind)
-      : 'openai';
-    entries.push({
-      id: item.id,
-      label: typeof item.label === 'string' && item.label ? item.label : item.id,
-      kind,
-    });
+  const read = (list: unknown, withStatus: boolean): void => {
+    if (!Array.isArray(list)) return;
+    for (const item of list) {
+      if (!isRecord(item)) continue;
+      if (typeof item.id !== 'string' || !item.id) continue;
+      if (!VALID_KINDS.includes(item.kind as BridgeProviderKind)) continue;
+      entries.push({
+        id: item.id,
+        label: typeof item.label === 'string' && item.label ? item.label : item.id,
+        kind: item.kind as BridgeProviderKind,
+        ...(withStatus ? { status: asAgentStatus(item) } : {}),
+      });
+    }
+  };
+  if (!isRecord(payload)) return entries;
+  // A `providers` entry has always been implicitly 'openai' when unlabelled; keep that for
+  // compatibility with bridges that predate the explicit kind.
+  if (Array.isArray(payload.providers)) {
+    for (const item of payload.providers) {
+      if (!isRecord(item)) continue;
+      if (typeof item.id !== 'string' || !item.id) continue;
+      if (item.kind !== undefined && !VALID_KINDS.includes(item.kind as BridgeProviderKind))
+        continue;
+      entries.push({
+        id: item.id,
+        label: typeof item.label === 'string' && item.label ? item.label : item.id,
+        kind: (item.kind as BridgeProviderKind | undefined) ?? 'openai',
+      });
+    }
   }
+  read(payload.agents, true);
   return entries;
 };
 

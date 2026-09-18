@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  parseEntries,
   readPairingTokenFromHash,
   stripPairingTokenFromHash,
 } from '@/services/llm/BridgeConnectionService';
@@ -42,5 +43,74 @@ describe('bridge pairing link', () => {
     expect(stripPairingTokenFromHash('#bridge-token-legacy=abc123')).toBe(
       '#bridge-token-legacy=abc123'
     );
+  });
+});
+
+/**
+ * Discovery parsing. The bridge grew a second kind of local lane (a CLI agent it runs as a
+ * subprocess), and it lives in its own `agents` array precisely because the old parser coerced every
+ * unrecognized `kind` to `'openai'` — which would have produced a provider pointed at
+ * `/providers/agy`, an endpoint that does not exist.
+ */
+describe('bridge discovery parsing', () => {
+  it('reads proxied providers and local CLI agents, agents last', () => {
+    const entries = parseEntries({
+      providers: [
+        { id: 'openai', label: 'OpenAI', kind: 'openai' },
+        { id: 'claude-bridge', label: 'Claude Code (MAX)', kind: 'agent-sdk' },
+      ],
+      agents: [{ id: 'agy', label: 'Antigravity (agy)', kind: 'agent-cli', available: true }],
+    });
+    // Order decides `LlmProviderRegistry.getPreferred()`, so a CLI agent must never jump the queue.
+    expect(entries.map(entry => entry.id)).toEqual(['openai', 'claude-bridge', 'agy']);
+    expect(entries[2].kind).toBe('agent-cli');
+  });
+
+  it('skips an entry whose kind this editor does not understand', () => {
+    const entries = parseEntries({
+      providers: [{ id: 'openai', label: 'OpenAI', kind: 'openai' }],
+      agents: [
+        { id: 'future-lane', label: 'Something new', kind: 'agent-quantum' },
+        { id: 'agy', label: 'Antigravity (agy)', kind: 'agent-cli' },
+      ],
+    });
+    expect(entries.map(entry => entry.id)).toEqual(['openai', 'agy']);
+  });
+
+  it('carries a CLI agent’s health through, so the picker can gate tools on it', () => {
+    const [agent] = parseEntries({
+      agents: [
+        {
+          id: 'agy',
+          label: 'Antigravity (agy)',
+          kind: 'agent-cli',
+          available: true,
+          version: '1.2.5',
+          auth: 'ok',
+          mcp: 'missing',
+          tools: 'disabled',
+          diagnostics: [{ reason: 'mcp-not-registered', severity: 'warning', message: 'no shim' }],
+        },
+      ],
+    });
+    expect(agent.status).toEqual({
+      available: true,
+      version: '1.2.5',
+      auth: 'ok',
+      mcp: 'missing',
+      tools: 'disabled',
+      diagnostics: [{ reason: 'mcp-not-registered', severity: 'warning', message: 'no shim' }],
+    });
+  });
+
+  it('still reads a bridge that predates the explicit provider kind', () => {
+    const entries = parseEntries({ providers: [{ id: 'custom', label: 'Custom' }] });
+    expect(entries).toEqual([{ id: 'custom', label: 'Custom', kind: 'openai' }]);
+  });
+
+  it('survives a payload that is not the shape it expects', () => {
+    expect(parseEntries(null)).toEqual([]);
+    expect(parseEntries({ providers: 'nope', agents: 7 })).toEqual([]);
+    expect(parseEntries({ agents: [{ label: 'no id', kind: 'agent-cli' }] })).toEqual([]);
   });
 });

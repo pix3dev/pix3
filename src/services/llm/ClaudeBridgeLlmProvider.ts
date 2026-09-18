@@ -1,10 +1,6 @@
 import { AnthropicLlmProvider, CLAUDE_REASONING_EFFORTS } from './AnthropicLlmProvider';
-import {
-  LlmError,
-  type LlmListModelsContext,
-  type LlmModel,
-  type LlmRequestContext,
-} from './LlmTypes';
+import { fetchBridgeModels } from './BridgeModels';
+import { type LlmListModelsContext, type LlmModel, type LlmRequestContext } from './LlmTypes';
 
 /**
  * Default endpoint of the local bridge (`tools/pix3-agent-bridge`). The bridge binds to 127.0.0.1 and
@@ -14,9 +10,6 @@ import {
  */
 const CLAUDE_BRIDGE_BASE_URL =
   (import.meta.env.VITE_CLAUDE_BRIDGE_URL as string | undefined) ?? 'http://127.0.0.1:8484/v1';
-
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null && !Array.isArray(value);
 
 /**
  * Personal/dev provider: routes the agent through a locally running `pix3-agent-bridge`, which
@@ -125,53 +118,9 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
 
   /** Live catalog from the bridge (`GET {base}/models`) — reflects what the subscription serves. */
   async listModels(ctx: LlmListModelsContext): Promise<LlmModel[]> {
-    const fetchImpl = ctx.fetchImpl ?? globalThis.fetch.bind(globalThis);
-    const baseUrl = (ctx.baseUrl ?? this.defaultBaseUrl).replace(/\/$/, '');
-
-    let response: Response;
-    try {
-      response = await fetchImpl(`${baseUrl}/models`, {
-        headers: ctx.apiKey ? { 'x-api-key': ctx.apiKey } : undefined,
-        signal: ctx.signal,
-      });
-    } catch (error) {
-      throw new LlmError(
-        'network',
-        'Could not reach the local Claude bridge. Is pix3-agent-bridge running?',
-        undefined,
-        { cause: error }
-      );
-    }
-    if (!response.ok) {
-      throw new LlmError('http', `Claude bridge error (HTTP ${response.status}).`, response.status);
-    }
-
-    const payload: unknown = await response.json();
-    const rawModels = isRecord(payload) && Array.isArray(payload.models) ? payload.models : [];
-    const models = rawModels
-      .filter(
-        (model): model is LlmModel =>
-          isRecord(model) &&
-          typeof model.id === 'string' &&
-          typeof model.label === 'string' &&
-          isRecord(model.capabilities)
-      )
-      // The bridge's /models payload predates the reasoning-effort field, so carry it over from the
-      // static catalog by id — otherwise the live list would silently drop the reasoning picker.
-      .map(model =>
-        model.capabilities.reasoningEfforts
-          ? model
-          : {
-              ...model,
-              capabilities: {
-                ...model.capabilities,
-                reasoningEfforts: this.getModel(model.id)?.capabilities.reasoningEfforts,
-              },
-            }
-      );
-    if (models.length === 0) {
-      throw new LlmError('unknown', 'The Claude bridge returned no models.');
-    }
-    return models;
+    return fetchBridgeModels(ctx.baseUrl ?? this.defaultBaseUrl, ctx, {
+      laneLabel: 'Claude Code',
+      staticEffortsFor: id => this.getModel(id)?.capabilities.reasoningEfforts,
+    });
   }
 }

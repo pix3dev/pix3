@@ -38,6 +38,9 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 
 import { DEFAULT_STALL_TIMEOUT_MS, normalizeStallTimeoutMs } from './config.ts';
+import { AsyncQueue, Deferred } from './util.ts';
+import type { Logger } from './util.ts';
+import { toCallToolResult } from './tool-relay.ts';
 import {
   HttpError,
   extractToolResults,
@@ -54,6 +57,8 @@ import type {
   WireToolDefinition,
   WireToolResult,
 } from './wire.ts';
+
+export type { Logger } from './util.ts';
 
 const MCP_SERVER_NAME = 'pix3';
 const MCP_PREFIX = `mcp__${MCP_SERVER_NAME}__`;
@@ -87,11 +92,12 @@ const estimateOutputTokens = (blocks: readonly WireBlock[]): number => {
   return Math.max(1, Math.ceil(chars / 4));
 };
 const IDLE_TIMEOUT_MS = 45 * 60 * 1000;
+/** Default soft cap on live sessions; per-lane overrides arrive through {@link SessionManagerOptions}. */
 export const MAX_SESSIONS = 4;
 /**
- * Absolute ceiling on live sessions. `MAX_SESSIONS` is the target, but evicting a session that is
+ * Absolute ceiling on live sessions. The soft cap is the target, but evicting a session that is
  * actively streaming output would break a working chat, so the manager is allowed to overshoot up to
- * here rather than kill a healthy producer (see `pickVictim`).
+ * double it rather than kill a healthy producer (see `pickVictim`).
  */
 export const HARD_MAX_SESSIONS = MAX_SESSIONS * 2;
 /**
@@ -108,58 +114,12 @@ const PRODUCING_WINDOW_MS = 30_000;
 /** How often the sweeper runs (idle reaping + the wedge watchdog). */
 const SWEEP_INTERVAL_MS = 60_000;
 
-export type Logger = (line: string) => void;
-
 interface PendingCall {
   readonly name: string;
   readonly input: unknown;
   resolve: (result: CallToolResult) => void;
   /** Anthropic `tool_use` block id this call was matched to (assigned from the assistant message). */
   toolUseId?: string;
-}
-
-class Deferred<T> {
-  readonly promise: Promise<T>;
-  resolve!: (value: T) => void;
-  reject!: (error: unknown) => void;
-  constructor() {
-    this.promise = new Promise<T>((resolve, reject) => {
-      this.resolve = resolve;
-      this.reject = reject;
-    });
-  }
-}
-
-/** Push-based async iterable used as the SDK's streaming input. */
-class AsyncQueue<T> implements AsyncIterable<T> {
-  private readonly buffer: T[] = [];
-  private readonly waiters: Array<(result: IteratorResult<T>) => void> = [];
-  private ended = false;
-
-  push(item: T): void {
-    const waiter = this.waiters.shift();
-    if (waiter) waiter({ value: item, done: false });
-    else this.buffer.push(item);
-  }
-
-  end(): void {
-    this.ended = true;
-    for (const waiter of this.waiters.splice(0)) {
-      waiter({ value: undefined as never, done: true });
-    }
-  }
-
-  [Symbol.asyncIterator](): AsyncIterator<T> {
-    return {
-      next: (): Promise<IteratorResult<T>> => {
-        if (this.buffer.length > 0) {
-          return Promise.resolve({ value: this.buffer.shift() as T, done: false });
-        }
-        if (this.ended) return Promise.resolve({ value: undefined as never, done: true });
-        return new Promise(resolve => this.waiters.push(resolve));
-      },
-    };
-  }
 }
 
 const toolUseName = (block: WireBlock): string =>
@@ -175,11 +135,6 @@ const sameJson = (a: unknown, b: unknown): boolean => {
     return false;
   }
 };
-
-const toCallToolResult = (result: WireToolResult): CallToolResult => ({
-  content: [{ type: 'text', text: result.content || '(empty result)' }],
-  ...(result.isError ? { isError: true } : {}),
-});
 
 export interface BridgeResponse {
   readonly status: number;
@@ -206,6 +161,25 @@ export interface ManagedSession {
   hasPendingToolUse(toolUseId: string): boolean;
   toolsMatch(tools: readonly WireToolDefinition[] | undefined): boolean;
   effortMatches(request: WireMessagesRequest): boolean;
+  /**
+   * True when this freshly-created session can simply continue the chat and therefore must NOT be
+   * seeded with a replayed transcript. Only the Antigravity lane sets it: `agy` persists its own
+   * conversations and `--conversation <id>` restores one, so after a bridge restart the right move
+   * is to send the last user turn, not to paste the whole history back in (which would double the
+   * context and re-trigger anything the model already acted on).
+   */
+  readonly resumesInsteadOfReplay?: boolean;
+  /**
+   * Optional identity check used when routing a continuing chat.
+   *
+   * Length alone is a weak key: two chats that are the same number of messages long, on the same
+   * model, with the same tools, are indistinguishable to the router — and it will hand the request
+   * to whichever it finds first. Observed live: a second chat's follow-up landed in an unrelated
+   * earlier session and was answered from ITS history. A lane that can identify a chat (the
+   * Antigravity one hashes its opening exchange) implements this to close that hole; a lane that
+   * cannot leaves it undefined and keeps the old behaviour.
+   */
+  matchesChat?(request: WireMessagesRequest): boolean;
   handleRequest(request: WireMessagesRequest, signal: AbortSignal): Promise<BridgeResponse>;
   handleTranscriptReplay(
     request: WireMessagesRequest,
@@ -806,6 +780,14 @@ export interface SessionManagerOptions {
   readonly now?: () => number;
   /** Set false to drive {@link SessionManager.sweep} manually (tests). */
   readonly autoSweep?: boolean;
+  /**
+   * Soft cap on live sessions (default {@link MAX_SESSIONS}). A per-lane number, because the cost of
+   * a session differs sharply between lanes: an `agy` session is a native process that itself
+   * spawns every MCP server in the user's config.
+   */
+  readonly maxSessions?: number;
+  /** Prefix for logging / `sessionKey`, so two managers' sessions are distinguishable. */
+  readonly label?: string;
 }
 
 /** Cheap health snapshot for the discovery response. */
@@ -840,9 +822,13 @@ export class SessionManager {
   private readonly stallTimeoutMs: number;
   private readonly factory: SessionFactory;
   private readonly now: () => number;
+  private readonly maxSessions: number;
+  private readonly hardMaxSessions: number;
 
   constructor(log: Logger, options: SessionManagerOptions = {}) {
-    this.log = log;
+    this.log = options.label ? (line: string) => log(`${options.label} ${line}`) : log;
+    this.maxSessions = Math.max(1, Math.round(options.maxSessions ?? MAX_SESSIONS));
+    this.hardMaxSessions = this.maxSessions * 2;
     this.stallTimeoutMs = normalizeStallTimeoutMs(
       options.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS
     );
@@ -883,7 +869,8 @@ export class SessionManager {
           candidate.transcriptLen === request.messages.length - 1 &&
           candidate.model === request.model &&
           candidate.toolsMatch(request.tools) &&
-          candidate.effortMatches(request)
+          candidate.effortMatches(request) &&
+          (candidate.matchesChat?.(request) ?? true)
       );
       if (session) return session.handleRequest(request, signal);
       this.log(
@@ -1014,6 +1001,12 @@ export class SessionManager {
 
   private replay(request: WireMessagesRequest, signal: AbortSignal): Promise<BridgeResponse> {
     const session = this.create(request);
+    if (session.resumesInsteadOfReplay === true) {
+      this.log(
+        `[${session.id}] resumed the agent's own conversation (${request.messages.length} messages) — not replaying`
+      );
+      return session.handleRequest(request, signal);
+    }
     const transcript = [
       'The conversation below already happened in the pix3 editor (the previous bridge session was lost).',
       'Continue it from where it left off — do not re-introduce yourself or redo completed work.',
@@ -1030,14 +1023,14 @@ export class SessionManager {
 
   private create(request: WireMessagesRequest): ManagedSession {
     this.dropClosed();
-    while (this.sessions.length >= MAX_SESSIONS) {
+    while (this.sessions.length >= this.maxSessions) {
       const victim = this.pickVictim();
       if (!victim) {
         // Every slot holds a session that is actively streaming. Overshooting the soft cap is far
         // cheaper than killing a working chat, so serve the request and let the sweeper catch up.
-        if (this.sessions.length < HARD_MAX_SESSIONS) {
+        if (this.sessions.length < this.hardMaxSessions) {
           this.log(
-            `session cap ${MAX_SESSIONS} reached but all sessions are producing output — ` +
+            `session cap ${this.maxSessions} reached but all sessions are producing output — ` +
               `allowing ${this.sessions.length + 1} temporarily`
           );
           break;

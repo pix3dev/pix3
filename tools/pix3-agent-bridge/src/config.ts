@@ -21,7 +21,7 @@ import path from 'node:path';
  * `claude-bridge` in discovery). The CLI rejects adding a provider under one of these so `GET
  * /v1/providers` can never emit duplicate ids.
  */
-export const RESERVED_PROVIDER_IDS = ['claude-bridge'] as const;
+export const RESERVED_PROVIDER_IDS = ['claude-bridge', 'agy'] as const;
 
 /** Upstream auth scheme: how the bridge presents the stored key to the provider. */
 export type ProviderKind = 'openai' | 'anthropic';
@@ -45,13 +45,41 @@ export interface ProviderConfig {
   builtin?: boolean;
 }
 
+/** Settings for the Antigravity CLI (`agy`) lane. See `agy.ts` / `agy-session.ts`. */
+export interface AgyConfig {
+  /** Explicit path to the `agy` executable; otherwise PATH and the usual install dirs are searched. */
+  bin?: string;
+  /**
+   * Pass `--dangerously-skip-permissions` when spawning agy.
+   *
+   * Off by default, and that default costs the editor its tools: measured, agy AUTO-DENIES every
+   * MCP call in print mode without this flag (`--mode accept-edits` does not help), so the relay
+   * simply never fires. The flag is opt-in rather than implied because it also un-gates agy's own
+   * shell, file and browser tools on this machine — the bridge's standing promise is that it never
+   * touches the local FS/shell on a model's behalf, and this is the one lever that can weaken it.
+   */
+  skipPermissions?: boolean;
+  /**
+   * Live-session cap for this lane, deliberately lower than the SDK lane's: every agy session is a
+   * full `agy` process plus EVERY MCP server in the user's own config as its children (an
+   * `npx chrome-devtools-mcp` among them).
+   */
+  maxSessions?: number;
+}
+
 export interface BridgeConfig {
   token: string;
+  /**
+   * Separate secret for the MCP relay route, so the shim (a file on disk, read by another process)
+   * never carries the pairing token that can spend provider keys and the MAX subscription.
+   */
+  mcpToken: string;
   port: number;
   origins: string[];
   providers: Record<string, ProviderConfig>;
   /** Watchdog threshold for wedged Agent-SDK sessions — see {@link DEFAULT_STALL_TIMEOUT_MS}. */
   stallTimeoutMs: number;
+  agy: AgyConfig;
 }
 
 /**
@@ -151,6 +179,18 @@ const parseProviders = (raw: unknown): Record<string, ProviderConfig> => {
   return providers;
 };
 
+const parseAgy = (raw: unknown): AgyConfig => {
+  if (!isRecord(raw)) return {};
+  const maxSessions = Number(raw.maxSessions);
+  return {
+    ...(typeof raw.bin === 'string' && raw.bin ? { bin: raw.bin } : {}),
+    ...(raw.skipPermissions === true ? { skipPermissions: true } : {}),
+    ...(Number.isFinite(maxSessions) && maxSessions > 0
+      ? { maxSessions: Math.min(8, Math.round(maxSessions)) }
+      : {}),
+  };
+};
+
 const readLegacyToken = (): string | null => {
   try {
     const legacy = JSON.parse(fs.readFileSync(LEGACY_CONFIG_PATH, 'utf8')) as unknown;
@@ -179,6 +219,10 @@ export const loadConfig = (): BridgeConfig => {
       typeof stored.token === 'string' && stored.token.length >= 16
         ? stored.token
         : (readLegacyToken() ?? randomBytes(24).toString('base64url')),
+    mcpToken:
+      typeof stored.mcpToken === 'string' && stored.mcpToken.length >= 16
+        ? stored.mcpToken
+        : randomBytes(24).toString('base64url'),
     port: typeof stored.port === 'number' ? stored.port : DEFAULT_PORT,
     origins: [
       ...DEFAULT_ORIGINS,
@@ -188,10 +232,12 @@ export const loadConfig = (): BridgeConfig => {
     stallTimeoutMs: normalizeStallTimeoutMs(
       process.env.PIX3_BRIDGE_STALL_TIMEOUT_MS ?? stored.stallTimeoutMs ?? DEFAULT_STALL_TIMEOUT_MS
     ),
+    agy: parseAgy(stored.agy),
   };
 
-  // Persist on first run (or after a legacy-token migration) so the token is stable across restarts.
-  if (!existed || !stored.token) {
+  // Persist on first run (or after a legacy-token migration / a newly minted MCP token) so both
+  // secrets are stable across restarts — the shim on disk is registered against one of them.
+  if (!existed || !stored.token || !stored.mcpToken) {
     saveConfig(config);
   } else {
     // Configs written by older versions are 0644 — re-tighten them on every boot rather than only
@@ -221,11 +267,13 @@ export const saveConfig = (config: BridgeConfig): void => {
   const customOrigins = config.origins.filter(o => !DEFAULT_ORIGINS.includes(o));
   const persisted = {
     token: config.token,
+    mcpToken: config.mcpToken,
     ...(config.port !== DEFAULT_PORT ? { port: config.port } : {}),
     ...(customOrigins.length > 0 ? { origins: customOrigins } : {}),
     ...(config.stallTimeoutMs !== DEFAULT_STALL_TIMEOUT_MS
       ? { stallTimeoutMs: config.stallTimeoutMs }
       : {}),
+    ...(Object.keys(config.agy).length > 0 ? { agy: config.agy } : {}),
     providers: config.providers,
   };
   fs.writeFileSync(CONFIG_PATH, `${JSON.stringify(persisted, null, 2)}\n`, 'utf8');
