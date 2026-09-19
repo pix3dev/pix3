@@ -18,6 +18,12 @@ export const FLOW_STAGE_METADATA_KEY = 'flowStage';
  */
 export const IDEA_TEMPLATE_ID = 'idea-blank';
 
+/**
+ * Manifest metadata key recording the name THIS EDITOR gave the project, so a later automatic
+ * rename can tell its own handiwork from a name the user typed (see `FlowProjectNameService`).
+ */
+export const FLOW_TITLE_SOURCE_METADATA_KEY = 'flowTitleSource';
+
 /** Manifest metadata key carrying the recipe the welcome card hinted at (a hint, not a choice). */
 export const FLOW_RECIPE_HINT_METADATA_KEY = 'recipeHint';
 

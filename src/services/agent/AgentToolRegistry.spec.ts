@@ -1052,7 +1052,11 @@ describe('AgentToolRegistry', () => {
       expect(result.preset).toBe('sprite');
       expect(result.saved).toMatchObject({ path: 'assets/ui/button.png' });
       expect(result.original).toEqual({ width: 512, height: 512 });
-      expect(result.__images).toEqual([{ mimeType: 'image/webp', data: 'UFJFVklFVw==' }]);
+      // The preview names the file it is a thumbnail of, so the chat can expand the saved image
+      // instead of these 256 pixels.
+      expect(result.__images).toEqual([
+        { mimeType: 'image/webp', data: 'UFJFVklFVw==', path: 'assets/ui/button.png' },
+      ]);
       expect(assetGen.discard).toHaveBeenCalledWith('img-1');
       expect(assetGen.discard).toHaveBeenCalledWith('img-2');
     });
@@ -1089,7 +1093,7 @@ describe('AgentToolRegistry', () => {
     describe('at the idea stage', () => {
       const ideaRegistry = (
         assetGen: ReturnType<typeof makeAssetGen>,
-        flowReferences: { upsert: ReturnType<typeof vi.fn> }
+        flowReferences: { upsert: ReturnType<typeof vi.fn>; list?: ReturnType<typeof vi.fn> }
       ): AgentToolRegistry =>
         buildRegistry({ assetGen, flowReferences, flowStage: { isIdeaStage: () => true } });
 
@@ -1115,6 +1119,43 @@ describe('AgentToolRegistry', () => {
           caption: 'flat vector city at dusk',
           prompt: 'flat vector city at dusk',
         });
+      });
+
+      /**
+       * Observed live: two mockups asked for in one session both got the guessable name
+       * `mockup_gameplay.png`, and the second replaced the first without a word — the column looked
+       * to the user like it had failed to refresh. Dropped files already de-duplicate; generated
+       * ones must too.
+       */
+      it('does not overwrite a reference that already has that name', async () => {
+        const assetGen = makeAssetGen(true);
+        const flowReferences = {
+          upsert: vi.fn(async () => undefined),
+          list: vi.fn(async () => ({ references: [{ name: 'mockup.png' }] })),
+        };
+
+        await ideaRegistry(assetGen, flowReferences).execute('generate_asset', {
+          prompt: 'another mockup',
+          name: 'mockup.png',
+        });
+
+        expect(assetGen.save).toHaveBeenCalledWith('img-2', 'references/mockup-2.png', {});
+      });
+
+      it('replaces in place when the caller explicitly asked to (Regenerate)', async () => {
+        const assetGen = makeAssetGen(true);
+        const flowReferences = {
+          upsert: vi.fn(async () => undefined),
+          list: vi.fn(async () => ({ references: [{ name: 'mockup.png' }] })),
+        };
+
+        await ideaRegistry(assetGen, flowReferences).execute('generate_asset', {
+          prompt: 'another attempt at the same mockup',
+          name: 'mockup.png',
+          overwrite: true,
+        });
+
+        expect(assetGen.save).toHaveBeenCalledWith('img-2', 'references/mockup.png', {});
       });
 
       /**
@@ -1441,7 +1482,9 @@ describe('AgentToolRegistry', () => {
       expect(assetGen.save).toHaveBeenCalledWith('img-proc', 'src/assets/textures/car.png', {});
       expect(result.ok).toBe(true);
       expect(result.preset).toBe('sprite');
-      expect(result.__images).toEqual([{ mimeType: 'image/webp', data: 'UFJFVklFVw==' }]);
+      expect(result.__images).toEqual([
+        { mimeType: 'image/webp', data: 'UFJFVklFVw==', path: 'src/assets/textures/car.png' },
+      ]);
       expect(assetGen.discard).toHaveBeenCalledWith('img-open');
       expect(assetGen.discard).toHaveBeenCalledWith('img-proc');
     });

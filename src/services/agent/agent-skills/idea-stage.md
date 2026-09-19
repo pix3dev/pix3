@@ -19,7 +19,12 @@ file does not.
   Screens & UI, Art & audio, Progression & difficulty, Open questions) and with the user's
   original prompt quoted under "What the user asked for". **Never delete that quote** — it is
   the only record of what was actually asked, in their words.
-- Keep the `# Title` and `**Pitch:**` lines: the header above the document reads them.
+- **Name the game in your first turn.** The `# Title` line is seeded with a few words lifted out
+  of the prompt — a placeholder, not a name. Replace it with the name the user would say out loud:
+  one to three words, in their language ("Флапи", not "Игра про птицу, которая летит между труб").
+  That line names the project itself — the header, the tab, the recents list — so a sentence there
+  is a sentence in the title bar. Fill `**Pitch:**` in the same turn: one line, what the game is.
+- Keep both lines in place afterwards: the header above the document reads them.
 - Empty sections are honest. A section you fill with plausible filler reads to the user as a
   decision that was made without them, and unpicking that costs more than the blank did.
 

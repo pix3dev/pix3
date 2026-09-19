@@ -15,6 +15,34 @@ const userText = (text: string): LlmMessage => ({
   content: [{ type: 'text', text }],
 });
 
+describe('transcript images', () => {
+  it('carries the saved file path of a tool preview into its display item', () => {
+    const items = panel.toDisplayItems(
+      [
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              mimeType: 'image/webp',
+              data: 'UFJFVklFVw==',
+              sourcePath: 'references/mockup.png',
+            },
+            // A screenshot previews no file: nothing to expand but its own pixels.
+            { type: 'image', mimeType: 'image/jpeg', data: 'U0hPVA==' },
+          ],
+        },
+      ],
+      {},
+      false
+    );
+
+    expect(items.map(item => item.kind)).toEqual(['image', 'image']);
+    expect(items[0].kind === 'image' && items[0].path).toBe('references/mockup.png');
+    expect(items[1].kind === 'image' && items[1].path).toBeUndefined();
+  });
+});
+
 describe('harness nudges', () => {
   it('classifies a nudge as its own display item, not as the user speaking', () => {
     const items = panel.toDisplayItems(

@@ -387,9 +387,7 @@ describe('style themes', () => {
 
 describe('deriveTitle', () => {
   it('takes the first few words and capitalizes them', () => {
-    expect(deriveTitle('a runner with obstacles and coins and more')).toBe(
-      'A runner with obstacles and'
-    );
+    expect(deriveTitle('a runner with obstacles and coins and more')).toBe('Runner with obstacles');
   });
 
   it('never returns an empty title', () => {
@@ -405,10 +403,37 @@ describe('deriveTitle', () => {
     );
   });
 
-  it('keeps a one-word clause from swallowing the whole title', () => {
-    // "Snake" alone is a clause, but a title of one word from a longer prompt tells the user less
-    // than the words that follow it.
-    expect(deriveTitle('snake: eat, grow, do not hit the wall')).toBe('Snake: eat, grow, do not');
+  it('skips the greeting and the request and names the game', () => {
+    // The live report this was fixed from: the whole title was the ask, and the one word that
+    // identified the game fell off the end.
+    expect(deriveTitle('Привет! давай сделаем игру флапи')).toBe('Флапи');
+    expect(deriveTitle('hi! can you make me a game about coins')).toBe('Coins');
+    expect(deriveTitle('сделай тапалку про монетки')).toBe('Тапалку про монетки');
+  });
+
+  it('names the game after the subject, not after "игру про то"', () => {
+    expect(deriveTitle('игру про то как кот прыгает по крышам')).toBe('Кот прыгает по крышам');
+  });
+
+  it('keeps the generic noun when what follows is a sentence, not a name', () => {
+    expect(deriveTitle('мне нужна игра три в ряд про конфеты')).toBe('Игра три в ряд');
+  });
+
+  it('falls back rather than naming a project after the word "game"', () => {
+    expect(deriveTitle('сделай игру')).toBe('New Prototype');
+    expect(deriveTitle('make a game')).toBe('New Prototype');
+  });
+
+  it('takes a one-word clause as the name the user gave the game', () => {
+    expect(deriveTitle('snake: eat, grow, do not hit the wall')).toBe('Snake');
+  });
+
+  it('never ends on a word that promises a continuation', () => {
+    expect(deriveTitle('a platformer about a cat and')).toBe('Platformer about a cat');
+  });
+
+  it('still names a prompt made of nothing but filler', () => {
+    expect(deriveTitle('сделай')).toBe('Сделай');
   });
 });
 
@@ -500,7 +525,7 @@ describe('generated design docs', () => {
       []
     );
 
-    expect(markdown).toMatch(/^# A coin tapper$/m);
+    expect(markdown).toMatch(/^# Coin tapper$/m);
     expect(markdown).toMatch(/^\*\*Pitch:\*\* a coin tapper$/m);
   });
 
@@ -708,7 +733,7 @@ describe('PrototypeBootstrapService.startIdea', () => {
       'references/index.json',
     ]);
     const gdd = harness.files.get('design/gdd.md') ?? '';
-    expect(gdd).toMatch(/^# A strategy about ants$/m);
+    expect(gdd).toMatch(/^# Strategy about ants$/m);
     expect(gdd).toContain('a strategy about ants');
     expect(gdd).toContain('## Open questions');
     // No recipe was chosen, so none of the prototype-stage documents may exist yet.

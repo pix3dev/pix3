@@ -24,6 +24,14 @@ export interface LlmImageBlock {
   readonly type: 'image';
   readonly mimeType: string;
   readonly data: string;
+  /**
+   * Project-relative path of the file this image is a PREVIEW of, when there is one (a generated
+   * asset, a processed image). Editor-side metadata: every provider maps the blocks it sends field
+   * by field, so this never reaches a model. The chat needs it because what rides in the transcript
+   * is deliberately small — a 256px thumbnail, sized for the model's token budget — and expanding
+   * that thumbnail would show the user a blurry copy of a file they already have at full size.
+   */
+  readonly sourcePath?: string;
 }
 
 /** A tool invocation emitted by the assistant. `input` is the parsed (object) arguments. */

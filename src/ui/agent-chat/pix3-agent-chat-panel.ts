@@ -16,6 +16,7 @@ import { LightboxService, type LightboxItem } from '@/services/editor/LightboxSe
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
 import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import {
   formatPricingHint,
@@ -128,7 +129,15 @@ export type DisplayItem =
   /** A `[Pix3]` harness nudge: shown collapsed to its heading, never as a user message. */
   | { kind: 'notice'; key: string; label: string; text: string }
   /** `key` is `<message>-<block>`, so the images of one message can be flipped through together. */
-  | { kind: 'image'; key: string; role: 'user' | 'assistant'; mimeType: string; data: string }
+  | {
+      kind: 'image';
+      key: string;
+      role: 'user' | 'assistant';
+      mimeType: string;
+      data: string;
+      /** Project file this is a thumbnail OF, when a tool saved one — what the lightbox expands. */
+      path?: string;
+    }
   | { kind: 'tool'; call: LlmToolUseBlock; result: LlmToolResultBlock | null }
   | { kind: 'metrics'; metric: AgentTurnMetric }
   /** Boundary where the service compacted the history — the thread visibly jumps here. */
@@ -195,6 +204,7 @@ export const toDisplayItems = (
           role: message.role,
           mimeType: block.mimeType,
           data: block.data,
+          ...(block.sourcePath ? { path: block.sourcePath } : {}),
         });
       }
       // tool-result blocks render attached to their call.
@@ -522,7 +532,12 @@ const describeToolCall = (call: LlmToolUseBlock): string => {
 type ToolEntry = { call: LlmToolUseBlock; result: LlmToolResultBlock | null };
 
 /** One inline image of the transcript, as the lightbox needs it. */
-type ChatImage = { readonly mimeType: string; readonly data: string };
+type ChatImage = {
+  readonly mimeType: string;
+  readonly data: string;
+  /** Project-relative path of the full-size file this thumbnail stands for, when there is one. */
+  readonly path?: string;
+};
 
 /** A run of adjacent tool calls, plus the message rows around them, after grouping. */
 type RenderRow =
@@ -689,6 +704,9 @@ export class AgentChatPanel extends ComponentBase {
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
 
+  @inject(ProjectStorageService)
+  private readonly storage!: ProjectStorageService;
+
   @inject(LightboxService)
   private readonly lightbox!: LightboxService;
 
@@ -754,6 +772,9 @@ export class AgentChatPanel extends ComponentBase {
   @state() private ctxScene: string | null = null;
   @state() private ctxSelection: Array<{ id: string; label: string }> = [];
   @state() private ctxSelectionExtra = 0;
+
+  /** Object URLs minted for the lightbox's full-size reads; released on the next open and on teardown. */
+  private chatImageUrls: string[] = [];
 
   private disposeChatSubscription?: () => void;
   private disposeSceneContextSub?: () => void;
@@ -840,6 +861,7 @@ export class AgentChatPanel extends ComponentBase {
   }
 
   disconnectedCallback(): void {
+    this.releaseChatImageUrls();
     this.disposeChatSubscription?.();
     this.disposeChatSubscription = undefined;
     this.disposeComposeSubscription?.();
@@ -1010,7 +1032,11 @@ export class AgentChatPanel extends ComponentBase {
           role: item.role,
           mimeType: item.mimeType,
           data: item.data,
-          siblings: siblings.map(image => ({ mimeType: image.mimeType, data: image.data })),
+          siblings: siblings.map(image => ({
+            mimeType: image.mimeType,
+            data: image.data,
+            ...(image.path ? { path: image.path } : {}),
+          })),
           siblingIndex: Math.max(0, siblings.indexOf(item)),
         });
       } else if (item.kind === 'divider') {
@@ -1095,7 +1121,7 @@ export class AgentChatPanel extends ComponentBase {
             class="agent-image-expand"
             title="Show larger"
             aria-label="Show larger"
-            @click=${() => this.openChatImage(row)}
+            @click=${() => void this.openChatImage(row)}
           >
             <img
               class="agent-image"
@@ -2269,18 +2295,51 @@ export class AgentChatPanel extends ComponentBase {
    * Expand a transcript image. The list handed over is the whole message's images, so the arrows
    * walk the moodboard the tool returned rather than dead-ending on the one that was clicked.
    *
-   * `data:` URLs, not object URLs: the transcript already holds the base64, and minting blobs here
-   * would put this panel in the business of revoking them.
+   * What rides in the transcript is a 256px thumbnail — sized for the model's token budget, not for
+   * a human looking at it full-screen. So an image that names a project file is re-read from disk at
+   * full size, and only an image that exists nowhere else (a screenshot, a comparison sheet) is
+   * shown from its own base64 as a `data:` URL.
+   *
+   * The object URLs minted for those reads are owned here: the lightbox never revokes what it is
+   * given, so the previous set is released on the next open and on disconnect.
    */
-  private openChatImage(row: Extract<RenderRow, { kind: 'image' }>): void {
+  private async openChatImage(row: Extract<RenderRow, { kind: 'image' }>): Promise<void> {
     ensureLightboxHost();
-    const items: LightboxItem[] = row.siblings.map(image => ({
-      kind: 'image',
-      title: 'Tool-captured image',
-      url: `data:${image.mimeType};base64,${image.data}`,
-      mimeType: image.mimeType,
-    }));
+    this.releaseChatImageUrls();
+    const items: LightboxItem[] = await Promise.all(
+      row.siblings.map(async (image): Promise<LightboxItem> => {
+        const fromFile = image.path ? await this.readProjectImageUrl(image.path) : null;
+        return {
+          kind: 'image',
+          title: image.path ? (image.path.split('/').pop() ?? image.path) : 'Tool-captured image',
+          url: fromFile ?? `data:${image.mimeType};base64,${image.data}`,
+          mimeType: image.mimeType,
+          ...(image.path ? { path: image.path } : {}),
+        };
+      })
+    );
     this.lightbox.open(items, row.siblingIndex);
+  }
+
+  /**
+   * Object URL for a project image, or `null` when it cannot be read — a generated file the user has
+   * since deleted or renamed must still expand, just to the thumbnail the transcript kept.
+   */
+  private async readProjectImageUrl(path: string): Promise<string | null> {
+    try {
+      const url = URL.createObjectURL(await this.storage.readBlob(path));
+      this.chatImageUrls.push(url);
+      return url;
+    } catch {
+      return null;
+    }
+  }
+
+  private releaseChatImageUrls(): void {
+    for (const url of this.chatImageUrls) {
+      URL.revokeObjectURL(url);
+    }
+    this.chatImageUrls = [];
   }
 
   /** Expand a staged composer attachment; the arrows walk the other staged images. */

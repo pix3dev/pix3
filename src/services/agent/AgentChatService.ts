@@ -1947,7 +1947,14 @@ export class AgentChatService {
             typeof image.mimeType === 'string' &&
             typeof image.data === 'string'
           ) {
-            images.push({ type: 'image', mimeType: image.mimeType, data: image.data });
+            images.push({
+              type: 'image',
+              mimeType: image.mimeType,
+              data: image.data,
+              // Editor-only: the chat expands the saved file rather than this thumbnail. Providers
+              // build their own image payloads field by field, so it never leaves the editor.
+              ...(typeof image.path === 'string' && image.path ? { sourcePath: image.path } : {}),
+            });
           }
         }
         const { [AGENT_TOOL_IMAGES_KEY]: _omitted, ...rest } = payload;

@@ -23,6 +23,7 @@ import { FLOW_PROGRESS_PATH } from '@/services/flow/FlowPlanService';
 import {
   FlowReferencesService,
   REFERENCES_DIR,
+  uniqueFileName,
   type FlowReferenceRole,
 } from '@/services/flow/FlowReferencesService';
 import { DECISIONS_PATH, appendDecision } from '@/services/flow/decision-log';
@@ -160,6 +161,12 @@ export type JsonSchema = Record<string, unknown>;
 export interface AgentToolImage {
   readonly mimeType: string;
   readonly data: string;
+  /**
+   * Project-relative path of the file this image previews, when the tool saved one. Carried through
+   * to the transcript so the chat can expand the SAVED file instead of the thumbnail it shows the
+   * model; a tool whose image exists nowhere on disk (a screenshot, a comparison sheet) omits it.
+   */
+  readonly path?: string;
 }
 
 /**
@@ -1972,6 +1979,11 @@ export class AgentToolRegistry {
               type: 'string',
               description:
                 'Target file name or relative path (e.g. "sprites/car.png"). Projects use a flat layout — one folder per asset type at the project root (`sprites/`, `models/`, `audio/`, …), never nested under `assets/`. A bare name is placed in the matching type folder automatically — at the IDEA stage it goes to `references/` instead, since that is the folder the references column lists; the extension is added when missing.',
+            },
+            overwrite: {
+              type: 'boolean',
+              description:
+                'IDEA STAGE ONLY: replace the existing reference of that name instead of saving alongside it. Default false — a name already taken in `references/` gets a `-2` suffix, so a second mockup never silently destroys the first. Pass true only when you were asked to redo THAT file (the Regenerate action of the references column says so explicitly).',
             },
             transparent: {
               type: 'boolean',
@@ -4325,7 +4337,7 @@ export class AgentToolRegistry {
     }
 
     const prompt = asString(args.prompt);
-    const name = this.resolveGeneratedAssetPath(asString(args.name));
+    const name = await this.resolveGeneratedAssetPath(asString(args.name), args.overwrite === true);
     const references = Array.isArray(args.references)
       ? args.references.filter((r): r is string => typeof r === 'string')
       : undefined;
@@ -4375,7 +4387,7 @@ export class AgentToolRegistry {
             `folder is not yours to choose. Do NOT copy or move it elsewhere; point at this path. ` +
             transparencyNote(preset, transparency)
           : transparencyNote(preset, transparency),
-        ...(await this.previewImages(oriented)),
+        ...(await this.previewImages(oriented, saved.path)),
       };
     } finally {
       for (const id of handleIds) {
@@ -4400,14 +4412,37 @@ export class AgentToolRegistry {
    * `references/`; only the file NAME is taken from what was asked for. The saved path comes back in
    * the tool result, so the model still knows where to point at it.
    */
-  private resolveGeneratedAssetPath(name: string): string {
+  private async resolveGeneratedAssetPath(name: string, overwrite: boolean): Promise<string> {
     const path = this.safePath(name);
     if (this.flowStage.isIdeaStage()) {
-      return `${REFERENCES_DIR}/${path.split('/').pop() || path}`;
+      const fileName = path.split('/').pop() || path;
+      // A reference is an artefact the board ACCUMULATES, not a slot: two mockups asked for in one
+      // session land on the same guessable name (`mockup_gameplay.png`) and the second would replace
+      // the first in silence — the user sees a list that did not grow and reads it as a list that
+      // did not refresh (observed live). Dropped files already de-duplicate this way; generated
+      // ones now do too. Replacing in place stays possible, but only when it was ASKED for
+      // (`overwrite`), which is what the column's Regenerate action prefills.
+      const unique = overwrite
+        ? fileName
+        : uniqueFileName(fileName, await this.takenReferenceNames());
+      return `${REFERENCES_DIR}/${unique}`;
     }
     // Bare file names land in the category folder at the project root (`car.png` →
     // `sprites/car.png`) so generated art never litters the project root.
     return ensureAssetTypeFolder(path);
+  }
+
+  /**
+   * File names already in `references/`, for collision-avoidance. A listing failure degrades to "no
+   * collisions": failing a generation over a directory listing would be the worse trade.
+   */
+  private async takenReferenceNames(): Promise<Set<string>> {
+    try {
+      const list = await this.flowReferences.list();
+      return new Set(list.references.map(item => item.name));
+    } catch {
+      return new Set<string>();
+    }
   }
 
   /**
@@ -4801,7 +4836,7 @@ export class AgentToolRegistry {
         preset,
         transparency,
         note: `Processed "${path}" → "${saved.path}" with the "${preset}" preset. ${transparencyNote(preset, transparency)}`,
-        ...(await this.previewImages(oriented)),
+        ...(await this.previewImages(oriented, saved.path)),
       };
     } catch (error) {
       return { ok: false, error: error instanceof Error ? error.message : String(error) };
@@ -5029,14 +5064,27 @@ export class AgentToolRegistry {
     return currentId;
   }
 
-  /** Build the `__images` payload from a 256px preview of a handle, for visual QC by the model. */
-  private async previewImages(handleId: string): Promise<Record<string, unknown>> {
+  /**
+   * Build the `__images` payload from a 256px preview of a handle, for visual QC by the model.
+   *
+   * `savedPath` is what the handle was written to, when it was written at all. The thumbnail is
+   * sized for the model's token budget, so without the path the chat would have nothing but those
+   * 256 pixels to enlarge when the user clicks the picture.
+   */
+  private async previewImages(
+    handleId: string,
+    savedPath?: string
+  ): Promise<Record<string, unknown>> {
     const previewDataUrl = await this.assetGen.preview(handleId, 256);
     const comma = previewDataUrl.indexOf(',');
     const previewMime = previewDataUrl.slice(5, previewDataUrl.indexOf(';'));
     return {
       [AGENT_TOOL_IMAGES_KEY]: [
-        { mimeType: previewMime, data: previewDataUrl.slice(comma + 1) },
+        {
+          mimeType: previewMime,
+          data: previewDataUrl.slice(comma + 1),
+          ...(savedPath ? { path: savedPath } : {}),
+        },
       ] satisfies AgentToolImage[],
     };
   }

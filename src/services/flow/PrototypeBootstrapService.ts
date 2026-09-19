@@ -74,6 +74,7 @@ import {
 import {
   FLOW_RECIPE_HINT_METADATA_KEY,
   FLOW_STAGE_METADATA_KEY,
+  FLOW_TITLE_SOURCE_METADATA_KEY,
 } from '@/services/flow/FlowStageService';
 
 // ---------------------------------------------------------------------------
@@ -1387,6 +1388,9 @@ export class PrototypeBootstrapService {
       metadata: {
         ...(manifest.metadata ?? {}),
         projectName: title,
+        // Records that the editor, not the user, chose this name — what lets the agent's first
+        // real title replace it later without ever overwriting a name the user typed.
+        [FLOW_TITLE_SOURCE_METADATA_KEY]: title,
         templateId: IDEA_TEMPLATE_ID,
         [FLOW_STAGE_METADATA_KEY]: 'idea',
         ...(recipeId ? { [FLOW_RECIPE_HINT_METADATA_KEY]: recipeId } : {}),
@@ -2175,21 +2179,215 @@ export const fallbackBrief = (prompt: string): PrototypeBrief => ({
   ],
 });
 
-/** A short project name out of the prompt's first words. */
-export const deriveTitle = (prompt: string): string => {
-  const cleaned = prompt.trim().replace(/["'`]/g, '');
-  // Cut at the first clause boundary when there is one: "ant colony strategy: build tunnels,
-  // gather food" names itself in its first clause, and taking a flat five words instead produced
-  // titles that ended mid-phrase on a comma ("Ant colony strategy: build tunnels,").
-  const clause = cleaned.split(/\s*[:;.!?—–]\s*|\s*,\s*/)[0] ?? '';
-  const source = clause.split(/\s+/).filter(Boolean).length >= 2 ? clause : cleaned;
-  const words = source.split(/\s+/).filter(Boolean).slice(0, 5).join(' ');
+/**
+ * Words a prompt OPENS with that say nothing about the game: greetings, discourse markers, and the
+ * request itself. "Привет! давай сделаем игру флапи" named the project after the greeting and the
+ * verb and ran out of room one word before the only word that identified it, so the front of the
+ * prompt is skipped before anything else is measured.
+ */
+const TITLE_LEAD_IN_WORDS = new Set([
+  // Greetings.
+  'привет',
+  'приветик',
+  'здравствуй',
+  'здравствуйте',
+  'хай',
+  'йо',
+  'hi',
+  'hello',
+  'hey',
+  'yo',
+  // Discourse markers people start a sentence with.
+  'короче',
+  'итак',
+  'слушай',
+  'слушайте',
+  'смотри',
+  'смотрите',
+  'ok',
+  'okay',
+  'so',
+  'well',
+  // The request itself.
+  'давай',
+  'давайте',
+  'пожалуйста',
+  'плиз',
+  'сделай',
+  'сделайте',
+  'сделаем',
+  'сделать',
+  'создай',
+  'создадим',
+  'создать',
+  'напиши',
+  'написать',
+  'собери',
+  'собрать',
+  'сгенерируй',
+  'придумай',
+  'придумать',
+  'запили',
+  'запилить',
+  'помоги',
+  'хочу',
+  'хочется',
+  'нужна',
+  'нужен',
+  'нужно',
+  'я',
+  'мы',
+  'мне',
+  'нам',
+  'please',
+  'lets',
+  "let's",
+  'let',
+  'make',
+  'create',
+  'build',
+  'generate',
+  'write',
+  'want',
+  'need',
+  'would',
+  'like',
+  'can',
+  'could',
+  'you',
+  'me',
+  'i',
+  'we',
+  'a',
+  'an',
+  'the',
+]);
+
+/**
+ * The bare word "game" is not a name: "игру флапи" is called "Флапи". Dropped only when what
+ * follows is short enough to BE a title — a prompt that opens with it and then runs on for a
+ * sentence keeps its words rather than being named after a subordinate clause.
+ */
+const GENERIC_GAME_WORDS = /(?:игру|игра|игры|игрушку|игрушка|игрульку|гейм|game)/.source;
+// A separator class instead of a word-boundary escape: that escape is ASCII-only, so it never
+// matches after a Cyrillic word and "игру флапи" kept its noun. Composed through `.source` so the
+// pieces stay regex literals — the same classes written as string literals lose their escapes.
+const TITLE_WORD_END = /(?:[\s,:;—–-]+|$)/.source;
+// Multi-word forms first: "про то как кот прыгает" would otherwise title the project "Игру про то".
+const GENERIC_GAME_PREPOSITIONS =
+  /(?:про то,?\s*как|о том,?\s*как|about how|про|об|обо|о|такую|такой|типа|about|where|где|with|с|со)/
+    .source;
+const GENERIC_GAME_NOUN = new RegExp(
+  `^${GENERIC_GAME_WORDS}${TITLE_WORD_END}(?:${GENERIC_GAME_PREPOSITIONS}${TITLE_WORD_END})?`,
+  'iu'
+);
+/** A title that is nothing but the generic noun names the project no better than the fallback. */
+const GENERIC_GAME_NOUN_ONLY = new RegExp(`^${GENERIC_GAME_WORDS}$`, 'iu');
+
+/** Words a title must not END on: they promise a continuation the cut just removed. */
+const TITLE_TRAILING_FILLER = new Set([
+  'и',
+  'с',
+  'со',
+  'про',
+  'для',
+  'где',
+  'как',
+  'что',
+  'в',
+  'на',
+  'о',
+  'об',
+  'а',
+  'но',
+  'and',
+  'with',
+  'about',
+  'where',
+  'that',
+  'the',
+  'a',
+  'an',
+  'of',
+  'or',
+  'but',
+  'to',
+  'in',
+  'on',
+]);
+
+const TITLE_MAX_WORDS = 4;
+const TITLE_MAX_CHARS = 40;
+
+/** Lowercased word of a token, punctuation and all, for a stop-list lookup. */
+const titleWord = (token: string): string =>
+  token.toLowerCase().replace(/^[^\p{L}\p{N}']+|[^\p{L}\p{N}']+$/gu, '');
+
+/** Drop lead-in words one at a time — never all of them: a prompt of pure filler still needs a name. */
+const stripLeadIns = (text: string): string => {
+  let rest = text.trim();
+  for (;;) {
+    const match = rest.match(/^\S+(?:\s+|$)/);
+    if (!match) {
+      return rest;
+    }
+    const word = titleWord(match[0]);
+    if (word && !TITLE_LEAD_IN_WORDS.has(word)) {
+      return rest;
+    }
+    const next = rest.slice(match[0].length).replace(/^[\s,:;.!?—–-]+/, '');
+    if (!next) {
+      return rest;
+    }
+    rest = next;
+  }
+};
+
+/** See {@link GENERIC_GAME_NOUN} — applied only when the rest of the clause is itself title-sized. */
+const stripGenericGameNoun = (text: string): string => {
+  const stripped = text.replace(GENERIC_GAME_NOUN, '');
+  if (stripped === text || !stripped.trim()) {
+    return text;
+  }
+  const clause = stripped.split(/\s*[:;.!?—–]\s*|\s*,\s*/)[0] ?? '';
+  const words = clause.split(/\s+/).filter(Boolean).length;
+  // What is left has to be a title on its own. Past that the noun was the sentence's subject and
+  // dropping it leaves a fragment ("игра, где ты прыгаешь по крышам" → "ты прыгаешь по крышам").
+  return words > 0 && words <= TITLE_MAX_WORDS ? stripped : text;
+};
+
+/** Cap by WORDS, then by characters — a character cap alone cuts a word in half. */
+const trimTitle = (text: string): string => {
+  let words = text.split(/\s+/).filter(Boolean).slice(0, TITLE_MAX_WORDS);
+  while (words.length > 1 && TITLE_TRAILING_FILLER.has(titleWord(words[words.length - 1]))) {
+    words = words.slice(0, -1);
+  }
+  while (words.length > 1 && words.join(' ').length > TITLE_MAX_CHARS) {
+    words = words.slice(0, -1);
+  }
   // Trailing punctuation survives the word split ("coins," when the cut lands on a comma).
-  const title = words
-    .slice(0, 48)
+  return words
+    .join(' ')
+    .slice(0, TITLE_MAX_CHARS)
     .replace(/[\s,;:.!?—–-]+$/, '')
     .trim();
-  if (!title) {
+};
+
+/**
+ * A short project name out of the prompt — what the user sees in the Flow header, the recents list
+ * and the status bar from the first second, before any model has run (the idea path makes no LLM
+ * call on the way in, design §3.1). It is a starting name, not the last word: the agent renames the
+ * project once its first turn has a real title for it (see `FlowProjectNameService`).
+ */
+export const deriveTitle = (prompt: string): string => {
+  const cleaned = prompt.trim().replace(/["'`]/g, '');
+  const idea = stripGenericGameNoun(stripLeadIns(cleaned));
+  // Cut at the first clause boundary: "ant colony strategy: build tunnels, gather food" names
+  // itself in its first clause, and taking a flat word count instead produced titles that ended
+  // mid-phrase on a comma ("Ant colony strategy: build tunnels,").
+  const clause = idea.split(/\s*[:;.!?—–]\s*|\s*,\s*/).find(part => part.trim().length > 0) ?? '';
+  const title = trimTitle(clause.trim() || idea);
+  if (!title || GENERIC_GAME_NOUN_ONLY.test(title)) {
     return 'New Prototype';
   }
   return title.charAt(0).toUpperCase() + title.slice(1);
@@ -2480,6 +2678,9 @@ export const renderIdeaFirstTurnMessage = (
     'the prompt. Fill in what the prompt and the references actually say, in the same turn, editing',
     'with `str_replace`. Everything you and the user agree on lives in that file; this conversation',
     'gets compacted and the file does not.',
+    '',
+    'Name the game this turn: the `# Title` line holds a placeholder lifted out of the prompt, and',
+    'it is what the project itself is named after — one to three words, in the language they wrote in.',
     '',
     'Do NOT guess the parts the user has not decided. End this turn with **one or two** questions',
     'through `ask_user` — the forks where a wrong guess would mean redoing the game later.',

@@ -8,6 +8,7 @@ import { DialogService } from '@/services/editor/DialogService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
 import { FlowPlanService, type FlowPlan } from '@/services/flow/FlowPlanService';
+import { FlowProjectNameService } from '@/services/flow/FlowProjectNameService';
 import { FlowStageService, type FlowStage } from '@/services/flow/FlowStageService';
 import { IDEA_DOC_PATH } from '@/services/flow/FlowReferencesService';
 import {
@@ -112,6 +113,9 @@ export class Pix3FlowShell extends ComponentBase {
 
   @inject(FlowStageService)
   private readonly stageService!: FlowStageService;
+
+  @inject(FlowProjectNameService)
+  private readonly projectNames!: FlowProjectNameService;
 
   @inject(PrototypeBootstrapService)
   private readonly bootstrap!: PrototypeBootstrapService;
@@ -512,6 +516,9 @@ export class Pix3FlowShell extends ComponentBase {
       return;
     }
     this.plan = await this.planService.load();
+    // The header reads the document's title directly; the PROJECT is named after the raw prompt
+    // until this carries the agent's title over to it (see FlowProjectNameService for the guards).
+    void this.projectNames.syncFromDocumentTitle(this.plan.title);
   }
 
   /**

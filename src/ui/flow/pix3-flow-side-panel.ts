@@ -414,7 +414,10 @@ export class Pix3FlowSidePanel extends ComponentBase {
   private onRegenerate(item: FlowReferenceItem): void {
     const prompt = item.caption ? `\n\nThe prompt that produced it: "${item.caption}"` : '';
     this.agentChat.composePrefill(
-      `Regenerate \`res://${item.path}\` — same path, another attempt.${prompt}`
+      // `overwrite: true` is spelled out because generated references otherwise de-duplicate their
+      // names: without it "regenerate" would leave a `-2` copy instead of replacing this card.
+      `Regenerate \`res://${item.path}\` — same path, another attempt. ` +
+        `Call generate_asset with name "${item.name}" and overwrite: true.${prompt}`
     );
   }
 
