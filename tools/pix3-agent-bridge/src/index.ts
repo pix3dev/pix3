@@ -43,6 +43,7 @@
 
 import http from 'node:http';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createRequire } from 'node:module';
 
 import { SessionManager, type ResetOptions } from './sessions.ts';
 import { HttpError, isRecord, parseMessagesRequest } from './wire.ts';
@@ -59,6 +60,24 @@ import { AGY_AGENT_ID } from './agy.ts';
 import { installShim } from './mcp-shim.ts';
 
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
+
+/**
+ * Own version, for the start banner — the answer to "is the bridge that is running the one I just
+ * installed?". Read at runtime rather than imported: `package.json` sits above `src/` (and above
+ * `dist/`, identically), so a JSON import would fall outside the build's rootDir.
+ */
+const BRIDGE_VERSION = ((): string => {
+  try {
+    const pkg = createRequire(import.meta.url)('../package.json') as { version?: unknown };
+    return typeof pkg.version === 'string' ? pkg.version : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+})();
+
+/** Yellow where it renders, plain text where it would only be noise (a pipe, NO_COLOR). */
+const yellow = (text: string): string =>
+  process.stdout.isTTY && !process.env.NO_COLOR ? `\x1b[33m${text}\x1b[0m` : text;
 
 /** Discovery entry for the intrinsic Agent-SDK (subscription) lane — not part of the provider table. */
 const AGENT_SDK_PROVIDER = {
@@ -502,7 +521,9 @@ const startServer = (config: BridgeConfig): void => {
       .filter(([, p]) => p.enabled && p.apiKey)
       .map(([id]) => id);
     console.log('');
-    console.log(`  Pix3AgentBridge listening on http://127.0.0.1:${config.port}`);
+    console.log(
+      `  Pix3AgentBridge ${yellow(`v${BRIDGE_VERSION}`)} listening on http://127.0.0.1:${config.port}`
+    );
     console.log('');
     console.log('  Pair the editor — open one of these (the editor stores the token and cleans the URL):');
     for (const link of pairingLinks(config)) {
