@@ -25,6 +25,9 @@
  *   - **`--print-timeout` defaults to 5 minutes** and would kill a process that is merely waiting
  *     for a human to approve a tool, so the bridge sets it far beyond its own watchdog and keeps
  *     ownership of the deadline.
+ *   - **A failed model call arrives as an `error_message` STEP, not as a `result`.** agy retries it
+ *     with backoff and says why only in its own log file, so a quota wall used to look like an idle
+ *     chat. `onStep` logs every one and fails the turn on the walls a retry cannot clear.
  */
 
 import { spawn } from 'node:child_process';
@@ -59,6 +62,12 @@ export interface AgyStepUpdate {
   readonly state?: string;
   readonly step_type?: string;
   readonly text_delta?: string;
+  // An `error_message` step carries the reason a model call failed. Which field holds it is not
+  // pinned by anything we can read (the live case — a Gemini 429 — reached only agy's own log
+  // file), so every plausible name is declared and `stepErrorText` takes the first that is filled.
+  readonly error?: string;
+  readonly error_message?: string;
+  readonly message?: string;
   readonly tool_name?: string;
   readonly tool_info?: { readonly name?: string; readonly parameters?: Record<string, unknown> };
   readonly usage?: AgyUsage;
@@ -228,6 +237,17 @@ const describeAgyTool = (step: AgyStepUpdate): string => {
     .map(([key, value]) => `${key}=${clip(typeof value === 'string' ? value : JSON.stringify(value), 120)}`)
     .join(', ');
   return `[agy] ${name}${summary ? `(${summary})` : ''}`;
+};
+
+/**
+ * Reason text of an `error_message` step, falling back to the raw step so an unfamiliar shape still
+ * reaches the log instead of vanishing.
+ */
+const stepErrorText = (step: AgyStepUpdate): string => {
+  for (const value of [step.error_message, step.error, step.message, step.text_delta]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return JSON.stringify(step);
 };
 
 export class AgySession implements ManagedSession {
@@ -602,6 +622,23 @@ export class AgySession implements ManagedSession {
         this.producedInTurn = true;
         this.flushTextRun();
         this.blocks.push({ type: 'text', text: describeAgyTool(step) });
+        return;
+      }
+      case 'error_message': {
+        // agy retries a failed model call itself (4s, 6s, 10s, 22s... under the 24h print timeout)
+        // and emits one of these per attempt, with the reason only in its own log file. Each one
+        // also counts as progress, so the manager's stall watchdog never fires: a chat that hit the
+        // Gemini quota wall simply sat there looking idle. Log every one, and stop waiting on the
+        // walls that cannot clear inside a turn.
+        const message = stepErrorText(step);
+        this.log(`[${this.id}] agy error step: ${clip(message, 400)}`);
+        if (!this.waiting || !(looksLikeQuota(message) || looksLikeAuth(message))) return;
+        this.failWaiting(this.classifyError(message));
+        this.resetTurnBuffers();
+        // The process would keep retrying that same wall for up to 24h, and queue the user's next
+        // turn behind it. Closing drops the session from the pool, so the next message starts a
+        // fresh one instead of landing in the same backoff.
+        this.forceClose('agy hit a quota or auth wall');
         return;
       }
       case 'user_input':

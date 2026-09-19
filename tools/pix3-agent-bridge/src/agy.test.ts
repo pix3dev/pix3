@@ -324,6 +324,44 @@ describe('AgySession', () => {
     }
   });
 
+  it('fails the turn on a quota wall reported as an error step, instead of waiting out the retries', async () => {
+    // Live case: Gemini answered RESOURCE_EXHAUSTED, agy retried it with backoff and emitted one
+    // `error_message` step per attempt. The bridge ignored them as an unknown step type, so the
+    // chat sat silent while only agy's log file knew why.
+    const { session, fake } = startSession();
+    const promise = session.handleRequest(makeRequest(), new AbortController().signal);
+    fake.emit(
+      { event: 'init', conversation_id: 'conv-1' },
+      step({
+        step_index: 1,
+        state: 'DONE',
+        step_type: 'error_message',
+        error_message:
+          'RESOURCE_EXHAUSTED (code 429): Individual quota reached. Please upgrade your subscription.',
+      })
+    );
+    await assert.rejects(promise, (error: { status?: number; message?: string }) => {
+      assert.equal(error.status, 429);
+      assert.match(String(error.message), /Individual quota reached/);
+      return true;
+    });
+    assert.equal(session.closed, true, 'the retrying process must not keep the next turn queued');
+  });
+
+  it('treats a retryable error step as a heartbeat', async () => {
+    const { session, fake } = startSession();
+    const promise = session.handleRequest(makeRequest(), new AbortController().signal);
+    fake.emit(
+      { event: 'init', conversation_id: 'conv-1' },
+      step({ step_index: 1, state: 'DONE', step_type: 'error_message', error_message: 'UNAVAILABLE (code 503): no capacity' }),
+      step({ step_index: 2, state: 'DONE', step_type: 'agent_response', text_delta: 'recovered' }),
+      { event: 'result', result: { status: 'SUCCESS', response: 'recovered' } }
+    );
+    const body = (await promise).body as { content: Array<{ text: string }> };
+    assert.equal(body.content[0].text, 'recovered');
+    assert.equal(session.closed, false);
+  });
+
   it('survives an event kind it has never seen', async () => {
     const { session, fake } = startSession();
     const promise = session.handleRequest(makeRequest(), new AbortController().signal);

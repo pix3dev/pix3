@@ -1,6 +1,6 @@
 {
   "name": "@pix3/agent-bridge",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Local bridge for the Pix3 editor's in-editor agent: local agent lanes (Claude Agent SDK on a Pro/MAX subscription, Antigravity CLI) plus a credential-injecting proxy for OpenAI / Anthropic / OpenCode Zen / custom OpenAI-compatible providers. Keys stay on your machine.",
   "type": "module",
   "repository": {
