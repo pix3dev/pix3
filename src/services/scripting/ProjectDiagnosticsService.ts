@@ -59,7 +59,7 @@ interface TypeScriptDiagnosticsWorker {
  * Monaco only produces diagnostics for files that are open in an editor. This
  * service closes that gap by reusing Monaco's TypeScript worker: it materialises
  * a model for every project script, asks the worker for semantic + syntactic
- * diagnostics, then disposes the temporary models.
+ * diagnostics, and KEEPS those models between runs (see {@link ownedModels}).
  *
  * Auto-runs after a compile and when entering play mode, but ONLY when Monaco is
  * already loaded (so pure scene/asset work never pays the Monaco load cost). The
@@ -82,6 +82,20 @@ export class ProjectDiagnosticsService {
   private running: Promise<ScriptDiagnosticsSummary> | null = null;
   private autoCheckTimer: number | null = null;
   private readonly disposers: Array<() => void> = [];
+
+  /**
+   * The models this service created for the check, by URI — kept alive between runs on purpose.
+   *
+   * They used to be disposed after every run and recreated from the fresh file text on the next,
+   * which looks correct and is not: a recreated model starts at `versionId` 1 again, and the TS
+   * language service in the worker caches a SourceFile by file name + version, so a same-name
+   * same-version file is not re-read. The check then reported the PREVIOUS content of the file —
+   * a `default` key at a line where the file now had `onStart()` — until the worker was restarted
+   * by its own idle timeout, and an agent spent a dozen hops arguing with a phantom diagnostic
+   * (observed live, autopilot plan §9). Updating a live model with `setValue` bumps its version
+   * monotonically, which is what makes the worker re-parse.
+   */
+  private readonly ownedModels = new Map<string, Monaco.editor.ITextModel>();
 
   /** Result of the most recent check (null until the first run completes). */
   private lastSummary: ScriptDiagnosticsSummary | null = null;
@@ -179,18 +193,36 @@ export class ProjectDiagnosticsService {
     const intelliSense = await this.intelliSense();
     await intelliSense.ensureConfigured(monaco);
 
-    // Materialise a model for every project script. Reuse a model if one already
-    // exists (an open editor tab); otherwise create a temporary one to dispose.
-    const createdModels: Monaco.editor.ITextModel[] = [];
+    // Materialise a model for every project script. An open editor tab's model is the source of
+    // truth and is used as is; a model of our own is updated in place (never recreated — see
+    // {@link ownedModels}); anything else is created once and kept.
     const models: Array<{ path: string; model: Monaco.editor.ITextModel }> = [];
+    const seen = new Set<string>();
     for (const [path, content] of files) {
       const uri = monaco.Uri.parse(`res://${path}`);
+      const key = uri.toString();
+      seen.add(key);
       let model = monaco.editor.getModel(uri);
+      if (model && model.isDisposed()) {
+        model = null;
+      }
       if (!model) {
         model = monaco.editor.createModel(content, this.languageFor(path), uri);
-        createdModels.push(model);
+        this.ownedModels.set(key, model);
+      } else if (this.ownedModels.get(key) === model && model.getValue() !== content) {
+        model.setValue(content);
       }
       models.push({ path, model });
+    }
+    // A script that left the project takes its model with it — a stale model would keep the
+    // worker resolving imports against a file that no longer exists.
+    for (const [key, model] of this.ownedModels) {
+      if (!seen.has(key)) {
+        if (!model.isDisposed()) {
+          model.dispose();
+        }
+        this.ownedModels.delete(key);
+      }
     }
 
     // Our new models now shadow the sibling-mirror extra libs; drop the mirrors
@@ -248,10 +280,8 @@ export class ProjectDiagnosticsService {
       this.report(summary);
       return summary;
     } finally {
-      for (const model of createdModels) {
-        model.dispose();
-      }
-      // Restore the sibling mirrors for the models we removed.
+      // The mirrors for files that now have a model stay dropped — the model is the truth for
+      // them from here on; this restores the mirrors of anything that lost its model above.
       intelliSense.refreshNow();
     }
   }
@@ -296,6 +326,12 @@ export class ProjectDiagnosticsService {
       dispose();
     }
     this.disposers.length = 0;
+    for (const model of this.ownedModels.values()) {
+      if (!model.isDisposed()) {
+        model.dispose();
+      }
+    }
+    this.ownedModels.clear();
     this.initialized = false;
   }
 }
