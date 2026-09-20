@@ -149,6 +149,9 @@ export const renderAutopilotTurnMessage = (step: AutopilotStep, plan: FlowPlan):
   }
   lines.push(
     '',
+    'The checklist can lag behind the code: if the project already does this, prove THAT in the',
+    'running game and tick the item instead of building it a second time.',
+    '',
     'Prove it in the running game before you report: compile, play, drive it with `game_input`,',
     'judge the outcome with `game_run` (an `until` that says what success IS), and read errors.',
     'Then update `design/progress.md` — tick this item `- [x]` with how you proved it, and mark the',

@@ -13,6 +13,7 @@ import {
   FLOW_BRIEF_PATH,
   FLOW_PROGRESS_PATH,
 } from '@/services/flow/FlowPlanService';
+import { FlowStageService } from '@/services/flow/FlowStageService';
 import { DECISIONS_PATH, extractDecisionEntries } from '@/services/flow/decision-log';
 import { routeQuestion } from '@/services/flow/autopilot-router';
 import {
@@ -31,6 +32,14 @@ const RECIPE_MD_PATH = 'design/recipe.md';
  * resetting it with every other keystroke.
  */
 export const ACTIVITY_GRACE_MS = 2_000;
+
+/**
+ * Prompt tokens the provider actually re-processed for this conversation so far. `inputTokens` is
+ * cache-inclusive by contract (see `LlmUsage`), so the cached share is taken back out; a provider
+ * that reports no cache figure counts in full, which errs towards stopping early — the honest side.
+ */
+const uncachedPromptTokens = (state: AgentChatState): number =>
+  Math.max(0, (state.totalUsage.inputTokens ?? 0) - (state.totalUsage.cacheReadTokens ?? 0));
 
 /**
  * The autopilot's director (plan §2.2): the code that decides WHICH increment happens next, starts
@@ -60,6 +69,9 @@ export class FlowAutopilotService {
   @inject(ProjectStorageService)
   private readonly storage!: ProjectStorageService;
 
+  @inject(FlowStageService)
+  private readonly flowStage!: FlowStageService;
+
   private unsubscribeChat: (() => void) | null = null;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
   private activityTimer: ReturnType<typeof setTimeout> | null = null;
@@ -69,7 +81,7 @@ export class FlowAutopilotService {
   private countdownReason: 'increment' | 'question' = 'increment';
   private lastStatus: AgentChatStatus = 'idle';
   private lastActiveTool: string | null = null;
-  /** Cumulative prompt tokens of the conversation as last seen — see {@link accumulateTokens}. */
+  /** The conversation's cumulative UNCACHED prompt tokens as last seen — see {@link accumulateTokens}. */
   private lastSeenInputTokens = 0;
   /** True between our own `send` and the turn settling: "this turn is the supervisor's". */
   private drivingTurn = false;
@@ -82,7 +94,7 @@ export class FlowAutopilotService {
    * the objection §7.1 makes to the idea it came from.
    */
   armFromUser(mode: 'armed' | 'autonomous' = 'armed'): void {
-    if (appState.ui.workspaceMode !== 'flow') {
+    if (!this.canArm()) {
       return;
     }
     this.patch({
@@ -96,7 +108,7 @@ export class FlowAutopilotService {
       inputTokens: 0,
       stopReason: null,
     });
-    this.lastSeenInputTokens = this.chat.getState().totalUsage.inputTokens ?? 0;
+    this.lastSeenInputTokens = uncachedPromptTokens(this.chat.getState());
     this.lastStatus = this.chat.getState().status;
     this.subscribeToChat();
     if (!this.chat.isRunning()) {
@@ -184,6 +196,17 @@ export class FlowAutopilotService {
     }
   }
 
+  /**
+   * Whether there is anything for the autopilot to drive: Flow, and past the idea stage.
+   *
+   * At the idea stage there is no `design/progress.md` and no runtime — the queue would be empty
+   * and the first countdown would end in "nothing to work from". The UI reads this to hide the
+   * offer rather than show a button that can only apologise.
+   */
+  canArm(): boolean {
+    return appState.ui.workspaceMode === 'flow' && !this.flowStage.isIdeaStage();
+  }
+
   dispose(): void {
     this.clearTimers();
     this.unsubscribeChat?.();
@@ -252,12 +275,17 @@ export class FlowAutopilotService {
   /**
    * Fold this conversation's cumulative usage into the run's total.
    *
+   * UNCACHED prompt tokens, not `inputTokens`: that counter is cache-inclusive and summed per hop,
+   * so one increment of ~40 hops over a 73K context reads as 3M tokens — measured live, where it
+   * tripped a 600K budget after a single turn. What the run actually spends is the part the
+   * provider re-processed, and that is what the budget is denominated in.
+   *
    * A delta rather than the raw number because Flow starts a FRESH conversation between increments
    * once the context grows fat (`flowIncrementHandoff`), which resets `totalUsage` — a run measured
    * by the latest conversation's counter would look cheaper the longer it went on.
    */
   private accumulateTokens(state: AgentChatState): void {
-    const current = state.totalUsage.inputTokens ?? 0;
+    const current = uncachedPromptTokens(state);
     const delta =
       current >= this.lastSeenInputTokens ? current - this.lastSeenInputTokens : current;
     this.lastSeenInputTokens = current;
@@ -283,7 +311,7 @@ export class FlowAutopilotService {
       return `Budget reached: ${Math.round(minutes)} minutes of autonomous work.`;
     }
     if (state.inputTokens >= prefs.autopilotMaxInputTokens) {
-      return `Budget reached: ${Math.round(state.inputTokens / 1000)}K prompt tokens this run.`;
+      return `Budget reached: ${Math.round(state.inputTokens / 1000)}K uncached prompt tokens this run.`;
     }
     return null;
   }

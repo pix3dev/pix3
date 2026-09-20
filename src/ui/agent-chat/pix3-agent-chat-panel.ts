@@ -2067,8 +2067,9 @@ export class AgentChatPanel extends ComponentBase {
     const running = this.chatState?.status === 'running';
 
     if (autopilot.mode === 'off') {
-      // Nothing to continue before the first turn has produced a checklist to continue from.
-      if (running || (this.chatState?.messages.length ?? 0) === 0) {
+      // Nothing to continue before the first turn has produced a checklist to continue from — and
+      // nothing at the idea stage, where the checklist does not exist yet.
+      if (running || (this.chatState?.messages.length ?? 0) === 0 || !this.autopilot.canArm()) {
         return null;
       }
       return html`

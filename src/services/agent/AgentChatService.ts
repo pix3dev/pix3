@@ -9,6 +9,7 @@ import {
   type DecisionSource,
 } from '@/services/flow/decision-log';
 import { routeQuestion, type AutopilotAnswer } from '@/services/flow/autopilot-router';
+import { isAutopilotDrivenTurn } from '@/services/flow/autopilot-state';
 import { SceneManager, NodeBase } from '@pix3/runtime';
 import {
   AgentSettingsService,
@@ -191,18 +192,6 @@ const MAX_AGENTS_MD_CHARS = 16_000;
 const FLOW_VERIFY_ATTEMPTS = 3;
 /** Recipe contract written into every Flow project by the prototype expander. */
 const RECIPE_MD_PATH = 'design/recipe.md';
-
-/**
- * True while the turn on screen was started by the Flow autopilot rather than typed by a human.
- *
- * `phase === 'running'` is the supervisor's own claim, not a mirror of the chat status: a turn the
- * user sent leaves the autopilot at `idle` even while it is armed (see `FlowAutopilotService`). So
- * this reads as exactly what it needs to mean — "there is nobody to answer a question right now".
- */
-const isAutopilotDrivenTurn = (): boolean => {
-  const autopilot = appState.ui.flowAutopilot;
-  return autopilot.mode !== 'off' && autopilot.phase === 'running';
-};
 
 /**
  * Tools an unattended run never gets (plan §5, "never autonomously").
@@ -1937,7 +1926,7 @@ export class AgentChatService {
         answered: null,
         by: 'self',
         options: asked.options,
-        note: 'Autopilot is driving and nobody is at the keyboard, so this question has no reader. Decide it yourself on the evidence you have, state the choice in ONE line of your reply, and carry on with the increment — do not ask again.',
+        note: 'Autopilot is driving and nobody is at the keyboard, so this question has no reader. Decide it yourself on the evidence you have, then call record_decision with the question and your choice — unlike an answered ask_user, THIS one is not filed for you — state the choice in ONE line of your reply, and carry on with the increment. Do not ask again.',
       };
     }
     if (routed.via !== 'decision-log') {

@@ -380,7 +380,7 @@ export interface FlowAutopilotState {
   increments: number;
   /** Tool calls observed across the run — the hop budget (§5). */
   toolIterations: number;
-  /** Cumulative prompt tokens the run has read, as the provider reports them. */
+  /** Cumulative UNCACHED prompt tokens the run has spent — `inputTokens` minus the cached share. */
   inputTokens: number;
   /** Why the run paused or finished, in the user's words. Null while it is going fine. */
   stopReason: string | null;

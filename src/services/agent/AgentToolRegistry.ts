@@ -27,6 +27,7 @@ import {
   type FlowReferenceRole,
 } from '@/services/flow/FlowReferencesService';
 import { DECISIONS_PATH, appendDecision, type DecisionSource } from '@/services/flow/decision-log';
+import { isAutopilotDrivenTurn } from '@/services/flow/autopilot-state';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { StudioViewportMountService } from '@/services/editor/StudioViewportMountService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
@@ -751,6 +752,10 @@ export class AgentToolRegistry {
             alternatives: Array.isArray(args.alternatives)
               ? args.alternatives.filter((item): item is string => typeof item === 'string')
               : [],
+            // With nobody at the keyboard every fork the model files here is its own call (autopilot
+            // plan §4 step 4). Stamped by code, not asked of the model: the schema has no `source`
+            // on purpose — a model that could label its own decision "user" would, eventually.
+            ...(isAutopilotDrivenTurn() ? { source: 'auto-agent' as const } : {}),
           }),
       },
       {

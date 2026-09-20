@@ -266,6 +266,27 @@ describe('FlowAutopilotService', () => {
     service.dispose();
   });
 
+  /**
+   * `inputTokens` is cache-inclusive and summed per hop, so a 40-hop increment over a 73K context
+   * reads as ~3M — measured live, where it tripped the 600K budget after ONE turn. The budget is
+   * denominated in what the provider re-processed: the cached share comes back out.
+   */
+  it('budgets uncached prompt tokens, not the cache-inclusive counter', async () => {
+    const { service, chat } = build({ preferences: { autopilotMaxIncrements: 99 } });
+    service.armFromUser();
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    chat.emit({
+      status: 'idle',
+      totalUsage: { inputTokens: 3_000_000, cacheReadTokens: 2_900_000 },
+    });
+    await vi.runOnlyPendingTimersAsync();
+
+    expect(appState.ui.flowAutopilot.inputTokens).toBe(100_000);
+    // Well under the 600K default, so the run carries on instead of pausing on the budget.
+    expect(appState.ui.flowAutopilot.phase).not.toBe('paused');
+    service.dispose();
+  });
+
   it('calls the run done when every item on the checklist is ticked', async () => {
     const { service } = build({
       files: { 'design/progress.md': '# Progress\n\n- [x] drone flies\n' },
