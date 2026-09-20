@@ -155,15 +155,27 @@ export interface PrototypeBrief {
   readonly references?: readonly PrototypeBriefReference[];
 }
 
-/** Recipe the flow falls back to when the planner names one that does not exist (contract §1). */
-export const FALLBACK_RECIPE_ID = 'recipe-arena-2d';
+/**
+ * The recipe used when nothing points anywhere else: no provider configured, the planner call
+ * failed, the reply was not JSON, or the reply had no `recipeId` at all.
+ *
+ * Used to be `recipe-arena-2d` — a full game (an avatar dodging a spawner's pickups/hazards) — on
+ * the theory that a game that already plays beats a blank stage. In the field that theory meant
+ * almost every under-specified prompt landed on the same falling-pickups game, and it could also
+ * just be an expensive wrong guess (`.plans/TODO.md` § "планнер не попадает в рецепт, который уже
+ * есть": a silent reply cost a 1679-line brief and 124K tokens before ending there anyway). Pointing
+ * this at {@link BLANK_RECIPE_ID} instead never asserts a genre the idea did not state, and still
+ * hands the agent a working skeleton (score/lives/timer, HUD, win/lose) to build the real mechanic
+ * on top of.
+ */
+export const FALLBACK_RECIPE_ID = 'recipe-blank-2d';
 
 /** Recipe ids the planner may choose from, with the one-liners it needs to choose well. */
 /**
  * Recipe ids the planner may pick that are served by an existing template folder under another
  * name. The playable-ad "recipe" is the shipped `playable-2d` template (tap-gate + CTA hook)
  * promoted into the catalog with a `design/recipe.md`; without this alias the planner's
- * correct answer would silently fall back to the arena recipe.
+ * correct answer would silently fall back to the blank recipe instead.
  */
 export const RECIPE_TEMPLATE_ALIASES: Readonly<Record<string, string>> = {
   'recipe-playable-ad': 'playable-2d',
@@ -187,10 +199,13 @@ export const FALLBACK_3D_RECIPE_ID = 'recipe-grid-3d';
  * The recipe with no mechanics: score/lives/timer, a HUD and a win/lose overlay, and nothing else.
  *
  * It is the answer to an *affirmative* signal that the catalog does not fit — the planner naming a
- * recipe that does not exist. That is a different situation from the one {@link FALLBACK_RECIPE_ID}
- * covers (a reply that told us nothing about the idea at all), and the two used to share an answer:
- * an idea shaped like snake was answered with the arena's pointer steering and falling spawners, so
- * the agent's first increment went on *demolishing* a mechanic before it could build one.
+ * recipe that does not exist — and, since {@link FALLBACK_RECIPE_ID} points here too, also the
+ * answer to getting no signal at all. The two used to disagree on purpose (silence kept a genre
+ * guess, only an invented id got the blank stage), because an idea shaped like snake answered with
+ * the arena's pointer steering and falling spawners meant the agent's first increment went on
+ * *demolishing* a mechanic before it could build one. Assuming a genre on total silence turned out
+ * to cost more than that: the same guess recurred for nearly every under-specified idea, so both
+ * paths now land on the recipe that asserts nothing.
  */
 export const BLANK_RECIPE_ID = 'recipe-blank-2d';
 
@@ -200,14 +215,29 @@ export const BLANK_RECIPE_ID = 'recipe-blank-2d';
  */
 export const BLANK_3D_RECIPE_ID = 'recipe-scene-3d';
 
+/**
+ * The blank recipes lead the catalog on purpose: they are both the DEFAULT (every degraded planner
+ * path in this file lands on {@link BLANK_RECIPE_ID}, see its doc comment) and, listed first, the
+ * planner's own path of least resistance when an idea is too thin to commit to a genre.
+ */
 export const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
+  {
+    id: BLANK_RECIPE_ID,
+    blurb:
+      "NO mechanics — an empty 2D field with score/lives/timer bookkeeping, a HUD and a win/lose overlay already wired; the first increment builds the core mechanic itself, CONTROLS INCLUDED. Pick it when the idea's core loop is not what any recipe below ships: grid or turn-based movement (snake, sokoban, match-3), word/card/board games, builders, physics contraptions, idle games. Deleting a wrong mechanic costs more than building on this blank.",
+  },
+  {
+    id: 'recipe-scene-3d',
+    blurb:
+      'a bare 3D stage: perspective camera, lights and solid geometry on a ground plane under a 2D UI layer, with a tap-to-start gate and a CTA end screen. Pick it for a 3D idea that is NOT a grid of things to tap — anything else three-dimensional starts here. Faking 3D with 2D sprites is not the same game.',
+  },
   {
     id: 'recipe-tapper-2d',
     blurb:
       'objects appear and tapping them is the whole game; timer or lives. Tappers, whack-a-mole, catch-the-falling, clickers.',
   },
   {
-    id: FALLBACK_RECIPE_ID,
+    id: 'recipe-arena-2d',
     blurb:
       'an avatar moves in a bounded field while a spawner sends pickups/hazards at it; touching them scores or hurts. Dodgers, collectors, top-down survival, runners. NOT grid or turn-based movement — its steering is continuous.',
   },
@@ -217,11 +247,6 @@ export const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
       'a ball under gravity bounces off walls, paddles and bumpers; a paddle keeps it in play. Breakout, pong, plinko, pinball.',
   },
   {
-    id: BLANK_RECIPE_ID,
-    blurb:
-      "NO mechanics — an empty 2D field with score/lives/timer bookkeeping, a HUD and a win/lose overlay already wired; the first increment builds the core mechanic itself, CONTROLS INCLUDED. Pick it when the idea's core loop is not what any recipe above ships: grid or turn-based movement (snake, sokoban, match-3), word/card/board games, builders, physics contraptions, idle games. Deleting a wrong mechanic costs more than building on this blank.",
-  },
-  {
     id: 'recipe-playable-ad',
     blurb: 'a playable ad: tap-to-start audio gate, a short loop, then a CTA screen to the store.',
   },
@@ -229,11 +254,6 @@ export const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
     id: FALLBACK_3D_RECIPE_ID,
     blurb:
       'a solid block of cubes in 3D that you carve by tapping; some cubes are core and cost a life. Voxel carving, 3D minesweeper, layer puzzles, tap-to-mine, "chip away to reveal the shape".',
-  },
-  {
-    id: 'recipe-scene-3d',
-    blurb:
-      'a bare 3D stage: perspective camera, lights and solid geometry on a ground plane under a 2D UI layer, with a tap-to-start gate and a CTA end screen. Pick it for a 3D idea that is NOT a grid of things to tap — anything else three-dimensional starts here. Faking 3D with 2D sprites is not the same game.',
   },
 ];
 
@@ -2025,9 +2045,9 @@ export const validateBrief = (
   } else if (!RECIPE_CATALOG.some(recipe => recipe.id === recipeId)) {
     issues.push(`Planner asked for an unknown recipe \`${recipeId}\`.`);
     // An INVENTED id is a signal, not just noise: the planner reached past the catalog because
-    // nothing in it fit, so the answer is the recipe with no mechanics rather than the genre
-    // fallback. (Silence — no `recipeId` at all — keeps the genre fallback above: there the reply
-    // said nothing about the idea, and a game that already plays beats a blank stage.)
+    // nothing in it fit, so the answer is the recipe with no mechanics — same answer silence gets
+    // above, now that asserting a genre on zero signal is no longer the default (see
+    // `FALLBACK_RECIPE_ID`'s doc comment).
     //
     // Dimensionality still comes first, because it is the one substitution the user notices
     // instantly and blames on the agent: asked for a 3D puzzle, handed 2D sprites pretending to be
@@ -2169,8 +2189,9 @@ export const fallbackBrief = (prompt: string): PrototypeBrief => ({
   entities: [],
   tunables: {},
   winLose: { win: 'To be decided with the player.', lose: 'To be decided with the player.' },
-  // The recipe skeleton already plays, so even the blind fallback checklist starts at what makes
-  // THIS game itself rather than at controls the project shipped with (contract §C2).
+  // The recipe already wires score/lives/timer/HUD/win-lose, so even the blind fallback checklist
+  // starts at what makes THIS game itself — the mechanic and its controls — rather than at
+  // bookkeeping the project shipped with (contract §C2).
   increments: [
     'The one mechanic this idea needs that the recipe does not have yet',
     'Opposition or a real stake',

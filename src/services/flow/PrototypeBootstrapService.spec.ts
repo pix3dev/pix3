@@ -188,16 +188,16 @@ describe('validateBrief', () => {
     expect(message).toContain('The idea reads as 3D but every recipe is 2D.');
   });
 
-  it('falls back to a GENRE recipe when the recipe id is missing entirely', () => {
-    // The other half of the fork: silence says nothing about the idea (a provider hiccup, most
-    // likely), and with zero signal the game that already plays beats a blank stage — the Flow
-    // stage being alive from the first frame is the design invariant here.
+  it('falls back to the BLANK recipe when the recipe id is missing entirely', () => {
+    // Silence says nothing about the idea (a provider hiccup, most likely), and asserting a genre on
+    // zero signal is what used to land almost every under-specified idea on the same falling-pickups
+    // game — so silence now gets the same answer an invented id gets: the recipe that asserts nothing.
     const { recipeId, ...withoutRecipe } = wellFormed;
     void recipeId;
     const { brief, issues } = validateBrief(withoutRecipe, 'a bubble tapper');
 
     expect(brief.recipeId).toBe(FALLBACK_RECIPE_ID);
-    expect(brief.recipeId).not.toBe(BLANK_RECIPE_ID);
+    expect(brief.recipeId).toBe(BLANK_RECIPE_ID);
     expect(issues.join(' ')).toContain('no recipeId');
   });
 
@@ -1123,7 +1123,11 @@ const buildTransitionHarness = (options?: {
           : [],
     },
     templates: {
-      getVisibleTemplates: () => [{ id: 'recipe-arena-2d' }, { id: 'recipe-tapper-2d' }],
+      getVisibleTemplates: () => [
+        { id: 'recipe-arena-2d' },
+        { id: 'recipe-tapper-2d' },
+        { id: 'recipe-blank-2d' },
+      ],
       getTemplate: (id: string) => ({
         id,
         projectType: '2d',
