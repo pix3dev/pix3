@@ -86,6 +86,32 @@ export interface AgentPreferences {
    * does. Missing/invalid on load falls back to {@link import('./AgentSouls').DEFAULT_SOUL_ID}.
    */
   soulId: string;
+  /**
+   * Seconds of silence after a turn settles before the Flow autopilot takes the next increment
+   * itself. 15 s is the plan's own number (§3.3): low stakes, because the queue it works from is
+   * the user's plan out of their own brief, and it only ever runs after an explicit arming click.
+   */
+  autopilotIdleSeconds: number;
+  /**
+   * Seconds before the autopilot answers an open `ask_user` question in Assisted mode. Three times
+   * the increment threshold on purpose: the `ask_user` contract is "guessing wrong means
+   * rebuilding", and reading a summary with three options takes longer than 15 s.
+   */
+  autopilotQuestionSeconds: number;
+  /** Increments one autonomous run may take before it stops and reports (§5). */
+  autopilotMaxIncrements: number;
+  /** Tool calls one autonomous run may spend in total (§5) — autonomy multiplies a lane's waste. */
+  autopilotMaxToolIterations: number;
+  /** Wall-clock minutes one autonomous run may take (§5). */
+  autopilotMaxMinutes: number;
+  /** Prompt tokens one autonomous run may read in total (§5), summed over its turns. */
+  autopilotMaxInputTokens: number;
+  /**
+   * How many `generate_asset` calls an autonomous run may spend. Zero by default: it is the user's
+   * BYOK money and the noisiest tool in the set — with the honest consequence, stated in the UI,
+   * that an unattended run leaves the frame as coloured rectangles.
+   */
+  autopilotAssetGenerations: number;
   /** Display name for the custom soul (used only when `soulId === 'custom'`). */
   customSoulName: string;
   /** Personality prompt for the custom soul (used only when `soulId === 'custom'`). */
@@ -133,6 +159,32 @@ export const MAX_TOOL_ITERATIONS = 100;
  */
 export const FLOW_MIN_TOOL_ITERATIONS = 60;
 
+/**
+ * Autopilot defaults, all of them plan §3.3 / §5 numbers. Exported so the UI can label a field with
+ * the default it would fall back to, and so a spec pins the value rather than a copy of it.
+ */
+export const AUTOPILOT_DEFAULTS = {
+  autopilotIdleSeconds: 15,
+  autopilotQuestionSeconds: 45,
+  autopilotMaxIncrements: 6,
+  autopilotMaxToolIterations: 240,
+  autopilotMaxMinutes: 20,
+  autopilotMaxInputTokens: 600_000,
+  autopilotAssetGenerations: 0,
+} as const;
+
+/**
+ * Clamp a stored autopilot number into a sane range, falling back to its default.
+ *
+ * Zero is a legitimate value for some of these (0 asset generations, 0 s in Autonomous mode), so
+ * the floor is 0 rather than 1 — but a NaN, a negative or a hand-edited localStorage entry must
+ * never reach the supervisor's timers or its budget arithmetic.
+ */
+const clampAutopilotNumber = (value: unknown, fallback: number, max: number): number =>
+  typeof value === 'number' && Number.isFinite(value) && value >= 0
+    ? Math.min(Math.round(value), max)
+    : fallback;
+
 const clampToolIterations = (value: unknown): number =>
   typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.min(Math.max(Math.round(value), MIN_TOOL_ITERATIONS), MAX_TOOL_ITERATIONS)
@@ -179,6 +231,17 @@ export class AgentSettingsService {
     }
     if (patch.maxToolIterations !== undefined) {
       next.maxToolIterations = clampToolIterations(patch.maxToolIterations);
+    }
+    // The autopilot numbers are clamped on the way in as well as on load, so a settings field left
+    // empty (NaN) or a debug-bridge write can never hand the supervisor a negative timer.
+    for (const key of Object.keys(AUTOPILOT_DEFAULTS) as Array<keyof typeof AUTOPILOT_DEFAULTS>) {
+      if (patch[key] !== undefined) {
+        next[key] = clampAutopilotNumber(
+          patch[key],
+          AUTOPILOT_DEFAULTS[key],
+          Number.MAX_SAFE_INTEGER
+        );
+      }
     }
     if (patch.modelByProvider) {
       next.modelByProvider = { ...this.ensureLoaded().modelByProvider, ...patch.modelByProvider };
@@ -452,6 +515,7 @@ export class AgentSettingsService {
       advisorModelId: '',
       advisorPinned: false,
       maxToolIterations: DEFAULT_MAX_TOOL_ITERATIONS,
+      ...AUTOPILOT_DEFAULTS,
       autoVerify: true,
       debugMode: false,
       soulId: DEFAULT_SOUL_ID,
@@ -517,6 +581,43 @@ export class AgentSettingsService {
             ? parsed.advisorPinned
             : Boolean(parsed.advisorProviderId),
         maxToolIterations: clampToolIterations(parsed.maxToolIterations),
+        // Preferences written before the autopilot existed simply have none of these keys, so the
+        // clamp's fallback is also the migration: an older settings blob loads at the defaults.
+        autopilotIdleSeconds: clampAutopilotNumber(
+          parsed.autopilotIdleSeconds,
+          defaults.autopilotIdleSeconds,
+          600
+        ),
+        autopilotQuestionSeconds: clampAutopilotNumber(
+          parsed.autopilotQuestionSeconds,
+          defaults.autopilotQuestionSeconds,
+          600
+        ),
+        autopilotMaxIncrements: clampAutopilotNumber(
+          parsed.autopilotMaxIncrements,
+          defaults.autopilotMaxIncrements,
+          50
+        ),
+        autopilotMaxToolIterations: clampAutopilotNumber(
+          parsed.autopilotMaxToolIterations,
+          defaults.autopilotMaxToolIterations,
+          5_000
+        ),
+        autopilotMaxMinutes: clampAutopilotNumber(
+          parsed.autopilotMaxMinutes,
+          defaults.autopilotMaxMinutes,
+          600
+        ),
+        autopilotMaxInputTokens: clampAutopilotNumber(
+          parsed.autopilotMaxInputTokens,
+          defaults.autopilotMaxInputTokens,
+          100_000_000
+        ),
+        autopilotAssetGenerations: clampAutopilotNumber(
+          parsed.autopilotAssetGenerations,
+          defaults.autopilotAssetGenerations,
+          100
+        ),
         autoVerify:
           typeof parsed.autoVerify === 'boolean' ? parsed.autoVerify : defaults.autoVerify,
         debugMode: typeof parsed.debugMode === 'boolean' ? parsed.debugMode : defaults.debugMode,

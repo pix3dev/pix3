@@ -342,6 +342,50 @@ export interface PlayModeError {
  */
 export type WorkspaceMode = 'flow' | 'studio';
 
+/**
+ * How much of the Flow the supervisor is allowed to drive (autopilot plan §3.1).
+ *
+ * `armed` is the Assisted mode the "Continue autonomously" button turns on: the agent still ends a
+ * turn on a real fork, and the supervisor picks the next increment once a countdown runs out.
+ * `autonomous` additionally answers `ask_user` inside the turn instead of ending it.
+ */
+export type FlowAutopilotMode = 'off' | 'armed' | 'autonomous';
+
+/**
+ * Where the supervisor is in its own cycle — deliberately NOT a mirror of the chat's status.
+ * `running` means the autopilot itself started the turn on screen; a turn the user sent keeps the
+ * autopilot at `idle`, which is what tells `AgentChatService` that a human is at the keyboard and
+ * a question should end the turn for them to answer.
+ */
+export type FlowAutopilotPhase = 'idle' | 'countdown' | 'running' | 'paused' | 'done';
+
+/**
+ * Live state of one autopilot run.
+ *
+ * Session state written directly by `FlowAutopilotService`, for the same reason as
+ * {@link UIState.flowSceneViewVisible}: it is neither undoable nor worth surviving a reload — a run
+ * that the page load interrupted is over, and resuming one the user cannot see would be the exact
+ * surprise the arming step exists to prevent.
+ */
+export interface FlowAutopilotState {
+  mode: FlowAutopilotMode;
+  phase: FlowAutopilotPhase;
+  /** Epoch ms the current countdown fires at; null while paused by user activity or not counting. */
+  countdownEndsAt: number | null;
+  /** Identity of the current run — a new one resets every budget counter below. */
+  runId: string | null;
+  /** Epoch ms the run started (0 when there is no run), for the wall-clock budget. */
+  startedAt: number;
+  /** Increments the supervisor has started in this run. */
+  increments: number;
+  /** Tool calls observed across the run — the hop budget (§5). */
+  toolIterations: number;
+  /** Cumulative prompt tokens the run has read, as the provider reports them. */
+  inputTokens: number;
+  /** Why the run paused or finished, in the user's words. Null while it is going fine. */
+  stopReason: string | null;
+}
+
 export interface UIState {
   theme: ThemeName;
   /** Active shell. Golden Layout is only initialized once this reaches `studio`. */
@@ -366,6 +410,8 @@ export interface UIState {
    * the game and back. Not persisted — it is a working posture, not a preference.
    */
   flowInspectorOpen: boolean;
+  /** The Flow autopilot's own state — see {@link FlowAutopilotState}. Flow mode only. */
+  flowAutopilot: FlowAutopilotState;
   isLayoutReady: boolean;
   focusedPanelId: string | null;
   commandPaletteOpen: boolean;
@@ -651,6 +697,17 @@ export const createInitialAppState = (): AppState => ({
     workspaceMode: 'studio',
     flowSceneViewVisible: false,
     flowInspectorOpen: false,
+    flowAutopilot: {
+      mode: 'off',
+      phase: 'idle',
+      countdownEndsAt: null,
+      runId: null,
+      startedAt: 0,
+      increments: 0,
+      toolIterations: 0,
+      inputTokens: 0,
+      stopReason: null,
+    },
     isLayoutReady: false,
     focusedPanelId: null,
     commandPaletteOpen: false,

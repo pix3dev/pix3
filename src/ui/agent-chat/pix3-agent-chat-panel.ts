@@ -16,6 +16,7 @@ import { LightboxService, type LightboxItem } from '@/services/editor/LightboxSe
 import { LlmProviderRegistry } from '@/services/llm/LlmProviderRegistry';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
 import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
+import { FlowAutopilotService } from '@/services/flow/FlowAutopilotService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import {
@@ -710,6 +711,9 @@ export class AgentChatPanel extends ComponentBase {
   @inject(LightboxService)
   private readonly lightbox!: LightboxService;
 
+  @inject(FlowAutopilotService)
+  private readonly autopilot!: FlowAutopilotService;
+
   @property({ type: String, reflect: true, attribute: 'tab-id' })
   tabId = '';
 
@@ -784,6 +788,9 @@ export class AgentChatPanel extends ComponentBase {
   private disposeComposeContextSubscription?: () => void;
   private disposeCatalogSubscription?: () => void;
   private disposeBridgeSubscription?: () => void;
+  private disposeAutopilotSubscription?: () => void;
+  /** Redraws the countdown's remaining seconds; only alive while one is actually counting. */
+  private countdownTicker?: ReturnType<typeof setInterval>;
   private readonly messagesRef = createRef<HTMLDivElement>();
   private readonly fileInputRef = createRef<HTMLInputElement>();
   private shouldStickToBottom = true;
@@ -852,6 +859,15 @@ export class AgentChatPanel extends ComponentBase {
     // Mirror the live editor context (active scene + selection) into the composer chips. The agent
     // already receives this in its system prompt; the chips just make it visible to the user.
     this.refreshEditorContext();
+    // The autopilot bar reads straight off the proxy; this only asks for a repaint (and keeps the
+    // one-second ticker alive exactly while a countdown is running, so an idle panel costs nothing).
+    // Subscribed to the autopilot slice, NOT to `appState.ui`: the whole slice churns on play-mode
+    // status and panel flags, and a repaint of a long chat transcript on every one of those is the
+    // shape of jank already measured on the Runtime panel.
+    this.disposeAutopilotSubscription = subscribe(appState.ui.flowAutopilot, () => {
+      this.syncCountdownTicker();
+      this.requestUpdate();
+    });
     this.disposeSceneContextSub = subscribe(appState.scenes, () => this.refreshEditorContext());
     this.disposeSelectionContextSub = subscribe(appState.selection, () =>
       this.refreshEditorContext()
@@ -874,6 +890,12 @@ export class AgentChatPanel extends ComponentBase {
     this.disposeCatalogSubscription = undefined;
     this.disposeBridgeSubscription?.();
     this.disposeBridgeSubscription = undefined;
+    this.disposeAutopilotSubscription?.();
+    this.disposeAutopilotSubscription = undefined;
+    if (this.countdownTicker) {
+      clearInterval(this.countdownTicker);
+      this.countdownTicker = undefined;
+    }
     this.disposeSceneContextSub?.();
     this.disposeSceneContextSub = undefined;
     this.disposeSelectionContextSub?.();
@@ -976,7 +998,7 @@ export class AgentChatPanel extends ComponentBase {
           ${showThinking ? this.renderRunningIndicator() : null} ${this.renderPendingQuestion()}
         </div>
         ${this.debugView !== 'none' ? this.renderDebugDrawer() : null} ${this.renderBanners()}
-        ${this.renderComposer()}
+        ${this.renderAutopilotBar()} ${this.renderComposer()}
       </div>
     `;
   }
@@ -1922,6 +1944,9 @@ export class AgentChatPanel extends ComponentBase {
       return;
     }
     this.shouldStickToBottom = true;
+    // A chip click is the user answering, so it cancels a pending autopilot turn exactly as a
+    // typed message would — otherwise their answer and the supervisor's would race.
+    this.autopilot.noteUserMessage();
     await this.chat.send(answer);
   }
 
@@ -2027,6 +2052,140 @@ export class AgentChatPanel extends ComponentBase {
     `;
   }
 
+  /**
+   * The Flow autopilot's one strip of UI, between the banners and the composer.
+   *
+   * Non-modal by design (Flow principle 6): it offers, counts down in the open, and every state it
+   * can be in has a visible way out in the same row. The countdown says "type to cancel" because
+   * that is literally the mechanism — the composer's own input handler pauses it.
+   */
+  private renderAutopilotBar() {
+    if (appState.ui.workspaceMode !== 'flow') {
+      return null;
+    }
+    const autopilot = appState.ui.flowAutopilot;
+    const running = this.chatState?.status === 'running';
+
+    if (autopilot.mode === 'off') {
+      // Nothing to continue before the first turn has produced a checklist to continue from.
+      if (running || (this.chatState?.messages.length ?? 0) === 0) {
+        return null;
+      }
+      return html`
+        <div class="agent-autopilot">
+          <span class="agent-autopilot-icon"
+            >${this.icons.getIcon('navigation-2', IconSize.SMALL)}</span
+          >
+          <span class="agent-autopilot-text"
+            >I can keep taking increments off the plan on my own.</span
+          >
+          <button
+            type="button"
+            class="agent-autopilot-action"
+            title="Take the next increment from design/progress.md without waiting for me"
+            @click=${() => this.autopilot.armFromUser()}
+          >
+            <span class="agent-btn-icon"
+              >${this.icons.getIcon('fast-forward', IconSize.SMALL)}</span
+            >
+            Continue autonomously
+          </button>
+        </div>
+      `;
+    }
+
+    if (autopilot.phase === 'paused' || autopilot.phase === 'done') {
+      const done = autopilot.phase === 'done';
+      return html`
+        <div class="agent-autopilot ${done ? 'is-done' : 'is-paused'}">
+          <span class="agent-autopilot-icon"
+            >${this.icons.getIcon(done ? 'check-circle' : 'pause', IconSize.SMALL)}</span
+          >
+          <span class="agent-autopilot-text">${autopilot.stopReason ?? 'Autopilot stopped.'}</span>
+          <button
+            type="button"
+            class="agent-autopilot-action"
+            title="Start another autonomous run from the current plan"
+            @click=${() => this.autopilot.resumeRun()}
+          >
+            <span class="agent-btn-icon">${this.icons.getIcon('play', IconSize.SMALL)}</span>
+            Keep going
+          </button>
+          <button
+            type="button"
+            class="agent-autopilot-off"
+            title="Switch the autopilot off"
+            @click=${() => this.autopilot.takeWheel()}
+          >
+            Turn off
+          </button>
+        </div>
+      `;
+    }
+
+    if (autopilot.phase === 'countdown') {
+      const endsAt = autopilot.countdownEndsAt;
+      const holding = endsAt === null;
+      const seconds = endsAt === null ? 0 : Math.max(0, Math.ceil((endsAt - Date.now()) / 1000));
+      return html`
+        <div class="agent-autopilot is-counting">
+          <span class="agent-autopilot-icon">${this.icons.getIcon('clock', IconSize.SMALL)}</span>
+          <span class="agent-autopilot-text">
+            ${holding
+              ? 'Holding while you type — send, or stop typing and I carry on.'
+              : `Taking the next increment in ${seconds}s — type to cancel.`}
+          </span>
+          <button
+            type="button"
+            class="agent-autopilot-off"
+            title="Switch the autopilot off"
+            @click=${() => this.autopilot.takeWheel()}
+          >
+            Turn off
+          </button>
+        </div>
+      `;
+    }
+
+    if (autopilot.phase === 'running') {
+      return html`
+        <div class="agent-autopilot is-running">
+          <span class="agent-autopilot-icon"
+            >${this.icons.getIcon('navigation-2', IconSize.SMALL)}</span
+          >
+          <span class="agent-autopilot-text">
+            Autopilot is running turn ${autopilot.increments} on its own.
+          </span>
+          <button
+            type="button"
+            class="agent-autopilot-action"
+            title="Stop this turn and take over"
+            @click=${() => this.autopilot.takeWheel()}
+          >
+            <span class="agent-btn-icon">${this.icons.getIcon('stop', IconSize.SMALL)}</span>
+            Take the wheel
+          </button>
+        </div>
+      `;
+    }
+
+    return null;
+  }
+
+  /** Keep the countdown's seconds honest without a timer running when nothing is counting. */
+  private syncCountdownTicker(): void {
+    const counting =
+      appState.ui.workspaceMode === 'flow' &&
+      appState.ui.flowAutopilot.phase === 'countdown' &&
+      appState.ui.flowAutopilot.countdownEndsAt !== null;
+    if (counting && !this.countdownTicker) {
+      this.countdownTicker = setInterval(() => this.requestUpdate(), 1000);
+    } else if (!counting && this.countdownTicker) {
+      clearInterval(this.countdownTicker);
+      this.countdownTicker = undefined;
+    }
+  }
+
   private renderComposer() {
     const running = this.chatState?.status === 'running';
     const canSend = Boolean(this.draft.trim()) || this.attachments.length > 0;
@@ -2053,6 +2212,9 @@ export class AgentChatPanel extends ComponentBase {
             @input=${(e: Event) => {
               this.draft = (e.target as HTMLTextAreaElement).value;
               this.historyIndex = -1;
+              // Typing holds an autopilot countdown where it is — the mode must never feel like it
+              // is racing the user for the chat (plan §7.6).
+              this.autopilot.noteUserActivity();
             }}
             @keydown=${this.handleComposerKeydown}
             @paste=${this.handlePaste}
@@ -2478,6 +2640,9 @@ export class AgentChatPanel extends ComponentBase {
     this.attachWarning = '';
     this.historyIndex = -1;
     this.shouldStickToBottom = true;
+    // The user's own message is priority 1 of the queue (plan §2.3): it drops whatever the
+    // autopilot had scheduled rather than racing it.
+    this.autopilot.noteUserMessage();
     await this.chat.send(text, { images, texts });
   }
 

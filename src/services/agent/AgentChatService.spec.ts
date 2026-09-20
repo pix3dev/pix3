@@ -5,6 +5,7 @@ import {
   LLM_REQUEST_TIMEOUT_MS,
   type ComposeContextRequest,
 } from './AgentChatService';
+import { AUTOPILOT_DEFAULTS } from '@/services/agent/AgentSettingsService';
 import {
   LlmError,
   type ChatParams,
@@ -53,6 +54,8 @@ interface Fakes {
   resetSessions?: ReturnType<typeof vi.fn>;
   /** Fake for `AgentToolRegistry.recordDecision()` — the auto-filed `ask_user` answer. */
   recordDecision?: ReturnType<typeof vi.fn>;
+  /** Fake for `AgentToolRegistry.specs()`; defaults to "this agent has no tools". */
+  toolSpecs?: ReturnType<typeof vi.fn>;
   /** Temporary debug edits outstanding at the end of the turn. Defaults to none. */
   listTemporaryEdits?: () => string[];
   /** Fake for `AgentToolRegistry.revertTemporaryEdits()` — the turn-end debug-value restore. */
@@ -80,6 +83,7 @@ const buildService = (fakes: Fakes): AgentChatService => {
         selectedProviderId: 'fake',
         modelByProvider: {},
         customBaseUrl: '',
+        ...AUTOPILOT_DEFAULTS,
         maxToolIterations: fakes.maxToolIterations ?? 5,
         debugMode: fakes.debugMode ?? false,
         soulId: fakes.soulId ?? 'brobot',
@@ -103,7 +107,7 @@ const buildService = (fakes: Fakes): AgentChatService => {
             },
     },
     toolRegistry: {
-      specs: () => [],
+      specs: fakes.toolSpecs ?? (() => []),
       execute: fakes.execute,
       recordDecision: fakes.recordDecision ?? vi.fn(async () => ({ ok: true })),
       listTemporaryEdits: fakes.listTemporaryEdits ?? (() => []),
@@ -1161,6 +1165,129 @@ describe('AgentChatService', () => {
       // The turn still ran and the fork is still resolved.
       expect(service.getState().status).toBe('idle');
       expect(service.getState().pendingQuestion).toBeNull();
+    });
+  });
+
+  /**
+   * With the Flow autopilot driving, an `ask_user` question has no reader: ending the turn on it
+   * would park the run until a countdown expired, for a fork nobody is going to answer.
+   */
+  describe('ask_user while the autopilot is driving the turn', () => {
+    beforeEach(() => {
+      appState.ui.workspaceMode = 'flow';
+      appState.ui.flowAutopilot.mode = 'armed';
+      appState.ui.flowAutopilot.phase = 'running';
+    });
+
+    afterEach(() => {
+      appState.ui.workspaceMode = 'studio';
+      appState.ui.flowAutopilot.mode = 'off';
+      appState.ui.flowAutopilot.phase = 'idle';
+    });
+
+    const askThenReport = () =>
+      vi
+        .fn()
+        .mockResolvedValueOnce(
+          toolCallResult('ask_user', 'c1', {
+            question: 'Win by score or by timer?',
+            options: ['by score', 'by timer'],
+          })
+        )
+        .mockResolvedValueOnce(textResult('went with it'));
+
+    it('answers from the brief, files the decision as automatic, and keeps going', async () => {
+      const recordDecision = vi.fn(async () => ({ ok: true }));
+      const chat = askThenReport();
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({ ok: true, asked: true })),
+        put: vi.fn(async () => undefined),
+        recordDecision,
+        readTextFile: async (path: string) => {
+          if (path === 'design/brief.md') return 'A one-minute run. The player wins by score.';
+          throw new Error('not found');
+        },
+      });
+
+      await service.send('go');
+
+      // The turn did NOT end on the question.
+      expect(chat).toHaveBeenCalledTimes(2);
+      expect(service.getState().pendingQuestion).toBeNull();
+      expect(JSON.stringify(service.getState().messages)).toContain(
+        '\\"answered\\":\\"by score\\"'
+      );
+      expect(recordDecision).toHaveBeenCalledWith({
+        question: 'Win by score or by timer?',
+        choice: 'by score',
+        source: 'auto-brief',
+      });
+    });
+
+    it('replays a settled fork without rewriting its line in the log', async () => {
+      const recordDecision = vi.fn(async () => ({ ok: true }));
+      const service = buildService({
+        chat: askThenReport(),
+        execute: vi.fn(async () => ({ ok: true, asked: true })),
+        put: vi.fn(async () => undefined),
+        recordDecision,
+        readTextFile: async (path: string) => {
+          if (path === 'design/decisions.md')
+            return '- **Win by score or by timer?** → by timer. Matches the brief. — 2026-09-19';
+          throw new Error('not found');
+        },
+      });
+
+      await service.send('go');
+
+      expect(JSON.stringify(service.getState().messages)).toContain(
+        '\\"answered\\":\\"by timer\\"'
+      );
+      expect(recordDecision).not.toHaveBeenCalled();
+    });
+
+    /**
+     * Plan §4 step 4: the honest fallback costs zero hops, which is why there is no "take the first
+     * option" heuristic above it — option order is whatever the model wrote.
+     */
+    it('tells the agent to decide it itself when nothing on file can answer', async () => {
+      const service = buildService({
+        chat: askThenReport(),
+        execute: vi.fn(async () => ({ ok: true, asked: true })),
+        put: vi.fn(async () => undefined),
+      });
+
+      await service.send('go');
+
+      const history = JSON.stringify(service.getState().messages);
+      expect(history).toContain('\\"answered\\":null');
+      expect(history).toContain('\\"by\\":\\"self\\"');
+      expect(service.getState().pendingQuestion).toBeNull();
+    });
+
+    it('withholds the tools that must never run unattended', async () => {
+      const specs = vi.fn((_allow?: ReadonlySet<string>) => [
+        { name: 'fs_write', description: '', inputSchema: { type: 'object' } },
+        { name: 'fs_delete', description: '', inputSchema: { type: 'object' } },
+        { name: 'generate_asset', description: '', inputSchema: { type: 'object' } },
+      ]);
+      const chat = vi.fn(async () => textResult('ok'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(),
+        put: vi.fn(async () => undefined),
+        toolSpecs: specs,
+      });
+
+      await service.send('go');
+
+      // Called twice: once bare (to enumerate the surface), once with the computed allow-list.
+      const allowed = specs.mock.calls.at(-1)?.[0] as ReadonlySet<string> | undefined;
+      expect(allowed?.has('fs_write')).toBe(true);
+      expect(allowed?.has('fs_delete')).toBe(false);
+      // Zero is the default asset allowance: BYOK money, unattended.
+      expect(allowed?.has('generate_asset')).toBe(false);
     });
   });
 

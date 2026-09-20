@@ -26,7 +26,7 @@ import {
   uniqueFileName,
   type FlowReferenceRole,
 } from '@/services/flow/FlowReferencesService';
-import { DECISIONS_PATH, appendDecision } from '@/services/flow/decision-log';
+import { DECISIONS_PATH, appendDecision, type DecisionSource } from '@/services/flow/decision-log';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { StudioViewportMountService } from '@/services/editor/StudioViewportMountService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
@@ -2348,6 +2348,8 @@ export class AgentToolRegistry {
     choice: string;
     reason?: string;
     alternatives?: readonly string[];
+    /** Who settled it. Omitted means the user did — see {@link DecisionSource}. */
+    source?: DecisionSource;
   }): Promise<
     | { ok: true; path: string; line: string; replaced: boolean; note?: string }
     | { ok: false; error: string }
@@ -2357,18 +2359,19 @@ export class AgentToolRegistry {
     if (!question || !choice) {
       return { ok: false, error: 'record_decision needs both a `question` and a `choice`.' };
     }
-    let source = '';
+    let existing = '';
     try {
-      source = await this.storage.readTextFile(DECISIONS_PATH);
+      existing = await this.storage.readTextFile(DECISIONS_PATH);
     } catch {
       // No log yet (a project that predates the idea stage) — appendDecision seeds the heading.
       await this.ensureParentDirectories(DECISIONS_PATH);
     }
-    const { text, line, replaced } = appendDecision(source, {
+    const { text, line, replaced } = appendDecision(existing, {
       question,
       choice,
       reason: entry.reason?.trim() ?? '',
       rejected: entry.alternatives ?? [],
+      ...(entry.source ? { source: entry.source } : {}),
     });
     await this.storage.writeTextFile(DECISIONS_PATH, text);
     return {

@@ -2,10 +2,18 @@ import { inject, injectable } from '@/fw/di';
 import { appState } from '@/state';
 import { buildProjectMap } from '@/services/flow/flow-project-map';
 import { MAX_RECIPE_MD_CHARS } from '@/services/flow/recipe-contract';
+import { FLOW_BRIEF_PATH } from '@/services/flow/FlowPlanService';
+import {
+  DECISIONS_PATH,
+  extractDecisionEntries,
+  type DecisionSource,
+} from '@/services/flow/decision-log';
+import { routeQuestion, type AutopilotAnswer } from '@/services/flow/autopilot-router';
 import { SceneManager, NodeBase } from '@pix3/runtime';
 import {
   AgentSettingsService,
   FLOW_MIN_TOOL_ITERATIONS,
+  type AgentPreferences,
 } from '@/services/agent/AgentSettingsService';
 import { resolveSoul } from '@/services/agent/AgentSouls';
 import {
@@ -183,6 +191,32 @@ const MAX_AGENTS_MD_CHARS = 16_000;
 const FLOW_VERIFY_ATTEMPTS = 3;
 /** Recipe contract written into every Flow project by the prototype expander. */
 const RECIPE_MD_PATH = 'design/recipe.md';
+
+/**
+ * True while the turn on screen was started by the Flow autopilot rather than typed by a human.
+ *
+ * `phase === 'running'` is the supervisor's own claim, not a mirror of the chat status: a turn the
+ * user sent leaves the autopilot at `idle` even while it is armed (see `FlowAutopilotService`). So
+ * this reads as exactly what it needs to mean — "there is nobody to answer a question right now".
+ */
+const isAutopilotDrivenTurn = (): boolean => {
+  const autopilot = appState.ui.flowAutopilot;
+  return autopilot.mode !== 'off' && autopilot.phase === 'running';
+};
+
+/**
+ * Tools an unattended run never gets (plan §5, "never autonomously").
+ *
+ * `fs_delete` is unconditional: an unattended agent that decides a file is in its way deletes the
+ * user's work, and every other write it can make is recoverable by reading the file back. The
+ * asset generator is gated on its own allowance instead, because there it is the user's BYOK money
+ * that is being spent, not their data being destroyed. There is deliberately no entry for
+ * building/publishing the playable HTML — the export is an editor command with no agent tool
+ * behind it, so there is nothing to withhold.
+ */
+const AUTONOMOUS_DENIED_TOOLS: readonly string[] = ['fs_delete'];
+/** Denied on top of {@link AUTONOMOUS_DENIED_TOOLS} while the run's asset allowance is zero. */
+const AUTONOMOUS_PAID_TOOLS: readonly string[] = ['generate_asset'];
 
 /** Cap serialized tool results so one verbose tool cannot blow up the context window. */
 const MAX_TOOL_RESULT_CHARS = 24_000;
@@ -565,6 +599,13 @@ export class AgentChatService {
    * timeouts can reach {@link MAX_CONSECUTIVE_TIMEOUTS_BEFORE_RECOVERY}.
    */
   private consecutiveTimeouts = 0;
+  /**
+   * Provenance for the answer the next {@link send} carries, set by {@link answerPending}. A field
+   * rather than a `send` parameter because the answer has to travel the ordinary send path — the
+   * autopilot's answer must be indistinguishable from a typed one everywhere except in the line it
+   * writes to the decision log. Consumed (and cleared) by {@link recordAnsweredFork}.
+   */
+  private pendingAnswerSource: DecisionSource | 'none' | null = null;
 
   getState(): AgentChatState {
     return this.state;
@@ -684,14 +725,43 @@ export class AgentChatService {
    */
   private async recordAnsweredFork(question: AgentPendingQuestion, answer: string): Promise<void> {
     const choice = answer.trim();
-    if (appState.ui.workspaceMode !== 'flow' || !choice) {
+    const source = this.pendingAnswerSource;
+    this.pendingAnswerSource = null;
+    if (appState.ui.workspaceMode !== 'flow' || !choice || source === 'none') {
       return;
     }
     try {
-      await this.toolRegistry.recordDecision({ question: question.question, choice });
+      await this.toolRegistry.recordDecision({
+        question: question.question,
+        choice,
+        ...(source && source !== 'user' ? { source } : {}),
+      });
     } catch (error) {
       this.debugLog('record-decision-failed', error);
     }
+  }
+
+  /**
+   * Answer the open question on somebody else's behalf — the Flow autopilot's Assisted path.
+   *
+   * Identical to the user typing the choice, with one addition: the decision is filed with the
+   * provenance that produced it, so `design/decisions.md` distinguishes a fork the user settled
+   * from one settled for them while they were away (plan §4).
+   *
+   * `'none'` files nothing, and it is not a corner case: the commonest automatic answer is a
+   * REPLAY of a fork the log already holds (the model re-asks it after a compaction). Re-filing
+   * that would rewrite the existing line — dropping the reason a later `record_decision` added to
+   * it and restamping somebody else's decision with today's date.
+   */
+  async answerPending(choice: string, source: DecisionSource | 'none'): Promise<void> {
+    // The empty check is the same one `send` makes: without it a blank choice would return early
+    // with the provenance still armed, and the NEXT answer — typed by the user — would be filed as
+    // an automatic one.
+    if (!choice.trim() || !this.state.pendingQuestion || this.isRunning()) {
+      return;
+    }
+    this.pendingAnswerSource = source;
+    await this.send(choice);
   }
 
   /**
@@ -1122,7 +1192,9 @@ export class AgentChatService {
     const model = this.modelCatalog.getModel(provider.id, modelId);
     // At the Flow idea stage the surface is deliberately smaller: no scene, script, play-mode or
     // gameplay tool exists to be called against a project that is an empty canvas (design §3.10).
-    const allowedTools = this.flowStage.isIdeaStage() ? IDEA_STAGE_TOOLS : undefined;
+    const allowedTools = this.flowStage.isIdeaStage()
+      ? IDEA_STAGE_TOOLS
+      : this.autonomousToolAllowList(preferences);
     const tools =
       model?.capabilities.supportsTools === false
         ? undefined
@@ -1826,12 +1898,113 @@ export class AgentChatService {
     } else if (clearsGameVerifyDebt(call.name, resultText)) {
       pass.unverifiedGameMutation = false;
     } else if (call.name === 'ask_user') {
-      pass.askedQuestion = parseAskUser(call.input);
+      const asked = parseAskUser(call.input);
+      if (isAutopilotDrivenTurn()) {
+        // Nobody is at the keyboard, so a question cannot end the turn — it would just park the run
+        // until a countdown expired. The answer is resolved here and the loop carries on, which is
+        // also why `askedQuestion` stays null and the verify debt is NOT cleared: this turn still
+        // owes proof (plan §4).
+        return {
+          type: 'tool-result',
+          toolUseId: call.id,
+          content: JSON.stringify(await this.answerAskUserAutonomously(asked)),
+        };
+      }
+      pass.askedQuestion = asked;
       // A turn that honestly ends in a question is NOT an unverified turn — otherwise the
       // verify-gate would drag an agent that hit a real fork into pointless verification.
       pass.unverifiedGameMutation = false;
     }
     return executed.result;
+  }
+
+  /**
+   * Resolve an `ask_user` question without the user, and answer the tool call with the outcome.
+   *
+   * Two shapes, and the second one is not a failure: when the router can settle the fork from the
+   * decision log or the brief, the answer comes back as data and is filed with its provenance; when
+   * it cannot, the agent is told to choose ITSELF and keep going (plan §4 step 4). That path costs
+   * zero extra hops, which is why there is no "pick the first option" heuristic above it — the
+   * order of options is arbitrary, so choosing by position would be guessing while looking decisive.
+   */
+  private async answerAskUserAutonomously(
+    asked: AgentPendingQuestion
+  ): Promise<Record<string, unknown>> {
+    const routed = await this.routeAutopilotAnswer(asked);
+    if (!routed) {
+      return {
+        ok: true,
+        answered: null,
+        by: 'self',
+        options: asked.options,
+        note: 'Autopilot is driving and nobody is at the keyboard, so this question has no reader. Decide it yourself on the evidence you have, state the choice in ONE line of your reply, and carry on with the increment — do not ask again.',
+      };
+    }
+    if (routed.via !== 'decision-log') {
+      // A replayed decision is already in the log; rewriting it would drop the reason recorded with
+      // the original and restamp somebody else's choice with today's date.
+      try {
+        await this.toolRegistry.recordDecision({
+          question: asked.question,
+          choice: routed.choice,
+          source: routed.source,
+        });
+      } catch (error) {
+        this.debugLog('record-decision-failed', error);
+      }
+    }
+    return {
+      ok: true,
+      answered: routed.choice,
+      by: 'autopilot',
+      note:
+        routed.via === 'decision-log'
+          ? 'This fork was already settled in `design/decisions.md`; the recorded choice stands. Continue with the increment.'
+          : 'Answered from the brief while nobody is at the keyboard, and filed in `design/decisions.md` as an automatic decision the user can change. Continue with the increment.',
+    };
+  }
+
+  /**
+   * The tool surface an autopilot-driven turn gets: everything, minus what must never happen with
+   * nobody watching (plan §5).
+   *
+   * Expressed as a subtraction from the live registry rather than as a hand-kept allow-list,
+   * because the gate downstream (`specs(allow)`) filters by name: a new tool added next month has
+   * to be available by default, or the denylist would silently become the whole product's tool set
+   * minus a handful. Returns `undefined` (no filtering at all) whenever the autopilot is not
+   * driving, which is the ordinary case.
+   */
+  private autonomousToolAllowList(preferences: AgentPreferences): ReadonlySet<string> | undefined {
+    if (!isAutopilotDrivenTurn()) {
+      return undefined;
+    }
+    const denied = new Set<string>(AUTONOMOUS_DENIED_TOOLS);
+    if (preferences.autopilotAssetGenerations <= 0) {
+      for (const name of AUTONOMOUS_PAID_TOOLS) {
+        denied.add(name);
+      }
+    }
+    return new Set(
+      this.toolRegistry
+        .specs()
+        .map(spec => spec.name)
+        .filter(name => !denied.has(name))
+    );
+  }
+
+  /** Read the project's settled forks and its own words, and let the router try to answer. */
+  private async routeAutopilotAnswer(asked: AgentPendingQuestion): Promise<AutopilotAnswer | null> {
+    const [decisionsText, brief, recipe] = await Promise.all([
+      this.storage.readTextFile(DECISIONS_PATH).catch(() => ''),
+      this.storage.readTextFile(FLOW_BRIEF_PATH).catch(() => ''),
+      this.storage.readTextFile(RECIPE_MD_PATH).catch(() => ''),
+    ]);
+    return routeQuestion({
+      question: asked.question,
+      options: asked.options,
+      decisions: extractDecisionEntries(decisionsText),
+      briefText: `${brief}\n${recipe}`,
+    });
   }
 
   /**

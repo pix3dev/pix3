@@ -2187,3 +2187,96 @@ pix3-agent-chat-panel .agent-message.is-user .agent-expand-link {
 pix3-agent-chat-panel .agent-message.is-user .agent-expand-link:hover {
   opacity: 1;
 }
+
+/* ── Flow autopilot strip (between the banners and the composer) ────────── */
+
+pix3-agent-chat-panel .agent-autopilot {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0 0.6rem 0.4rem;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-size: 0.72rem;
+  line-height: 1.4;
+}
+
+/* Green is reserved for "this is going fine": a run in progress, and a run that finished its list. */
+pix3-agent-chat-panel .agent-autopilot.is-running,
+pix3-agent-chat-panel .agent-autopilot.is-done {
+  border-color: var(--ok-line);
+  background: var(--ok-soft);
+}
+
+pix3-agent-chat-panel .agent-autopilot.is-counting {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+pix3-agent-chat-panel .agent-autopilot.is-paused {
+  border-color: var(--line-2);
+}
+
+pix3-agent-chat-panel .agent-autopilot-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  color: var(--pix3-accent-color, #f5ae39);
+}
+
+pix3-agent-chat-panel .agent-autopilot.is-running .agent-autopilot-icon,
+pix3-agent-chat-panel .agent-autopilot.is-done .agent-autopilot-icon {
+  color: var(--ok);
+}
+
+pix3-agent-chat-panel .agent-autopilot-icon svg {
+  display: block;
+  width: 0.9rem;
+  height: 0.9rem;
+}
+
+pix3-agent-chat-panel .agent-autopilot-text {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+pix3-agent-chat-panel .agent-autopilot-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  height: 1.6rem;
+  padding: 0 0.55rem;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--line-1);
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font: inherit;
+  font-size: 0.72rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+pix3-agent-chat-panel .agent-autopilot-action:hover {
+  border-color: rgba(var(--pix3-accent-rgb), 0.5);
+  background: rgba(var(--pix3-accent-rgb), 0.14);
+  color: var(--fg-0);
+}
+
+pix3-agent-chat-panel .agent-autopilot-off {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--fg-2);
+  font: inherit;
+  font-size: 0.7rem;
+  text-decoration: underline;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+pix3-agent-chat-panel .agent-autopilot-off:hover {
+  color: var(--fg-0);
+}

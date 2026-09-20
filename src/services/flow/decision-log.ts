@@ -33,7 +33,34 @@ export interface DecisionEntry {
   readonly rejected: readonly string[];
   /** `YYYY-MM-DD`, or empty for an entry written before the log carried dates. */
   readonly date: string;
+  /**
+   * Who settled the fork. Absent means the human did — every line written before the autopilot
+   * existed, and every answer typed or clicked since.
+   *
+   * The log is re-read by the planner at the start of every compacted conversation, so a decision
+   * the supervisor took on the user's behalf has to stay distinguishable from one they took
+   * themselves: it is the difference between "this is settled" and "this was decided for you while
+   * you were away — say so if it is wrong" (autopilot plan §4).
+   */
+  readonly source?: DecisionSource;
 }
+
+/** Where a decision came from. See {@link DecisionEntry.source}. */
+export type DecisionSource = 'user' | 'auto-brief' | 'auto-advisor' | 'auto-agent';
+
+/** The word rendered inside `_(auto: …)_`, per non-human source. */
+const AUTO_LABELS: Record<Exclude<DecisionSource, 'user'>, string> = {
+  'auto-brief': 'brief',
+  'auto-advisor': 'advisor',
+  'auto-agent': 'agent',
+};
+
+/** Read side of {@link AUTO_LABELS}. */
+const SOURCE_BY_LABEL: Record<string, DecisionSource> = {
+  brief: 'auto-brief',
+  advisor: 'auto-advisor',
+  agent: 'auto-agent',
+};
 
 /**
  * Markdown that must not survive into a decision line.
@@ -76,6 +103,7 @@ export const formatDecisionLine = (
     readonly date?: string;
   }
 ): string => {
+  const auto = entry.source && entry.source !== 'user' ? AUTO_LABELS[entry.source] : '';
   const question = collapse(entry.question);
   const choice = collapse(entry.choice);
   const reason = collapse(entry.reason ?? '');
@@ -87,6 +115,9 @@ export const formatDecisionLine = (
   }
   if (rejected.length > 0) {
     parts.push(`_(rejected: ${rejected.join(', ')})_`);
+  }
+  if (auto) {
+    parts.push(`_(auto: ${auto})_`);
   }
   if (date) {
     parts.push(`— ${date}`);
@@ -109,6 +140,7 @@ const BLOCK_CHOICE = /^[ \t]*[-*][ \t]*\*\*Chosen:\*\*[ \t]*(.+)$/i;
 const BLOCK_REASON = /^[ \t]*[-*][ \t]*\*\*Why:\*\*[ \t]*(.+)$/i;
 const TRAILING_DATE = /[ \t]*[—-][ \t]*(\d{4}-\d{2}-\d{2})[ \t]*$/;
 const REJECTED = /[ \t]*_\((?:rejected|отклонено):[ \t]*(.+?)\)_[ \t]*/i;
+const AUTO = /[ \t]*_\(auto:[ \t]*([a-z]+)\)_[ \t]*/i;
 
 /** Split a one-liner's tail into choice / reason / rejected / date. */
 const parseTail = (tail: string): Omit<DecisionEntry, 'question'> => {
@@ -118,6 +150,16 @@ const parseTail = (tail: string): Omit<DecisionEntry, 'question'> => {
   if (dateMatch) {
     date = dateMatch[1];
     rest = rest.slice(0, dateMatch.index).trim();
+  }
+  // The auto marker is read before `rejected` only because both are cut out of the same tail; the
+  // writer puts it after the rejected list, and neither regex can match the other's text.
+  let source: DecisionSource | undefined;
+  const autoMatch = AUTO.exec(rest);
+  if (autoMatch) {
+    source = SOURCE_BY_LABEL[autoMatch[1].toLowerCase()];
+    rest = (rest.slice(0, autoMatch.index) + rest.slice(autoMatch.index + autoMatch[0].length))
+      .replace(/\s{2,}/g, ' ')
+      .trim();
   }
   let rejected: string[] = [];
   const rejectedMatch = REJECTED.exec(rest);
@@ -140,6 +182,9 @@ const parseTail = (tail: string): Omit<DecisionEntry, 'question'> => {
     reason: reason.trim().replace(/[.]+$/, ''),
     rejected,
     date,
+    // Absent rather than `source: undefined`: a human-written line has no marker, and an entry that
+    // carries the key at all would read as "provenance was recorded" to every consumer.
+    ...(source ? { source } : {}),
   };
 };
 

@@ -68,6 +68,26 @@ describe('formatDecisionLine', () => {
     ]);
   });
 
+  /**
+   * The marker is what lets the user (and the planner, at the next compaction) tell a fork they
+   * settled from one the autopilot settled for them while they were away — plan §4.
+   */
+  it.each([
+    ['auto-brief' as const, 'brief'],
+    ['auto-advisor' as const, 'advisor'],
+    ['auto-agent' as const, 'agent'],
+  ])('marks a %s decision as auto before the date', (source, label) => {
+    expect(
+      formatDecisionLine({ question: 'Q?', choice: 'A', reason: '', source, date: DATE })
+    ).toBe(`- **Q?** → A. _(auto: ${label})_ — ${DATE}`);
+  });
+
+  it('writes no marker for a decision the user made', () => {
+    expect(
+      formatDecisionLine({ question: 'Q?', choice: 'A', reason: '', source: 'user', date: DATE })
+    ).toBe(`- **Q?** → A. — ${DATE}`);
+  });
+
   it('does not double the sentence stop when the choice already ends in one', () => {
     expect(
       formatDecisionLine({ question: 'Q', choice: 'A.', reason: 'Because.', date: DATE })
@@ -85,6 +105,23 @@ describe('extractDecisionEntries', () => {
       date: DATE,
     };
     expect(extractDecisionEntries(formatDecisionLine(entry))).toEqual([entry]);
+  });
+
+  it('round-trips the auto marker alongside the rejected list', () => {
+    const entry = {
+      question: 'Win by score or timer?',
+      choice: 'By score',
+      reason: 'The brief says score',
+      rejected: ['by timer'],
+      date: DATE,
+      source: 'auto-brief' as const,
+    };
+    expect(extractDecisionEntries(formatDecisionLine(entry))).toEqual([entry]);
+  });
+
+  it('leaves the source key off a line nobody marked, so "no marker" never reads as provenance', () => {
+    const [entry] = extractDecisionEntries(`- **Q?** → A. — ${DATE}`);
+    expect('source' in entry).toBe(false);
   });
 
   it('still reads the block shape projects were seeded with before the tool existed', () => {
