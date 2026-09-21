@@ -798,6 +798,7 @@ export class SceneRunner {
     // a graph that is already gone. `runGraph` stops before it starts, which is
     // what makes a scene change clear them too.
     this.sceneService.clearCommands();
+    this.sceneService.clearTweens();
     this.sceneService.clearPhysics2D();
 
     this.activeCamera2D = null;
@@ -1211,6 +1212,9 @@ export class SceneRunner {
     this.sceneService.interpolatePhysics2D(alpha);
 
     this.renderer.beginStatsFrame();
+    // Tweens first: they own plain numbers (positions, opacity, width), so scripts
+    // ticked below read this frame's value rather than last frame's.
+    this.sceneService.updateTweens(dt);
     this.updateGameLogicSafe(dt);
     this.flushInstancedNodes();
     const logicMs = performance.now() - logicStart;

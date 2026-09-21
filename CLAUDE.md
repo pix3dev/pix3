@@ -23,6 +23,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | Why the exported .html weighs what it does / export size                | this file → "Playable export size"                                                                                                |
 | Viewport not repainting / render-on-demand                              | this file → "Editor viewport renders on demand"                                                                                   |
 | A viewport inset/overlay draws in the wrong place / `setViewport` units | this file → "Viewport insets are sized in device pixels"                                                                          |
+| Tween a value, fade / cross-fade a node, ball trail                      | `docs/nodes-and-systems.md` → "Tweens (scene.tween)"; the `trail` line under "Juice & time-scale"                     |
 | 2D physics (bodies, colliders, sensors) / collision polygons            | `docs/nodes-and-systems.md` → "Physics — which tier to use", then "2D physics" / "2D collision"                                   |
 | Where a menu / end screen / modal belongs in a project or template      | `docs/pix3-specification.md` → "Project Templates, Target Platform and Agent Overlay" → the `scenes/ui/` paragraph                |
 | Command / Operation / undo wiring                                       | `AGENTS.md` → "Commands and Operations"; code in `src/features/<area>/`                                                           |

@@ -14,6 +14,7 @@ describe('AgentSkillsService', () => {
       'game-prototype',
       'asset-generation',
       'verify-and-fix',
+      'engine-api-map',
     ]);
     for (const skill of service.list()) {
       expect(skill.content.length).toBeGreaterThan(100);
@@ -23,7 +24,7 @@ describe('AgentSkillsService', () => {
 
   it('emits one index line per skill', () => {
     const lines = service.indexLines();
-    expect(lines).toHaveLength(5);
+    expect(lines).toHaveLength(6);
     // The two Flow stage skills lead the index in stage order: at the idea stage `idea-stage` is
     // the first thing to read, at the prototype stage `flow-increment` is.
     expect(lines[0]).toMatch(/^- idea-stage — /);

@@ -5,9 +5,15 @@
 A ball under gravity bounces off walls, bumpers and a paddle you steer; hits score, the
 bottom drain costs a life. Playable, neon-lit and audible before any edit.
 
-Physics lives in the project: `BallBody` runs the swept solver (`ball-collision.ts`)
+Ball physics lives in the project: `BallBody` runs the swept solver (`ball-collision.ts`)
 over colliders rebuilt each frame from the marker nodes' **live world transforms**, so
-a rotated flipper works for free. No rigidbody engine, no `core:Hitbox2D`, no rapier.
+a rotated flipper works for free. No `core:Hitbox2D` on the ball, no rapier. (The
+engine's own `scene.physics2d` / `core:PhysicsBody2D` solver exists for games that grow
+many interacting bodies — do not put both on the same ball.)
+
+The paddle is optional: for an idle / builder pinball, delete or hide it, make the drain
+relaunch instead of costing a life, and the bumpers plus the `ball-hit` juice carry the
+game.
 
 The look: `PostProcess` (bloom + vignette) over bright accents, a tinted gradient
 sprite behind the board, `Label2D` glow on the HUD (drawn after post — it glows on

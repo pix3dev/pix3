@@ -8,7 +8,13 @@ correct, and it is the point.
 Use this when the game's core loop is not what another recipe ships (grid or
 turn-based movement, word / card / board games, builders, idle). The first thing
 to build is the mechanic itself, controls included; building it here beats
-deleting somebody else's mechanic first.
+deleting somebody else's mechanic first. A falling, bouncing ball is the bouncer
+recipe's job — do not rebuild that here.
+
+The field is not grey: `post-fx` blooms anything bright and `bg-glow` lights the
+background, and `sprites/ph-*.png` is a shape library (disc, orb, ring, star,
+capsule) tinted with the palette at T0. Build the mechanic out of those shapes,
+not out of `ColorRect2D` squares — see `design/recipe.md` → Placeholders.
 
 **`design/recipe.md` is the contract.** It lists the stable node ids, the
 tunables (with their ranges), the extension points and what must not be renamed.
@@ -21,6 +27,7 @@ scenes/main.pix3scene    the game — open and build here. There is no menu on p
 scenes/ui/result.pix3scene  win/lose overlay, instanced into main hidden (editor-only)
 scripts/GameRules.ts     score / lives / timer / win / lose / end flow / restart
 scripts/ScoreHud.ts      signals → HUD widgets (display only)
+sprites/ph-*.png         shape library (near-white, tinted via core:tint)
 design/recipe.md         the contract
 design/tests/            reachability ledger + one example routine (a format seed)
 ```

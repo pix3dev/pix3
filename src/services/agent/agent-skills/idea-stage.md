@@ -49,8 +49,10 @@ file does not.
 `ask_user` ends your turn with a question plus option chips, and at this stage that is the
 **normal** way for a turn to end — not a failure to finish.
 
-- One or two questions. Not five: a chip row of five is a form, and the user came here to
-  talk.
+- **One question per turn.** Not five: a chip row of five is a form, and the user came here to
+  talk — and not a ladder of one-question turns either: every turn the user has to answer before
+  seeing anything is a turn they may not take. Pick the ONE fork that decides the most, decide the
+  next-biggest yourself and write the choice into the document with a one-line note.
 - Ask about the forks where a wrong guess means redoing the game later: "does the run last a
   minute or ten?", "portrait or landscape?", "one screen or a level list?", "is the failure a
   timer or a health bar?"
@@ -91,18 +93,27 @@ comes back in the tool result, so point at that.
 The same goes for anything you write by hand for the user to look at: a mockup, a table, a
 scratch note that is not the design document itself belongs in `references/`.
 
-## 6. Moodboards: ask the question with pictures
+## 6. Moodboards: ask the question with pictures — in the FIRST turn
 
-When the conversation reaches "what should it look like", do not describe three styles in
-prose. Generate them.
+The look is decided with pictures, not prose, and it is decided **in your first turn**, right
+after the document edits: the user typed one sentence and the first thing they should see back
+is their game. Do not wait for the conversation to "reach" the look — it never does before the
+user has seen a picture. The only exception is a `style` reference already attached to the
+prompt: then the look is theirs, skip the moodboard.
 
-- 2–4 candidates in one turn via `generate_asset`, named `mood-<n>.png`, each with
-  **`role: "style-candidate"`**. At this stage a bare name lands in `references/` on its own —
-  you do not need to spell the folder out. Give each a short prompt that differs in ONE axis
-  (flat vector vs painterly vs pixel), not in three — the point is a comparison the user can
-  make. The tool records your prompt as the caption; the role is the part it cannot guess, and
-  it is what turns the cards into a set of candidates rather than finished art.
-- **End that turn with "which one is closer?"** The candidates ARE the question.
+- **Three fake store screenshots** in one turn via `generate_asset`, named `mood-1.png` …
+  `mood-3.png`, each with **`role: "style-candidate"`**. At this stage a bare name lands in
+  `references/` on its own — you do not need to spell the folder out. Each prompt describes
+  THIS game's actual play screen — portrait or landscape as decided, the field, the pieces, the
+  HUD, one juicy moment — **full-bleed: the screen itself fills the whole image, no phone body,
+  no bezel, no store chrome, no dark backdrop around it** (a device mockup hands the palette
+  measurer a black frame, and the mockup's frame is what tints the project). It differs from
+  the others in ONE axis (flat vector vs
+  painterly vs pixel; or dark neon vs pastel vs retro), not in three: the point is a comparison
+  the user can make. The tool records your prompt as the caption; the role is the part it
+  cannot guess, and it is what turns the cards into a set of candidates rather than finished art.
+- The pictures ARE the "which one is closer?" question — say so in one line. Your single
+  `ask_user` of the turn goes to the structural fork (§3), not to the style.
 - **You do not adopt the style — the user does, with one click.** Each candidate card carries a
   droplet button that measures the image's palette, writes `design/style.md` and files the
   choice in the decision log, all in code. So when they answer in the chat, do not write

@@ -101,6 +101,18 @@ export interface BatchPlan {
  */
 const REF_PATTERN = /^\$(\d+|prev)((?:\.[A-Za-z0-9_]+)+)$/;
 
+/**
+ * The tool name a step names, with any MCP server prefix removed.
+ *
+ * Through the bridge lanes the editor's tools reach the model as an MCP server called `pix3`, so
+ * the model knows `fs_read` as `mcp__pix3__fs_read` and, naturally, writes THAT into a batch step.
+ * Two live runs lost a hop each to "Unknown tool: mcp__pix3__fs_read" / a failed
+ * `mcp__pix3__add_component` step before the model guessed the bare name. The registry is keyed by
+ * bare names, so the prefix is stripped here rather than taught away in the prompt.
+ */
+export const normalizeBatchToolName = (name: string): string =>
+  name.replace(/^mcp__[A-Za-z0-9-]+__/, '');
+
 export const parseBatchPlan = (input: unknown): BatchPlan | { error: string } => {
   const raw = (input ?? {}) as { steps?: unknown; onError?: unknown };
   if (!Array.isArray(raw.steps) || raw.steps.length === 0) {
@@ -124,16 +136,17 @@ export const parseBatchPlan = (input: unknown): BatchPlan | { error: string } =>
     if (typeof step.tool !== 'string' || step.tool.length === 0) {
       return { error: `steps[${index}].tool must be a tool name.` };
     }
-    if (NEVER_BATCHABLE.has(step.tool)) {
+    const tool = normalizeBatchToolName(step.tool);
+    if (NEVER_BATCHABLE.has(tool)) {
       return {
-        error: `${step.tool} cannot be batched: you need its answer before you can choose what to do next (or it returns an image, or it costs a network round trip). Call it on its own. The test for everything else: if you already decided to make all the calls before seeing any of their results, they belong in one batch — reads included.`,
+        error: `${tool} cannot be batched: you need its answer before you can choose what to do next (or it returns an image, or it costs a network round trip). Call it on its own. The test for everything else: if you already decided to make all the calls before seeing any of their results, they belong in one batch — reads included.`,
       };
     }
     if (step.args !== undefined && (typeof step.args !== 'object' || Array.isArray(step.args))) {
       return { error: `steps[${index}].args must be an object.` };
     }
     steps.push({
-      tool: step.tool,
+      tool,
       args: (step.args ?? {}) as Record<string, unknown>,
       ...(typeof step.label === 'string' && step.label ? { label: step.label } : {}),
     });

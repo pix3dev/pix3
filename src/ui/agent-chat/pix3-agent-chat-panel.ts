@@ -35,7 +35,16 @@ import { renderMarkdownLite } from './markdown-lite';
 import './pix3-agent-chat-panel.ts.css';
 
 /** Tool groups with at least this many steps start collapsed (unless running). */
-const GROUP_COLLAPSE_THRESHOLD = 6;
+const GROUP_COLLAPSE_THRESHOLD = 4;
+
+/**
+ * From this many steps up, a group's head carries a histogram of which tools it spent them on — the
+ * one thing you want from a 34-step research run you are not going to expand.
+ */
+const GROUP_HISTOGRAM_THRESHOLD = 4;
+
+/** Most histogram rows drawn; the rest of the distinct tool names fold into a single "other". */
+const GROUP_HISTOGRAM_ROWS = 5;
 
 /** Short, capitalised labels for the reasoning-level picker (keyed by {@link ReasoningEffort}). */
 const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
@@ -290,6 +299,61 @@ const formatMetricTooltip = (metric: AgentTurnMetric): string => {
   return lines.join('\n');
 };
 
+/**
+ * Fold a merged tool group's per-hop metrics into one. A research phase is 30+ single-tool hops,
+ * each of which used to print its own "0.8s · 26 tok/s · …" line under its own card; the group now
+ * prints their sum instead. A single metric is returned untouched, so a one-hop group renders
+ * exactly what it rendered before grouping existed.
+ *
+ * Counters are summed only over the hops that reported them, so "nothing reported" stays
+ * `undefined` rather than collapsing to a zero that {@link formatMetric} would then print.
+ */
+export const aggregateTurnMetrics = (
+  metrics: readonly AgentTurnMetric[]
+): AgentTurnMetric | undefined => {
+  if (metrics.length === 0) return undefined;
+  if (metrics.length === 1) return metrics[0];
+  const sum = (pick: (metric: AgentTurnMetric) => number | undefined): number | undefined => {
+    let total: number | undefined;
+    for (const metric of metrics) {
+      const value = pick(metric);
+      if (value !== undefined) total = (total ?? 0) + value;
+    }
+    return total;
+  };
+  // The origin of the last hop is the provider the group ended on — the one a reader would name.
+  const origin = [...metrics].reverse().find(metric => metric.origin)?.origin;
+  return {
+    ...(origin ? { origin } : {}),
+    elapsedMs: metrics.reduce((total, metric) => total + metric.elapsedMs, 0),
+    ...pruneUndefined({
+      inputTokens: sum(metric => metric.inputTokens),
+      outputTokens: sum(metric => metric.outputTokens),
+      cacheReadTokens: sum(metric => metric.cacheReadTokens),
+      cacheCreationTokens: sum(metric => metric.cacheCreationTokens),
+      predictedCacheTokens: sum(metric => metric.predictedCacheTokens),
+    }),
+  };
+};
+
+/** Drop the `undefined` entries so an optional field stays absent rather than explicitly undefined. */
+const pruneUndefined = (fields: Record<string, number | undefined>): Record<string, number> => {
+  const out: Record<string, number> = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+};
+
+/** Wall-clock duration for a group head: `45s`, `2m 10s`, `2m`. */
+const formatElapsed = (elapsedMs: number): string => {
+  const seconds = Math.round(elapsedMs / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  return rest === 0 ? `${minutes}m` : `${minutes}m ${rest}s`;
+};
+
 /** Compact token count for the context meter: 980, 24K, 1.2M. */
 const formatTokenCount = (tokens: number): string => {
   if (tokens < 1000) return String(tokens);
@@ -541,7 +605,7 @@ type ChatImage = {
 };
 
 /** A run of adjacent tool calls, plus the message rows around them, after grouping. */
-type RenderRow =
+export type RenderRow =
   | {
       kind: 'text';
       key: string;
@@ -566,7 +630,16 @@ type RenderRow =
     }
   | { kind: 'metrics'; metric: AgentTurnMetric }
   | { kind: 'divider' }
-  | { kind: 'toolgroup'; id: string; tools: ToolEntry[] };
+  | {
+      kind: 'toolgroup';
+      id: string;
+      tools: ToolEntry[];
+      /**
+       * The per-hop turn metrics swallowed by this group (debug mode only — empty otherwise). The
+       * group prints their sum as one line instead of one line per hop.
+       */
+      metrics: AgentTurnMetric[];
+    };
 
 /** Derived status for a single tool row or a whole group. */
 type ToolStatus = 'done' | 'error' | 'running' | 'queued';
@@ -590,7 +663,7 @@ const basename = (path: string): string => {
 };
 
 /** Bucket a tool name into a coarse category for group-label derivation. */
-const toolCategory = (name: string): ToolCategory => {
+export const toolCategory = (name: string): ToolCategory => {
   if (/^(fs_read|fs_list)$/.test(name)) return 'read';
   if (/^(str_replace|fs_write|fs_delete)$/.test(name)) return 'edit-file';
   if (/^(find_nodes|node_inspect)$/.test(name)) return 'inspect';
@@ -609,7 +682,9 @@ const toolCategory = (name: string): ToolCategory => {
     return 'test';
   }
   if (/^(generate_asset|process_asset)$/.test(name)) return 'assets';
-  if (/^(read_skill|ask_advisor)$/.test(name)) return 'research';
+  // `engine_search` / `engine_read` are how the agent reads the engine's own sources and docs —
+  // they are the bulk of a research phase, and labelling 30 of them "Working" said nothing.
+  if (/^(read_skill|ask_advisor|engine_search|engine_read)$/.test(name)) return 'research';
   return 'other';
 };
 
@@ -656,6 +731,127 @@ const deriveGroupLabel = (tools: readonly ToolEntry[]): string => {
     default:
       return 'Working';
   }
+};
+
+/** One bar of a tool group's histogram: a tool name and how many of the group's steps it took. */
+export type ToolHistogramBar = { readonly name: string; readonly count: number };
+
+/**
+ * How a group's steps split across tool names, biggest first. Everything past
+ * {@link GROUP_HISTOGRAM_ROWS} distinct names folds into one trailing "other" bar, so the head
+ * never grows past that many rows however varied the run was. Ties keep first-seen order (the sort
+ * is stable), which matches the order the calls actually happened in.
+ */
+export const toolHistogram = (
+  tools: readonly ToolEntry[],
+  maxRows: number = GROUP_HISTOGRAM_ROWS
+): ToolHistogramBar[] => {
+  const counts = new Map<string, number>();
+  for (const tool of tools) {
+    counts.set(tool.call.name, (counts.get(tool.call.name) ?? 0) + 1);
+  }
+  const bars = [...counts].map(([name, count]) => ({ name, count }));
+  bars.sort((a, b) => b.count - a.count);
+  if (bars.length <= maxRows) return bars;
+  const head = bars.slice(0, maxRows - 1);
+  const folded = bars.slice(maxRows - 1).reduce((total, bar) => total + bar.count, 0);
+  return [...head, { name: 'other', count: folded }];
+};
+
+/**
+ * Collapse runs of adjacent tool items into a single {@link RenderRow} group; text / notice /
+ * image / divider items break a group, and a `metrics` item — one per provider round-trip — does
+ * NOT: a research phase is 30+ single-tool hops with a metrics line between each pair, and letting
+ * those break the run produced 30 cards each reading "Working · 1 step". The folded metrics ride
+ * on the group and print as one summed line. Preserves order; the caller marks the first/last
+ * assistant reply so the view can draw the agent avatar and hover Copy/Retry actions.
+ */
+export const buildRenderRows = (items: readonly DisplayItem[]): RenderRow[] => {
+  const rows: RenderRow[] = [];
+  // A tool that captured five screenshots arrives as five separate rows, so each image row has to
+  // carry its whole message's list — otherwise the lightbox arrows have nowhere to go.
+  const imagesByMessage = new Map<string, Extract<DisplayItem, { kind: 'image' }>[]>();
+  for (const item of items) {
+    if (item.kind === 'image') {
+      const messageKey = item.key.split('-')[0];
+      const group = imagesByMessage.get(messageKey) ?? [];
+      group.push(item);
+      imagesByMessage.set(messageKey, group);
+    }
+  }
+  let pending: ToolEntry[] = [];
+  let pendingMetrics: AgentTurnMetric[] = [];
+  const flush = (): void => {
+    if (pending.length > 0) {
+      rows.push({
+        kind: 'toolgroup',
+        id: pending[0].call.id,
+        tools: pending,
+        metrics: pendingMetrics,
+      });
+    } else {
+      // Metrics with no tools left to attach them to still belong in the transcript.
+      for (const metric of pendingMetrics) rows.push({ kind: 'metrics', metric });
+    }
+    pending = [];
+    pendingMetrics = [];
+  };
+  for (const item of items) {
+    if (item.kind === 'tool') {
+      pending.push({ call: item.call, result: item.result });
+      continue;
+    }
+    if (item.kind === 'metrics') {
+      // Hold it against the open group (and keep the group open for the next hop's tools); with no
+      // group open it is an ordinary standalone line, exactly as before.
+      if (pending.length > 0) pendingMetrics.push(item.metric);
+      else rows.push({ kind: 'metrics', metric: item.metric });
+      continue;
+    }
+    flush();
+    if (item.kind === 'text') {
+      rows.push({
+        kind: 'text',
+        key: item.key,
+        role: item.role,
+        text: item.text,
+        ...(item.origin && { origin: item.origin }),
+        firstAssistant: false,
+        lastAssistant: false,
+      });
+    } else if (item.kind === 'notice') {
+      rows.push({ kind: 'notice', key: item.key, label: item.label, text: item.text });
+    } else if (item.kind === 'image') {
+      const siblings = imagesByMessage.get(item.key.split('-')[0]) ?? [item];
+      rows.push({
+        kind: 'image',
+        key: item.key,
+        role: item.role,
+        mimeType: item.mimeType,
+        data: item.data,
+        siblings: siblings.map(image => ({
+          mimeType: image.mimeType,
+          data: image.data,
+          ...(image.path ? { path: image.path } : {}),
+        })),
+        siblingIndex: Math.max(0, siblings.indexOf(item)),
+      });
+    } else {
+      rows.push({ kind: 'divider' });
+    }
+  }
+  flush();
+
+  const assistantIdx = rows
+    .map((row, i) => (row.kind === 'text' && row.role === 'assistant' ? i : -1))
+    .filter(i => i >= 0);
+  if (assistantIdx.length > 0) {
+    const first = rows[assistantIdx[0]];
+    if (first.kind === 'text') first.firstAssistant = true;
+    const last = rows[assistantIdx[assistantIdx.length - 1]];
+    if (last.kind === 'text') last.lastAssistant = true;
+  }
+  return rows;
 };
 
 /** Rendered unified diff for a `str_replace`, or `null` when it carries no old/new strings. */
@@ -977,7 +1173,7 @@ export class AgentChatPanel extends ComponentBase {
           chatState.compactedAtIndices
         )
       : [];
-    const rows = this.buildRenderRows(items);
+    const rows = buildRenderRows(items);
     const running = chatState?.status === 'running';
     // The first tool still awaiting a result is the one in flight; later pending calls are queued.
     const firstPendingId = items.find(
@@ -1001,84 +1197,6 @@ export class AgentChatPanel extends ComponentBase {
         ${this.renderAutopilotBar()} ${this.renderComposer()}
       </div>
     `;
-  }
-
-  /**
-   * Collapse runs of adjacent tool items into a single {@link RenderRow} group; text / image /
-   * metrics items break a group. Preserves order and marks the first/last assistant reply so the
-   * view can draw the agent avatar and hover Copy/Retry actions.
-   */
-  private buildRenderRows(items: readonly DisplayItem[]): RenderRow[] {
-    const rows: RenderRow[] = [];
-    // A tool that captured five screenshots arrives as five separate rows, so each image row has to
-    // carry its whole message's list — otherwise the lightbox arrows have nowhere to go.
-    const imagesByMessage = new Map<string, Extract<DisplayItem, { kind: 'image' }>[]>();
-    for (const item of items) {
-      if (item.kind === 'image') {
-        const messageKey = item.key.split('-')[0];
-        const group = imagesByMessage.get(messageKey) ?? [];
-        group.push(item);
-        imagesByMessage.set(messageKey, group);
-      }
-    }
-    let pending: ToolEntry[] = [];
-    const flush = (): void => {
-      if (pending.length > 0) {
-        rows.push({ kind: 'toolgroup', id: pending[0].call.id, tools: pending });
-        pending = [];
-      }
-    };
-    for (const item of items) {
-      if (item.kind === 'tool') {
-        pending.push({ call: item.call, result: item.result });
-        continue;
-      }
-      flush();
-      if (item.kind === 'text') {
-        rows.push({
-          kind: 'text',
-          key: item.key,
-          role: item.role,
-          text: item.text,
-          ...(item.origin && { origin: item.origin }),
-          firstAssistant: false,
-          lastAssistant: false,
-        });
-      } else if (item.kind === 'notice') {
-        rows.push({ kind: 'notice', key: item.key, label: item.label, text: item.text });
-      } else if (item.kind === 'image') {
-        const siblings = imagesByMessage.get(item.key.split('-')[0]) ?? [item];
-        rows.push({
-          kind: 'image',
-          key: item.key,
-          role: item.role,
-          mimeType: item.mimeType,
-          data: item.data,
-          siblings: siblings.map(image => ({
-            mimeType: image.mimeType,
-            data: image.data,
-            ...(image.path ? { path: image.path } : {}),
-          })),
-          siblingIndex: Math.max(0, siblings.indexOf(item)),
-        });
-      } else if (item.kind === 'divider') {
-        rows.push({ kind: 'divider' });
-      } else {
-        rows.push({ kind: 'metrics', metric: item.metric });
-      }
-    }
-    flush();
-
-    const assistantIdx = rows
-      .map((row, i) => (row.kind === 'text' && row.role === 'assistant' ? i : -1))
-      .filter(i => i >= 0);
-    if (assistantIdx.length > 0) {
-      const first = rows[assistantIdx[0]];
-      if (first.kind === 'text') first.firstAssistant = true;
-      const last = rows[assistantIdx[assistantIdx.length - 1]];
-      if (last.kind === 'text') last.lastAssistant = true;
-    }
-    return rows;
   }
 
   /** Compact session strip: agent glyph + title + step count, with History / New chat on the right. */
@@ -1777,17 +1895,23 @@ export class AgentChatPanel extends ComponentBase {
     running: boolean,
     firstPendingId: string | undefined
   ) {
-    const { tools, id } = group;
+    const { tools, id, metrics } = group;
     const status = this.groupStatus(tools, running, firstPendingId);
     const open = this.isGroupOpen(id, tools.length, status);
     const label = deriveGroupLabel(tools);
     const doneCount = tools.filter(
       t => this.toolStatus(t, running, firstPendingId) === 'done'
     ).length;
+    const folded = aggregateTurnMetrics(metrics);
+    // Total wall clock only on a merged group: a one-hop group must read exactly as it did before
+    // grouping existed, and its time is already on the metrics line right below it.
+    const elapsedText = tools.length > 1 && folded ? ` · ${formatElapsed(folded.elapsedMs)}` : '';
     const countText =
       status === 'running'
         ? `${doneCount}/${tools.length}`
-        : `${tools.length} ${tools.length === 1 ? 'step' : 'steps'}`;
+        : `${tools.length} ${tools.length === 1 ? 'step' : 'steps'}${elapsedText}`;
+    const histogram =
+      tools.length >= GROUP_HISTOGRAM_THRESHOLD ? toolHistogram(tools) : ([] as ToolHistogramBar[]);
 
     return html`
       <div class="agent-group ${status === 'error' ? 'is-error' : ''}">
@@ -1811,11 +1935,44 @@ export class AgentChatPanel extends ComponentBase {
               ><span class="agent-group-progress-bar"></span
             ></span>`
           : null}
+        ${histogram.length > 0 ? this.renderToolHistogram(histogram) : null}
         ${open
           ? html`<div class="agent-group-body">
               ${tools.map(t => this.renderToolRow(t, running, firstPendingId))}
             </div>`
           : null}
+      </div>
+      ${folded
+        ? html`<div class="agent-metrics" title=${formatMetricTooltip(folded)}>
+            ${formatMetric(folded)}
+          </div>`
+        : null}
+    `;
+  }
+
+  /**
+   * Which tools a group spent its steps on, as a row of tiny bars under the head. It stays visible
+   * while the group is collapsed — that is the point: a 34-step research run answers "what did it
+   * do" without being expanded into 34 rows.
+   */
+  private renderToolHistogram(bars: readonly ToolHistogramBar[]) {
+    const peak = bars.reduce((max, bar) => Math.max(max, bar.count), 1);
+    return html`
+      <div class="agent-group-hist no-select">
+        ${bars.map(
+          bar => html`
+            <div class="agent-group-hist-row">
+              <code class="agent-group-hist-name" title=${bar.name}>${bar.name}</code>
+              <span class="agent-group-hist-track">
+                <span
+                  class="agent-group-hist-bar"
+                  style=${`width:${((bar.count / peak) * 100).toFixed(1)}%`}
+                ></span>
+              </span>
+              <span class="agent-group-hist-count">${bar.count}</span>
+            </div>
+          `
+        )}
       </div>
     `;
   }

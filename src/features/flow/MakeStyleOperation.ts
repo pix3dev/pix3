@@ -17,7 +17,7 @@ import {
   parseStyleReference,
   renderStyleFromReference,
 } from '@/services/flow/style-doc';
-import { extractPalette } from '@/services/image-gen/image-ops';
+import { extractStylePalette } from '@/services/image-gen/image-ops';
 
 export interface MakeStyleParams {
   /** Project-relative path of the chosen image, e.g. `references/mood-2.png`. */
@@ -70,9 +70,11 @@ export class MakeStyleOperation implements Operation<OperationInvokeResult> {
       return { didMutate: false };
     }
 
-    // Median cut, no random seeding: the same image always yields the same palette, so re-adopting
-    // a style can never silently recolour the project.
-    const palette = (await extractPalette(blob, PALETTE_SIZE)).map(swatch => swatch.hex);
+    // Quantize finely, then CHOOSE: the most-covering box is the background and the rest are ranked
+    // by saturation × brightness × a damped coverage, so a neon reference yields neon accents rather
+    // than five shades of its own backdrop (which is what plain coverage order gave). Still median
+    // cut underneath — no random seeding, so re-adopting a style cannot silently recolour a project.
+    const palette = await extractStylePalette(blob, PALETTE_SIZE);
 
     const entry = await references.readIndexEntry(fileName);
     const previousRole: FlowReferenceRole | null = entry?.role ?? null;

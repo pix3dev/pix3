@@ -4,6 +4,7 @@ import flowIncrement from './agent-skills/flow-increment.md?raw';
 import gamePrototype from './agent-skills/game-prototype.md?raw';
 import assetGeneration from './agent-skills/asset-generation.md?raw';
 import verifyAndFix from './agent-skills/verify-and-fix.md?raw';
+import engineApiMap from './agent-skills/engine-api-map.md?raw';
 
 /** A bundled knowledge pack the in-editor agent can read on demand via the `read_skill` tool. */
 export interface AgentSkill {
@@ -53,7 +54,25 @@ export class AgentSkillsService {
       whenToUse: 'running the game to check it works and debugging runtime/script errors',
       content: verifyAndFix,
     },
+    {
+      id: 'engine-api-map',
+      whenToUse:
+        'the index of what a game script can call (scene / input / node / physics / juice) — already in your prompt; re-read a section only after a compaction',
+      content: engineApiMap,
+    },
   ];
+
+  /**
+   * The engine API map, inlined into the system prompt's cached prefix rather than pulled on
+   * demand. Measured reason: a live Flow run spent 34 of its first 60 hops on `engine_search` /
+   * `engine_read` re-discovering `pointerEvents`, `position.set` and `adoptChild` before writing a
+   * line — an index the model has from hop one costs ~3K cached tokens and removes that whole
+   * phase. It is also a skill (`read_skill { id: 'engine-api-map' }`) so a compacted conversation
+   * can get a section back.
+   */
+  apiMap(): string {
+    return engineApiMap;
+  }
 
   /** All skills (for the tool schema enum + the system-prompt index). */
   list(): readonly AgentSkill[] {

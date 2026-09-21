@@ -8,9 +8,17 @@
 # including controls. That is your first increment — build it inside `board`.
 #
 # Stable node ids (design/recipe.md is the contract — do not rename these):
-#   game-root, game-background, board, board-floor,
+#   post-fx, game-root, game-background, bg-glow, board, board-floor,
 #   hud, score-label, time-label, lives-bar,
 #   result-overlay, result-dim, result-label, retry-button (scenes/ui/result.pix3scene)
+#
+# The look is two cheap ingredients, the same ones the bouncer recipe uses:
+#   1. `post-fx` (PostProcess, affect2D) — bloom picks up whatever is bright, so
+#      a bright sprite glows for free. `bloomIntensity` is a recipe tunable the
+#      Flow theme pack turns up for neon and down for pastel.
+#   2. `bg-glow` — a near-white radial-gradient placeholder (`sprites/ph-bg.png`)
+#      tinted with the palette background, over the darkest ColorRect. It is what
+#      keeps an empty field from reading as a grey slab.
 #
 # The win/lose overlay lives in its own file under scenes/ui/ and is instanced
 # here hidden (`visible: false` = editor only), so opening this scene shows the
@@ -23,6 +31,21 @@ metadata:
   author: Pix3 Recipe
   description: Blank gameplay field — bookkeeping, HUD and win/lose only; the mechanic is yours
 root:
+  - id: post-fx
+    type: PostProcess
+    name: Post FX
+    properties:
+      affect2D: true
+      bloomEnabled: true
+      bloomIntensity: 0.8
+      bloomThreshold: 0.6
+      bloomSmoothing: 0.2
+      bloomRadius: 0.75
+      vignetteEnabled: true
+      vignetteOffset: 0.3
+      vignetteDarkness: 0.45
+      chromaticAberrationEnabled: false
+    children: []
   - id: game-root
     type: Group2D
     name: Game Root
@@ -58,6 +81,28 @@ root:
           width: 1080
           height: 1920
           color: "#12141c"
+          transform:
+            position: [0, 0]
+            scale: [1, 1]
+            rotation: 0
+          layout:
+            enabled: true
+            horizontalAlign: stretch
+            verticalAlign: stretch
+        children: []
+      # Radial glow over the flat background. Near-white PNG + core:tint, so the
+      # T0 palette recolours it (role `background` in design/recipe.md).
+      - id: bg-glow
+        type: Sprite2D
+        name: Background Glow
+        properties:
+          texture: { type: 'texture', url: 'res://sprites/ph-bg.png' }
+          width: 1080
+          height: 1920
+          opacity: 0.85
+          effects:
+            - type: core:tint
+              params: { color: "#3a2f7a", amount: 1 }
           transform:
             position: [0, 0]
             scale: [1, 1]

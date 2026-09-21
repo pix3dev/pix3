@@ -84,6 +84,18 @@ export class NodeBase extends Object3D {
   private readonly _signals: Map<string, Set<SignalConnection>> = new Map();
   private _disposed = false;
 
+  /**
+   * True once {@link dispose} has run — the node's components are detached, its
+   * Three.js resources released and it is out of the tree.
+   *
+   * Anything that HOLDS a node across frames without owning it (a tween, a trail,
+   * a cached lookup) has to be able to ask: writing into a disposed node silently
+   * does nothing while keeping the whole subtree alive through the reference.
+   */
+  get isDisposed(): boolean {
+    return this._disposed;
+  }
+
   /** Reference to InputSystem (injected by runtime) */
   _input?: import('../core/InputService').InputService;
 

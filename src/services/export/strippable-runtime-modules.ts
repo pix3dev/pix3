@@ -204,6 +204,24 @@ export const STRIPPABLE_RUNTIME_MODULES: readonly StrippableRuntimeModule[] = [
     keepWhenMentioned: ['RevoluteJoint2DBehavior', 'core:RevoluteJoint2D'],
   },
 
+  // --- tweens and trails ---
+  {
+    // `SceneService.tween` constructs it lazily, and the per-frame
+    // `updateTweens` hook is a null check on an instance nobody made — so a
+    // project that never writes the word cannot reach the getter (the
+    // `collision2d` / `network` precedent above).
+    modulePath: 'core/TweenApi',
+    keepWhenMentioned: ['tween', 'Tween', 'TweenApi'],
+    lazyValueImporters: ['core/SceneService'],
+  },
+  {
+    // The motion ribbon. `JuiceApi.trail()` is its only construction site, and
+    // nothing else in the runtime reaches it.
+    modulePath: 'core/trail-2d',
+    keepWhenMentioned: ['trail', 'Trail2D'],
+    lazyValueImporters: ['core/JuiceApi'],
+  },
+
   // --- multiplayer ---
   {
     // ~59 KiB with its protocol tree. `SceneService.network` is a getter that

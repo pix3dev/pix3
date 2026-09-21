@@ -16,14 +16,12 @@ import { parseStylePalette } from '@/services/flow/PrototypeBootstrapService';
 import { MakeStyleCommand } from './MakeStyleCommand';
 
 /**
- * `extractPalette` reads pixels through a canvas, which happy-dom does not have. The quantizer has
- * its own spec; what this file is about is the three files the choice writes and puts back.
+ * `extractStylePalette` reads pixels through a canvas, which happy-dom does not have. The quantizer
+ * and the swatch picker have their own spec; what this file is about is the three files the choice
+ * writes and puts back.
  */
 vi.mock('@/services/image-gen/image-ops', () => ({
-  extractPalette: vi.fn(async () => [
-    { hex: '#2b1a0e', color: { r: 43, g: 26, b: 14 }, weight: 0.5 },
-    { hex: '#e8c07d', color: { r: 232, g: 192, b: 125 }, weight: 0.3 },
-  ]),
+  extractStylePalette: vi.fn(async () => ['#2b1a0e', '#e8c07d']),
 }));
 
 class StorageStub {

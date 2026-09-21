@@ -3,6 +3,8 @@ import { appState } from '@/state';
 import {
   AgentChatService,
   LLM_REQUEST_TIMEOUT_MS,
+  readUnparsedToolInput,
+  unparsedToolInputRefusal,
   type ComposeContextRequest,
 } from './AgentChatService';
 import { AUTOPILOT_DEFAULTS } from '@/services/agent/AgentSettingsService';
@@ -330,6 +332,121 @@ describe('AgentChatService', () => {
     expect(state.messages[3]).toEqual({
       role: 'assistant',
       content: [{ type: 'text', text: 'recovered' }],
+    });
+  });
+
+  /**
+   * The bridge lane (Claude Code SDK) wraps a tool_use whose JSON did not parse in a marker instead
+   * of arguments. Measured on nearly every turn's first `batch`: handed on, the batch parser answered
+   * "`steps` must be a non-empty array" — a hop lost to an error that names the wrong problem.
+   */
+  describe('a tool_use whose input did not parse', () => {
+    const marker = {
+      __unparsedToolInput: { raw: '{"steps": \n<parameter name="onError">continue}', len: 46 },
+    };
+
+    it('is refused before dispatch with a resend instruction, and the tool never runs', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(toolCallResult('batch', 'call-1', marker))
+        .mockResolvedValueOnce(textResult('resending'));
+      const execute = vi.fn(async () => ({ ok: true }));
+      const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+      await service.send('build it');
+
+      expect(execute).not.toHaveBeenCalled();
+      const state = service.getState();
+      expect(state.status).toBe('idle');
+      const results = state.messages[2].content as unknown as Array<{
+        type: string;
+        toolUseId: string;
+        toolName: string;
+        content: string;
+        isError?: boolean;
+      }>;
+      expect(results).toHaveLength(1);
+      expect(results[0]).toMatchObject({
+        type: 'tool-result',
+        toolUseId: 'call-1',
+        toolName: 'batch',
+        isError: true,
+      });
+      expect(results[0].content).toBe(
+        'The input of your batch call did not parse as JSON (the client received 46 raw ' +
+          'characters: "{\\"steps\\": \\n<parameter name=\\"onError\\">continue}"). Resend the SAME ' +
+          'call with one complete JSON object for its arguments — nothing was executed.'
+      );
+      // Not the batch parser's own complaint — that is the message this guard exists to pre-empt.
+      expect(results[0].content).not.toMatch(/steps` must be/);
+      // The refusal reached the model as a tool result and the loop went on.
+      const secondCallMessages = (chat.mock.calls[1][0] as { messages: LlmMessage[] }).messages;
+      expect(secondCallMessages[2].content).toEqual(results);
+      expect(state.messages[3]).toEqual({
+        role: 'assistant',
+        content: [{ type: 'text', text: 'resending' }],
+      });
+    });
+
+    it('applies to any tool, not just batch, and copes with a marker that carries no raw text', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(toolCallResult('fs_write', 'call-1', { __unparsedToolInput: true }))
+        .mockResolvedValueOnce(textResult('ok'));
+      const execute = vi.fn(async () => ({ ok: true }));
+      const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+      await service.send('write it');
+
+      expect(execute).not.toHaveBeenCalled();
+      const [result] = service.getState().messages[2].content as unknown as Array<{
+        toolName: string;
+        content: string;
+        isError?: boolean;
+      }>;
+      expect(result.isError).toBe(true);
+      expect(result.toolName).toBe('fs_write');
+      expect(result.content).toBe(
+        'The input of your fs_write call did not parse as JSON. Resend the SAME call with one ' +
+          'complete JSON object for its arguments — nothing was executed.'
+      );
+    });
+
+    it('quotes at most 300 raw characters back to the model', () => {
+      const raw = 'x'.repeat(1000);
+      const text = unparsedToolInputRefusal('batch', { raw, len: 1000 });
+      expect(text).toContain('received 1000 raw characters');
+      expect(text).toContain(`"${'x'.repeat(300)}…"`);
+      expect(text).not.toContain('x'.repeat(301));
+    });
+
+    it('leaves a normal input alone — the marker counts only as a top-level key', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(
+          toolCallResult('batch', 'call-1', {
+            steps: [
+              // A step whose ARGUMENTS mention the marker is ordinary data, not a parse failure.
+              { tool: 'fs_write', args: { path: 'a.ts', content: '__unparsedToolInput' } },
+            ],
+          })
+        )
+        .mockResolvedValueOnce(textResult('done'));
+      const execute = vi.fn(async () => ({ ok: true }));
+      const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+      await service.send('write it');
+
+      expect(execute).toHaveBeenCalledWith('fs_write', {
+        path: 'a.ts',
+        content: '__unparsedToolInput',
+      });
+      const [result] = service.getState().messages[2].content as unknown as Array<{
+        isError?: boolean;
+      }>;
+      expect(result.isError).not.toBe(true);
+      expect(readUnparsedToolInput({ steps: [] })).toBeNull();
+      expect(readUnparsedToolInput('{"steps": []}')).toBeNull();
     });
   });
 

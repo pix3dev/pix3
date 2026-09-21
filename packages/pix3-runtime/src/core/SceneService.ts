@@ -10,6 +10,7 @@ import { NetworkNodeBinder } from './NetworkNodeBinder';
 import { GameTime } from './GameTime';
 import { GameCommandRegistry } from './GameCommands';
 import { JuiceApi } from './JuiceApi';
+import { TweenApi } from './TweenApi';
 import { AudioApi } from './AudioApi';
 import { CutsceneApi } from './CutsceneApi';
 import type { InputService } from './InputService';
@@ -142,6 +143,7 @@ export class SceneService {
   private flashOverlay: HTMLDivElement | null = null;
   private flashAnimationId: number | null = null;
   private juiceApi: JuiceApi | null = null;
+  private tweenApi: TweenApi | null = null;
   private audioApi: AudioApi | null = null;
   private inertLocalization: LocalizationService | null = null;
   private cutsceneApi: CutsceneApi | null = null;
@@ -211,6 +213,7 @@ export class SceneService {
     this.changeScenePromise = null;
     this.cutsceneApi?.dispose();
     this.cutsceneApi = null;
+    this.clearTweens();
     this.collision2dService = null;
     this.commandRegistry?.clear();
     // Scene state, unlike the session below: its bindings point at nodes that are going away.
@@ -256,6 +259,34 @@ export class SceneService {
       this.juiceApi = new JuiceApi(this);
     }
     return this.juiceApi;
+  }
+
+  /**
+   * Godot-style tweens — `this.scene.tween.to(node, { x: 300, opacity: 0 }, { durationSec: 0.4 })`,
+   * plus `fadeIn` / `fadeOut` / `crossFade` / `killAll`. Ticked on scaled game time
+   * like the rest of the juice, and dropped when the scene stops.
+   */
+  get tween(): TweenApi {
+    if (!this.tweenApi) {
+      this.tweenApi = new TweenApi(this);
+    }
+    return this.tweenApi;
+  }
+
+  /**
+   * Advance every running tween. Called by `SceneRunner` each frame with the SCALED
+   * delta; deliberately not lazy, so a scene that never tweened pays one null check.
+   */
+  updateTweens(dt: number): void {
+    this.tweenApi?.update(dt);
+  }
+
+  /**
+   * Cancel every tween. Called by `SceneRunner.stop()` next to {@link clearCommands}
+   * (and by {@link dispose}) — a tween closure must never outlive its graph.
+   */
+  clearTweens(): void {
+    this.tweenApi?.cancelAll();
   }
 
   /**

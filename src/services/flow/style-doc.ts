@@ -5,7 +5,7 @@
  * Picking a style is a UI action, not a turn: the user clicks one candidate, the palette is
  * quantized out of that image, and this renders the document. No model is asked what the colours
  * are, because quantization is exact and free while a guess is neither — the same reasoning
- * `extractPalette` is built on.
+ * `extractStylePalette` is built on.
  *
  * The one hard constraint is the `- **Palette:**` line: `parseStylePalette` reads it at the
  * idea → prototype transition to tint the recipe's placeholder art, so the shape here has to match

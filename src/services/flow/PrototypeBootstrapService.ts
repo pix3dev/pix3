@@ -224,7 +224,7 @@ export const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
   {
     id: BLANK_RECIPE_ID,
     blurb:
-      "NO mechanics — an empty 2D field with score/lives/timer bookkeeping, a HUD and a win/lose overlay already wired; the first increment builds the core mechanic itself, CONTROLS INCLUDED. Pick it when the idea's core loop is not what any recipe below ships: grid or turn-based movement (snake, sokoban, match-3), word/card/board games, builders, physics contraptions, idle games. Deleting a wrong mechanic costs more than building on this blank.",
+      "NO mechanics — an empty 2D field with score/lives/timer bookkeeping, a HUD, bloom post-fx, a shape-sprite library and a win/lose overlay already wired; the first increment builds the core mechanic itself, CONTROLS INCLUDED. Pick it when the idea's core loop is not what any recipe below ships: grid or turn-based movement (snake, sokoban, match-3), word/card/board games, builders, clickers and idle games WITHOUT a ball. Deleting a wrong mechanic costs more than building on this blank.",
   },
   {
     id: 'recipe-scene-3d',
@@ -244,7 +244,7 @@ export const RECIPE_CATALOG: ReadonlyArray<{ id: string; blurb: string }> = [
   {
     id: 'recipe-bouncer-2d',
     blurb:
-      'a ball under gravity bounces off walls, paddles and bumpers; a paddle keeps it in play. Breakout, pong, plinko, pinball.',
+      'a ball under gravity bounces off walls, bumpers and an optional paddle, with neon bloom, swept collision and hit juice already wired; the drain can cost a life OR relaunch the ball. Breakout, pong, plinko, pinball, peggle, and idle/builder pinball where the player places bumpers — the falling bouncing ball is the mechanic that survives, even when the paddle goes.',
   },
   {
     id: 'recipe-playable-ad',
@@ -1739,6 +1739,9 @@ export const PLANNER_SYSTEM_PROMPT = [
   `  mechanic would first have to be removed or replaced, pick \`${BLANK_RECIPE_ID}\` (2D) or`,
   `  \`${BLANK_3D_RECIPE_ID}\` (3D) instead: extending beats demolishing, and demolishing loses to`,
   '  starting from a blank. A breakout still takes the bouncer; a snake or a sokoban takes the blank.',
+  '  "Survives" means the PHYSICS and the LOOK survive, not every control: an idle pinball where',
+  "  the player places bumpers and the ball is returned by a conveyor keeps the bouncer's falling",
+  '  ball, bumpers, bloom and hit juice and only loses the paddle — that is the bouncer, not the blank.',
   '- A genre recipe ALREADY ships a playable skeleton: menu, game, win/lose, working controls, a',
   '  score and a HUD. It runs before the first increment starts. So `increments` EXTENDS that',
   '  skeleton — never write "controls", "core loop", "menu" or "score" as a step; those exist.',
@@ -2703,8 +2706,17 @@ export const renderIdeaFirstTurnMessage = (
     'Name the game this turn: the `# Title` line holds a placeholder lifted out of the prompt, and',
     'it is what the project itself is named after — one to three words, in the language they wrote in.',
     '',
-    'Do NOT guess the parts the user has not decided. End this turn with **one or two** questions',
-    'through `ask_user` — the forks where a wrong guess would mean redoing the game later.',
+    'Show the look this turn too: after the document edits, generate THREE fake store screenshots of',
+    'THIS game — the actual play screen with its field, pieces and HUD, FULL-BLEED (the screen fills',
+    'the image: no phone body, no bezel, no store chrome, no backdrop), not abstract swatches — via',
+    '`generate_asset` with `role: "style-candidate"`, named `mood-1.png` …',
+    '`mood-3.png`, each differing in ONE axis (e.g. flat vector vs painterly vs pixel; or dark neon vs',
+    'pastel vs retro). Skip this only when a `style` reference was attached above. The user picks one',
+    'with the droplet button on its card — do not adopt a style yourself.',
+    '',
+    'Do NOT guess the parts the user has not decided. End this turn with **exactly one** question',
+    'through `ask_user` — the single fork where a wrong guess would mean redoing the game later.',
+    'The screenshots are the second question ("which one is closer?") — say so in one line before it.',
     '',
     'There is no scene, no script and no play mode at this stage. Nothing to compile, nothing to run.'
   );
@@ -2791,6 +2803,13 @@ export const renderStyleMarkdown = (
     `- **Art style:** ${brief.style.artStyle || '(unspecified)'}`,
     `- **Mood:** ${brief.style.mood || '(unspecified)'}`,
     `- **Theme:** ${effectiveTheme(brief)}${brief.style.theme ? '' : ' (default for this recipe)'} — already applied to the scene; keep new art in this look.`,
+    // The `Reference:` line is what `parseStyleReference` reads when the user later adopts another
+    // candidate: without it the previous style keeps its role and the project carries two
+    // `style` files (a live run did exactly that). Only the first style reference is named — the
+    // moodboard flow adopts exactly one picture.
+    ...(styleRefs.length > 0
+      ? [`- **Reference:** \`${styleRefs[0].path.replace(/^res:\/\//i, '')}\``]
+      : []),
     '',
     styleRefs.length > 0
       ? `Derived from ${styleRefs.map(reference => `\`${reference.path}\``).join(', ')} — the palette was measured from the image, not guessed.`

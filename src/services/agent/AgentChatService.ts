@@ -1414,6 +1414,21 @@ export class AgentChatService {
         forcedOverwrites,
       };
       for (const call of calls) {
+        // A tool_use whose JSON the client could not parse arrives wrapped in a marker, not as
+        // arguments. Answer it BEFORE either dispatch path: handed on, a `batch` would fail on
+        // "`steps` must be a non-empty array" and any other tool on some equally unrelated
+        // validation message — a hop lost to an error that names the wrong problem.
+        const unparsed = readUnparsedToolInput(call.input);
+        if (unparsed) {
+          results.push({
+            type: 'tool-result',
+            toolUseId: call.id,
+            toolName: call.name,
+            content: unparsedToolInputRefusal(call.name, unparsed),
+            isError: true,
+          });
+          continue;
+        }
         results.push(
           call.name === 'batch'
             ? await this.runBatch(call, pass)
@@ -2226,6 +2241,16 @@ export class AgentChatService {
       );
     }
 
+    // The engine API map rides in the cached prefix on purpose (see `AgentSkillsService.apiMap`):
+    // what the agent knows at hop one it does not spend thirty hops searching for.
+    lines.push(
+      '',
+      'Engine API map — the surface a game script can call. It is complete for the common cases: use it directly and do NOT engine_search / engine_read for anything named here; search only for what it does not name.',
+      '"""',
+      this.skills.apiMap().trim(),
+      '"""'
+    );
+
     if (agentsMd) {
       const trimmed =
         agentsMd.length > MAX_AGENTS_MD_CHARS
@@ -2559,6 +2584,62 @@ const truncate = (text: string): string =>
   text.length <= MAX_TOOL_RESULT_CHARS
     ? text
     : `${text.slice(0, MAX_TOOL_RESULT_CHARS)}\n… [truncated ${text.length - MAX_TOOL_RESULT_CHARS} chars — request a narrower query]`;
+
+/**
+ * Top-level key a client stamps on a tool_use `input` when the model's JSON did not parse. The
+ * Claude Code SDK (`claude.exe`, the bridge's MAX lane) emits `{ __unparsedToolInput: { raw, len } }`
+ * in place of the arguments; the value's shape is not relied on beyond that.
+ */
+export const UNPARSED_TOOL_INPUT_KEY = '__unparsedToolInput';
+
+/** How much of the raw, unparsed text is quoted back to the model. */
+const UNPARSED_TOOL_INPUT_RAW_CHARS = 300;
+
+interface UnparsedToolInput {
+  readonly raw: string | null;
+  readonly len: number | null;
+}
+
+/**
+ * `{ raw, len }` when `input` carries the {@link UNPARSED_TOOL_INPUT_KEY} marker, otherwise `null`.
+ * Either field may be missing (a client that only says "it did not parse" is still a marker).
+ */
+export const readUnparsedToolInput = (input: unknown): UnparsedToolInput | null => {
+  if (!isRecord(input) || !(UNPARSED_TOOL_INPUT_KEY in input)) {
+    return null;
+  }
+  const marker = input[UNPARSED_TOOL_INPUT_KEY];
+  const raw = isRecord(marker) && typeof marker.raw === 'string' ? marker.raw : null;
+  const len =
+    isRecord(marker) && typeof marker.len === 'number' && Number.isFinite(marker.len)
+      ? marker.len
+      : raw !== null
+        ? raw.length
+        : null;
+  return { raw, len };
+};
+
+/**
+ * Model-facing text for a tool call whose arguments never parsed. Says what happened, quotes the
+ * head of what the client saw (JSON-escaped, so newlines and quotes stay legible in one line) and
+ * asks for the same call again — nothing ran, so there is nothing to undo or re-check.
+ */
+export const unparsedToolInputRefusal = (
+  toolName: string,
+  { raw, len }: UnparsedToolInput
+): string => {
+  const detail =
+    raw !== null
+      ? ` (the client received ${len ?? raw.length} raw characters: ${JSON.stringify(
+          raw.length > UNPARSED_TOOL_INPUT_RAW_CHARS
+            ? `${raw.slice(0, UNPARSED_TOOL_INPUT_RAW_CHARS)}…`
+            : raw
+        )})`
+      : len !== null
+        ? ` (the client received ${len} raw characters)`
+        : '';
+  return `The input of your ${toolName} call did not parse as JSON${detail}. Resend the SAME call with one complete JSON object for its arguments — nothing was executed.`;
+};
 
 /** System prompt for the (tool-free) compaction round-trip. */
 const COMPACT_SYSTEM_PROMPT =

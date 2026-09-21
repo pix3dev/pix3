@@ -9,22 +9,30 @@ anything.
 extension points (including the full pinball path), and what must not be
 renamed. Read it first.
 
-## The physics is in this project, not in the engine
+## The ball physics is in this project, by choice
 
-Pix3 ships **no rigidbody solver**, and `core:Hitbox2D` is an axis-aligned
-overlap test that ignores rotation. Both are dead ends for a ball: a fast ball
-would tunnel through a wall between two frames, and a tilted paddle cannot be
-described by an axis-aligned box at all.
+`scripts/ball-collision.ts` implements swept (continuous) circle-vs-segment and
+circle-vs-circle collision with fixed substeps — the ball's whole displacement
+is tested each substep, so no speed can skip a wall — and `scripts/BallBody.ts`
+builds the colliders every frame from the **live world transforms** of ordinary
+marker nodes. Rotate `paddle` in the inspector, animate it from a clip, or add
+flippers: the physics follows with no extra code. `core:Hitbox2D` is an
+axis-aligned overlap test that ignores rotation — never put it on the ball.
 
-So `scripts/ball-collision.ts` implements swept (continuous) circle-vs-segment
-and circle-vs-circle collision with fixed substeps — the ball's whole
-displacement is tested each substep, so no speed can skip a wall — and
-`scripts/BallBody.ts` builds the colliders every frame from the **live world
-transforms** of ordinary marker nodes. Rotate `paddle` in the inspector, animate
-it from a clip, or add flippers: the physics follows with no extra code.
+The engine also ships a general 2D rigid-body solver (`core:PhysicsBody2D` +
+`core:Collider2D`, `scene.physics2d`) — reach for it when the game grows bodies
+that push each other (stacks, debris, several balls); one ball against static
+geometry is exactly what the swept solver here is for, and mixing the two on the
+same ball is a bug.
 
-Never `import` rapier here. It is a ~2 MB lazily-loaded wasm payload, it is not
-needed for this, and it would blow the export budget.
+Never `import` rapier here. It is a ~2 MB lazily-loaded wasm payload for 3D
+only, it is not needed for this, and it would blow the export budget.
+
+**Idle / builder variant (idle-pinball, plinko-tycoon):** the drain does not
+have to cost a life. Set `startingLives` high or make the drain relaunch the ball
+(`BallBody.resetBall()` after `ball-drained`) — a conveyor returning the ball
+forever — and let the player spend the hits' coins on more bumpers. The paddle
+can be deleted or hidden; the bumpers and the juice on `ball-hit` stay.
 
 ## The neon look is three cheap ingredients
 

@@ -12,6 +12,7 @@ import {
   type FloatTextStyleOptions,
   type JuicePoint2D,
 } from './juice-transients';
+import { Trail2D, type TrailOptions } from './trail-2d';
 import type { SceneService } from './SceneService';
 import type { FlashOptions } from './SceneService';
 
@@ -236,6 +237,44 @@ export class JuiceApi {
       popup.position.set(local.x, local.y, 0);
     }
     return popup;
+  }
+
+  /**
+   * A fading motion ribbon that follows a node — the "this thing is fast" read a
+   * ball, a dash or a projectile gets for one line of script.
+   *
+   * Same transient lifecycle as {@link burst}: a runtime-only 2D node spawned into
+   * the target's 2D root, ticked through `node.tick` (so a hitstop freezes it) and
+   * never pickable. It keeps following until `trail.stop()`, then fades out over
+   * `lifeSec` and frees itself; freeing the target does the same.
+   *
+   * ```ts
+   * this.trail = this.scene.juice.trail(this.node, { colors: ['#ffcf33', '#ff4d6d'], widthPx: 18 });
+   * // ... later, when the ball is gone:
+   * this.trail?.stop();
+   * ```
+   *
+   * Returns null when the target cannot be resolved or the scene has no 2D node to
+   * host the ribbon.
+   */
+  trail(target: JuiceTarget, options: TrailOptions = {}): Trail2D | null {
+    const node = this.resolveNode(target);
+    if (!node) {
+      return null;
+    }
+    const host = this.resolve2DHost(node);
+    if (!host) {
+      console.warn('[JuiceApi] trail: the scene has no 2D node to host the ribbon.');
+      return null;
+    }
+
+    const trail = new Trail2D(
+      { id: this.nextTransientId('trail'), name: 'JuiceTrail' },
+      node,
+      options
+    );
+    host.adoptChild(trail);
+    return trail;
   }
 
   /**

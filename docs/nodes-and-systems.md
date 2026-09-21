@@ -243,6 +243,19 @@ Fire-and-forget game feel from scripts (or the matching `core:*` presets):
   them like every other juice effect. Call them **together with the mechanic** they
   punctuate; they are one-liners, not a later polish pass.
   Spec §6.12; demo: [../samples/HelloWorld/demo-05-juice.pix3scene](../samples/HelloWorld/demo-05-juice.pix3scene).
+- `scene.juice.trail(target, opts)` — fading motion ribbon that follows a node (a ball, a dash, a projectile). Options: `lifeSec` (0.35), `widthPx` (14, tapers to 0 at the tail), `color` / `colors` (a palette is lerped head→tail), `additive` (true), `zIndex`, `maxPoints` (48, max 256). Returns a `Trail2D` — call `trail.stop()` to stop following; it then fades out and frees itself, and freeing the target does the same. Same transient lifecycle as `burst`: runtime-only node, never pickable, never serialized.
+
+### Tweens (scene.tween)
+
+Interpolate any number over time — the piece `scene.juice.*` leaves out (juice plays fixed
+effects; a tween animates whatever the game names). Ticked on SCALED game time, so a hitstop
+freezes a tween in flight; all tweens are dropped when the scene stops or changes.
+
+- `scene.tween.to(target, props, opts)` → `TweenHandle`. `target` is a node, a node query (an unresolvable one warns once and returns an inert handle), or any plain object.
+- `props` end values. On a node: `x` / `y` (→ `position.x/y`), `position: {x,y}`, `scale` (a number is uniform x/y, or `{x,y}`), `rotation` (RADIANS → `rotation.z`), `opacity`, `width` / `height`, plus any other numeric (dotted) path, e.g. `'position.x'`. On a plain object every key is a (dotted) path. Writes go through the node's public property, so a reactive schema setter redraws.
+- `opts`: `durationSec` (0.3), `ease` (`'cubicOut'`; any `KeyframeEasing` name), `delaySec` (0; the start value is captured when the delay ends, not when the tween was created), `yoyo` (false — odd iterations run backwards), `repeat` (0 extra iterations; `-1` = forever), `onUpdate(t)`, `onComplete()`.
+- `TweenHandle`: `cancel()` (leaves the target where it is), `finished: Promise<'completed' | 'cancelled'>` (never rejects), `isRunning`.
+- `scene.tween.fadeIn(node, sec)`, `fadeOut(node, sec, {hide=true})`, `crossFade(from, to, sec)` (fades `from` out and hides it while `to` becomes visible and fades in; the handle ends when both do), `killAll(target?)`.
 
 ### Audio (buses, snapshots, one-shots)
 

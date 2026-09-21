@@ -473,11 +473,11 @@ export const looksLikeScene = (sceneText: string): boolean => {
 /**
  * Which palette colour a placeholder role gets.
  *
- * Fixed, ordered assignment rather than anything clever: the palette arrives sorted by coverage
- * (see `extractPalette`), so index 0 is the reference's dominant colour — right for the background
- * and wrong for the player, who needs to pop against it. The player therefore takes the *last*
- * (least-covering, usually the accent) colour, hazards the second accent, and everything else walks
- * the middle of the ramp. Same brief in, same colours out.
+ * Fixed, ordered assignment rather than anything clever: the palette arrives ordered for exactly
+ * this mapping (see `pickStylePalette`), so index 0 is the reference's ground colour — right for
+ * the background and wrong for the player, who needs to pop against it. The player therefore takes
+ * the *last* entry (the strongest accent), hazards the one before it (the second accent), and
+ * everything else walks the middle of the ramp. Same brief in, same colours out.
  */
 export const paletteColorForRole = (role: string, palette: readonly string[]): string | null => {
   if (palette.length === 0) {

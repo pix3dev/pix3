@@ -926,6 +926,1010 @@ export async function extractPalette(
   return quantizePixels(pixels, count, options);
 }
 
+/** Hue (0..360, 0 for greys), saturation and lightness (0..1) of a colour. */
+export interface HslColor {
+  readonly h: number;
+  readonly s: number;
+  readonly l: number;
+}
+
+/**
+ * RGB → HSL. Exported because the style-palette picker below reasons in "how colourful / how
+ * bright", which is exactly what S and L are and exactly what RGB channels are not.
+ */
+export const rgbToHsl = (color: RgbColor): HslColor => {
+  const r = clamp(color.r, 0, 255) / 255;
+  const g = clamp(color.g, 0, 255) / 255;
+  const b = clamp(color.b, 0, 255) / 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  const delta = max - min;
+  if (delta === 0) {
+    return { h: 0, s: 0, l };
+  }
+  const s = delta / (1 - Math.abs(2 * l - 1));
+  let h: number;
+  if (max === r) {
+    h = 60 * (((g - b) / delta) % 6);
+  } else if (max === g) {
+    h = 60 * ((b - r) / delta + 2);
+  } else {
+    h = 60 * ((r - g) / delta + 4);
+  }
+  return { h: (h + 360) % 360, s, l };
+};
+
+/** HSL → RGB, the inverse of {@link rgbToHsl}. Used to build lightness variants of a colour. */
+export const hslToRgb = (color: HslColor): RgbColor => {
+  const h = ((color.h % 360) + 360) % 360;
+  const s = clamp(color.s, 0, 1);
+  const l = clamp(color.l, 0, 1);
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+  const m = l - c / 2;
+  const sector: readonly [number, number, number] =
+    h < 60
+      ? [c, x, 0]
+      : h < 120
+        ? [x, c, 0]
+        : h < 180
+          ? [0, c, x]
+          : h < 240
+            ? [0, x, c]
+            : h < 300
+              ? [x, 0, c]
+              : [c, 0, x];
+  return {
+    r: Math.round((sector[0] + m) * 255),
+    g: Math.round((sector[1] + m) * 255),
+    b: Math.round((sector[2] + m) * 255),
+  };
+};
+
+/** Shortest angular distance between two hues, 0..180. */
+const hueDistance = (a: number, b: number): number => {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+};
+
+/** Plain euclidean RGB distance (0..√3·255) — the same metric {@link chromaKeyImage} uses. */
+const rgbDistance = (a: RgbColor, b: RgbColor): number =>
+  Math.sqrt((a.r - b.r) ** 2 + (a.g - b.g) ** 2 + (a.b - b.b) ** 2);
+
+/**
+ * How many boxes the style palette quantizes the whole image into for the **ground**. Deliberately
+ * more than the five colours it returns: median cut spends its boxes where the *pixels* are, so at
+ * five boxes a neon reference gets four shades of its own backdrop and one muddy average of
+ * everything else.
+ */
+const STYLE_QUANTIZE_BOXES = 16;
+
+/**
+ * Pixels the accent histogram reads (fixed stride) when the caller sets no `maxSamples`. Three
+ * times the quantizer's default: a 15° hue bin needs a stable population for a thin neon stroke —
+ * the ball, a "+25" — to clear {@link BIN_MIN_SHARE} reliably rather than by luck of the stride.
+ */
+const STYLE_HISTOGRAM_SAMPLES = 24576;
+
+/** Lightness at or below which a swatch is the device frame / letterbox, not a game ground. */
+const NEAR_BLACK_LIGHTNESS = 0.06;
+
+/** The window a *game's* background sits in: dark, but lit and tinted rather than black. */
+const GROUND_MIN_LIGHTNESS = 0.06;
+const GROUND_MAX_LIGHTNESS = 0.35;
+const GROUND_MIN_SATURATION = 0.15;
+
+/**
+ * What counts as a colour worth building a game palette on: chromatic, lit, and not blown out. A
+ * phone-mockup reference is ~60% device frame, so these bounds — not coverage — decide which pixels
+ * get a vote on the accents at all. The ceiling is where a glow core stops carrying a hue: tinting
+ * a near-white placeholder with a near-white "colour" hands back the placeholder.
+ */
+const VIVID_MIN_SATURATION = 0.3;
+const VIVID_MIN_LIGHTNESS = 0.2;
+const VIVID_MAX_LIGHTNESS = 0.9;
+
+/** Hue bins of the accent histogram (15° each); each is split once more into a dark/mid and a light band. */
+const HUE_BINS = 24;
+const LIGHT_BAND_LIGHTNESS = 0.66;
+
+/**
+ * Share of the sampled opaque pixels a hue bin needs to be a colour *of the picture* rather than
+ * anti-aliasing fringe. At the sample counts the picker runs at (≥ 8k) this is a dozen pixels or
+ * more; it is a share, not a count, so a tiny image still yields its colours.
+ */
+const BIN_MIN_SHARE = 0.0015;
+
+/** Portion of a bin (by pop, brightest-chroma first) whose mean represents the bin. */
+const BIN_CORE_FRACTION = 0.33;
+
+/** Two bin representatives within one bin of hue and closer than this in RGB are one colour. */
+const TWIN_RGB_DISTANCE = 40;
+
+/** Exponent on coverage in `prominence`: 10× the area buys ~26% more rank, no more. */
+const SHARE_EXPONENT = 0.1;
+
+/**
+ * RGB distance below which a swatch counts as "the background again". A fine quantization splits a
+ * gradient backdrop into several near-identical boxes; without this the accent slots fill up with
+ * copies of the thing the accents are supposed to pop against.
+ */
+const BACKGROUND_MERGE_DISTANCE = 48;
+
+/** No two colours in a returned palette may be closer than this — five slots, five colours. */
+const PALETTE_MIN_SEPARATION = 24;
+
+/** Nothing this dark may enter the palette as an accent — it would alias onto the background. */
+const FILL_MIN_LIGHTNESS = 0.12;
+
+/**
+ * Quality tiers for an accent candidate. Tier 1 is the window a colour must sit in to be tinted onto
+ * a near-white sprite and still glow: saturated and mid-lit. Below the lightness floor it is a
+ * shadow; above the ceiling or below the saturation floor it is a wash or a neutral (tan, cream,
+ * dusty rose). Tier 2 is the same window relaxed; tier 3 is everything else that passed the vivid
+ * gate. Roles are filled tier by tier, so a 30% shadow cannot outrank a 2% highlight on coverage —
+ * it is never in the running while a highlight exists.
+ */
+const PRIME_MIN_SATURATION = 0.55;
+const PRIME_MIN_LIGHTNESS = 0.45;
+const PRIME_MAX_LIGHTNESS = 0.8;
+const RELAXED_MIN_SATURATION = 0.45;
+const RELAXED_MIN_LIGHTNESS = 0.4;
+const RELAXED_MAX_LIGHTNESS = 0.85;
+
+/**
+ * A candidate within this many degrees of a *tinted* ground's hue is the background wearing another
+ * shade — a mid-blue on an indigo board — and drops one tier, unless it is saturated enough to be a
+ * neon of that hue in its own right.
+ */
+const GROUND_HUE_RADIUS = 25;
+const GROUND_HUE_NEON_SATURATION = 0.75;
+
+/** Hue degrees within which two accents read as the same colour. */
+const ACCENT_HUE_SPACING = 28;
+/** …relaxed when the picture has fewer distinct hues than the palette has slots (gold beside orange). */
+const ACCENT_HUE_SPACING_RELAXED = 20;
+
+/**
+ * WCAG contrast an accent must reach against the ground. 2.5 reads on a deep ground; a mid-lightness
+ * ground (a lit purple board, L ≈ 0.38) needs 3 or orchid-on-purple passes. The player gets a bonus.
+ */
+const DARK_GROUND_MAX_LIGHTNESS = 0.3;
+const ACCENT_MIN_CONTRAST_DARK = 2.5;
+const ACCENT_MIN_CONTRAST_MID = 3;
+const PLAYER_CONTRAST_BONUS = 0.5;
+
+/**
+ * The player slot goes to the most prominent accent unless the runner-up of the same tier pops this
+ * much harder against the ground (contrast ratio). Magenta out-scores cyan on chroma on a purple
+ * board, but the cyan ball is what reads as "the player" there.
+ */
+const PLAYER_CONTRAST_SWAP_RATIO = 1.25;
+
+/** A hazard candidate must already read this well as painted; the lift does the rest. */
+const HAZARD_MIN_PAINTED_CONTRAST = 1.8;
+/** Share of the hazard score that is prominence; the rest is hue distance from the player. */
+const HAZARD_BASE_WEIGHT = 0.4;
+/** A hazard should be saturated, not pastel: a candidate above the prime lightness ceiling is scaled by this. */
+const HAZARD_PASTEL_PENALTY = 0.7;
+
+/** Gold / orange / yellow — the collectible hue when the picture has one. */
+const WARM_HUE_MIN = 18;
+const WARM_HUE_MAX = 70;
+
+const UI_MIN_LIGHTNESS = 0.6;
+/** A same-hue pastel may take the ui slot when it is at least this light… */
+const UI_SAME_HUE_MIN_LIGHTNESS = 0.65;
+/** …and at least this far in RGB from every colour already chosen. */
+const UI_SAME_HUE_MIN_DISTANCE = 60;
+
+/** The contrast lift: HSL lightness steps, bounded so a lifted colour stays the colour it was. */
+const LIFT_STEP = 0.02;
+const LIFT_MIN_LIGHTNESS = 0.08;
+const LIFT_MAX_LIGHTNESS = 0.88;
+/**
+ * Lift beyond this is a different colour, not a legible version of the measured one; a candidate
+ * that needs more is passed over while another candidate exists.
+ */
+const MAX_BOUNDED_LIFT = 0.16;
+
+/** Lightness targets tried, in order, when a role has to be invented from an existing accent. */
+const INVENT_TARGETS: Readonly<Record<AccentRole, readonly number[]>> = {
+  player: [0.6, 0.7, 0.5],
+  hazard: [0.5, 0.68, 0.4, 0.78],
+  collectible: [0.74, 0.58, 0.84, 0.48],
+  ui: [0.82, 0.72, 0.62, 0.86],
+};
+/** An invented variant of a chromatic seed is pinned this saturated so it glows rather than fades. */
+const INVENT_MIN_SATURATION = 0.55;
+/** A seed below this saturation is grey, and its variants stay grey — no hue is invented. */
+const GREY_SEED_SATURATION = 0.15;
+/**
+ * When no role target of any seed separates, the seed's whole **lightness ladder** is searched —
+ * every {@link LIFT_STEP} from {@link LIFT_MIN_LIGHTNESS} to {@link LIFT_MAX_LIGHTNESS} — at its
+ * pinned saturation first and then at these alternatives (a grey seed stays grey). A ladder spans
+ * a few hundred RGB units along one hue, room for a dozen colours at the palette floor, so a
+ * reference with a single usable hue still yields distinct slots. There is deliberately **no fixed
+ * fallback colour**: a constant reached twice is a duplicate the second time, and a gold that is not
+ * in the picture is an invented hue — `#808080` alone used to return `#423006` twice for that reason.
+ */
+const INVENT_ALT_SATURATIONS: readonly number[] = [1, 0.35];
+
+type AccentRole = 'player' | 'hazard' | 'collectible' | 'ui';
+
+/** True when a colour is chromatic and lit — the gate every accent path shares. */
+const isVividColor = (color: RgbColor): boolean => {
+  const { s, l } = rgbToHsl(color);
+  return s >= VIVID_MIN_SATURATION && l >= VIVID_MIN_LIGHTNESS && l <= VIVID_MAX_LIGHTNESS;
+};
+
+/** WCAG 2.x relative luminance (sRGB → linear, Rec. 709 weights). */
+const relativeLuminance = (color: RgbColor): number => {
+  const linear = (channel: number): number => {
+    const c = clamp(channel, 0, 255) / 255;
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  };
+  return 0.2126 * linear(color.r) + 0.7152 * linear(color.g) + 0.0722 * linear(color.b);
+};
+
+/** WCAG 2.x contrast ratio, 1..21. */
+const contrastRatio = (a: RgbColor, b: RgbColor): number => {
+  const la = relativeLuminance(a);
+  const lb = relativeLuminance(b);
+  return (Math.max(la, lb) + 0.05) / (Math.min(la, lb) + 0.05);
+};
+
+/** HSL chroma — the real colourfulness, which collapses towards both black and white. */
+const hslChroma = (hsl: HslColor): number => (1 - Math.abs(2 * hsl.l - 1)) * hsl.s;
+
+/**
+ * How much a colour would "pop" as a glowing sprite: chroma, weighted towards the light side so that
+ * of two equally saturated colours the brighter one wins, with a soft penalty on very dark ones.
+ */
+const popOf = (hsl: HslColor): number => hslChroma(hsl) * (0.35 + hsl.l);
+
+/**
+ * The bar a swatch must clear to fill a slot the vivid pass left empty: not near-black, and not the
+ * background wearing another shade. Both halves are a live failure this replaced — `#060813` took
+ * the hazard slot off a phone mockup because the old fill step only looked at coverage.
+ */
+const passesFillGate = (color: RgbColor, background: RgbColor): boolean =>
+  rgbToHsl(color).l >= FILL_MIN_LIGHTNESS &&
+  rgbDistance(color, background) >= BACKGROUND_MERGE_DISTANCE;
+
+/**
+ * The colour the game's world sits on.
+ *
+ * Normally the most-covering swatch, because that is what a reference is mostly made of. The
+ * exception is the one that produced `#363d55, #000201, #010100, #060813, #eec2ae` from a real
+ * moodboard: a **phone mockup**, where most of the frame is the black device body and the actual
+ * game is the bright rectangle inside it. When the dominant swatch is that near-black, the ground is
+ * the most-covering swatch that is dark *but lit and tinted* — a deep purple, a navy — and the
+ * device frame is scenery.
+ */
+const pickBackground = (swatches: readonly PaletteSwatch[]): RgbColor => {
+  const heaviest = (entries: readonly PaletteSwatch[]): PaletteSwatch =>
+    entries.reduce((best, entry) => (entry.weight > best.weight ? entry : best));
+  const top = heaviest(swatches);
+  if (rgbToHsl(top.color).l >= NEAR_BLACK_LIGHTNESS) {
+    return top.color;
+  }
+  const grounds = swatches.filter(entry => {
+    const { s, l } = rgbToHsl(entry.color);
+    return l >= GROUND_MIN_LIGHTNESS && l <= GROUND_MAX_LIGHTNESS && s >= GROUND_MIN_SATURATION;
+  });
+  return grounds.length > 0 ? heaviest(grounds).color : top.color;
+};
+
+/** See the tier constants: 1 = tintable neon, 2 = relaxed window, 3 = merely vivid. */
+const accentTier = (hsl: HslColor, ground: HslColor): 1 | 2 | 3 => {
+  const inWindow = (minS: number, minL: number, maxL: number): boolean =>
+    hsl.s >= minS && hsl.l >= minL && hsl.l <= maxL;
+  let tier: 1 | 2 | 3 = inWindow(PRIME_MIN_SATURATION, PRIME_MIN_LIGHTNESS, PRIME_MAX_LIGHTNESS)
+    ? 1
+    : inWindow(RELAXED_MIN_SATURATION, RELAXED_MIN_LIGHTNESS, RELAXED_MAX_LIGHTNESS)
+      ? 2
+      : 3;
+  const wearsGroundHue =
+    ground.s >= GROUND_MIN_SATURATION &&
+    hueDistance(hsl.h, ground.h) < GROUND_HUE_RADIUS &&
+    hsl.s < GROUND_HUE_NEON_SATURATION;
+  if (wearsGroundHue && tier < 3) {
+    tier = (tier + 1) as 2 | 3;
+  }
+  return tier;
+};
+
+/** One accent candidate, measured once against the ground it has to read on. */
+interface PoolEntry {
+  readonly color: RgbColor;
+  readonly hsl: HslColor;
+  readonly pop: number;
+  /** `pop` with a whisper of coverage — ranks comparably popping colours by how much is there. */
+  readonly prominence: number;
+  readonly tier: 1 | 2 | 3;
+  /** WCAG contrast against the ground, as painted. */
+  readonly contrast: number;
+  /** Position in the (sorted) pool — the tie-break every sort ends on. */
+  readonly index: number;
+}
+
+const byProminence = (a: PoolEntry, b: PoolEntry): number =>
+  b.prominence - a.prominence || a.index - b.index;
+
+/**
+ * The accent candidates of a swatch list: everything vivid and clear of the ground, or — only when a
+ * reference has nothing chromatic — whatever clears the fill gate. Sorted by prominence, and the
+ * position in that order is the index every later tie-break falls back on.
+ */
+const buildAccentPool = (swatches: readonly PaletteSwatch[], ground: RgbColor): PoolEntry[] => {
+  const groundHsl = rgbToHsl(ground);
+  const vivid = swatches.filter(
+    swatch =>
+      isVividColor(swatch.color) && rgbDistance(swatch.color, ground) >= BACKGROUND_MERGE_DISTANCE
+  );
+  const usable =
+    vivid.length > 0 ? vivid : swatches.filter(swatch => passesFillGate(swatch.color, ground));
+  const measured = usable.map((swatch, index) => {
+    const hsl = rgbToHsl(swatch.color);
+    const pop = popOf(hsl);
+    return {
+      color: swatch.color,
+      hsl,
+      pop,
+      prominence: pop * Math.pow(Math.max(swatch.weight, 0), SHARE_EXPONENT),
+      tier: accentTier(hsl, groundHsl),
+      contrast: contrastRatio(swatch.color, ground),
+      index,
+    };
+  });
+  return measured.sort(byProminence).map((entry, index) => ({ ...entry, index }));
+};
+
+interface Lifted {
+  readonly color: RgbColor;
+  /** How far (HSL lightness) the colour had to move; 0 when it already read. */
+  readonly amount: number;
+}
+
+/**
+ * Raise (or, on a light ground, lower) lightness in {@link LIFT_STEP}s until the colour clears the
+ * contrast bar, keeping hue and saturation. Reports how far it had to go so a caller can refuse a
+ * lift that has turned the measured colour into a different one.
+ */
+const liftToContrast = (color: RgbColor, background: RgbColor, minContrast: number): Lifted => {
+  if (contrastRatio(color, background) >= minContrast) {
+    return { color, amount: 0 };
+  }
+  const base = rgbToHsl(color);
+  const lighten = rgbToHsl(background).l <= 0.5;
+  let l = base.l;
+  let best = color;
+  let reached = base.l;
+  for (let step = 0; step < 60; step += 1) {
+    l = lighten ? l + LIFT_STEP : l - LIFT_STEP;
+    if (l < LIFT_MIN_LIGHTNESS || l > LIFT_MAX_LIGHTNESS) {
+      break;
+    }
+    best = hslToRgb({ h: base.h, s: base.s, l });
+    reached = l;
+    if (contrastRatio(best, background) >= minContrast) {
+      break;
+    }
+  }
+  return { color: best, amount: Math.abs(reached - base.l) };
+};
+
+/** One rung of a {@link lightnessLadder}. */
+interface Rung {
+  readonly color: RgbColor;
+  readonly l: number;
+  /** 0 for the ladder's primary saturation, then the position in {@link INVENT_ALT_SATURATIONS}. */
+  readonly saturationRank: number;
+}
+
+/**
+ * The saturation an invented variant of `seed` wears: pinned vivid for a chromatic seed so it glows
+ * rather than fades, untouched for a grey one so no hue is conjured out of a neutral.
+ */
+const pinnedSaturation = (seed: HslColor): number =>
+  seed.s < GREY_SEED_SATURATION ? seed.s : Math.max(seed.s, INVENT_MIN_SATURATION);
+
+/**
+ * Every lightness variant of `seed`'s hue, {@link LIFT_MIN_LIGHTNESS} to {@link LIFT_MAX_LIGHTNESS}
+ * in {@link LIFT_STEP}s — at `saturation` first (rank 0), then, for a chromatic seed, at each of
+ * {@link INVENT_ALT_SATURATIONS}. The search space an invented or re-seated colour is drawn from:
+ * always the seed's own hue, in a fixed order, so the pick is deterministic.
+ */
+const lightnessLadder = (seed: HslColor, saturation = pinnedSaturation(seed)): Rung[] => {
+  const saturations =
+    seed.s < GREY_SEED_SATURATION
+      ? [saturation]
+      : [saturation, ...INVENT_ALT_SATURATIONS.filter(alt => alt !== saturation)];
+  const steps = Math.round((LIFT_MAX_LIGHTNESS - LIFT_MIN_LIGHTNESS) / LIFT_STEP);
+  const rungs: Rung[] = [];
+  saturations.forEach((s, saturationRank) => {
+    for (let step = 0; step <= steps; step += 1) {
+      const l = Math.round((LIFT_MIN_LIGHTNESS + step * LIFT_STEP) * 1000) / 1000;
+      rungs.push({ color: hslToRgb({ h: seed.h, s, l }), l, saturationRank });
+    }
+  });
+  return rungs;
+};
+
+/**
+ * Pick a *usable game palette* out of a quantized image.
+ *
+ * The roles this feeds (`paletteColorForRole` in `recipe-contract.ts`) are assigned by index, and
+ * coverage order is the wrong index for them: on any reference with a big backdrop — worse, on a
+ * phone mockup, where the backdrop is the black device body — every one of the five most-covering
+ * boxes is a shade of that backdrop, so the player, the hazard and the pickup all come out
+ * near-black. What a brief needs is one ground colour and a handful of things that *pop against it*:
+ * a question about saturation and lightness, not about area.
+ *
+ * The **background** comes from `swatches` by coverage, with the mockup correction in
+ * {@link pickBackground}. The **accents** come from `accentSwatches` — in the shipping path the hue
+ * histogram of {@link accentHistogram}, where a swatch's `weight` is the share of the picture in its
+ * hue — or, when the caller has none, from whichever of `swatches` pass the vividness gate. Coverage
+ * then decides almost nothing: candidates are ranked by `pop = chroma · (0.35 + lightness)` with a
+ * `coverage^0.1` whisper, and are taken **tier by tier** (saturated mid-lit first, see the tier
+ * constants), so a large dark saturated region — the shadow side of a purple board, 30% of a real
+ * mockup — never outranks a 2% neon stroke. That was the measured defect this design replaced:
+ * `#364078 #28134c #4a0856 #085b7a #da96c2`, three of four accents shadows, because the old score
+ * multiplied by `coverage^0.35`.
+ *
+ * Roles are then filled explicitly, each ≥ {@link ACCENT_HUE_SPACING}° in hue from every accent
+ * already placed (relaxed to {@link ACCENT_HUE_SPACING_RELAXED}° before anything is invented):
+ *
+ *   - **player** = the most prominent candidate that reads at the player contrast — unless the
+ *     runner-up of the same tier pops {@link PLAYER_CONTRAST_SWAP_RATIO}× harder off the ground;
+ *   - **collectible** = a warm (gold/orange) colour if the picture has one, claimed *before* the
+ *     hazard search so "the farthest hue" cannot spend the only gold;
+ *   - **hazard** = prominence × hue distance from the player, over candidates that already read as
+ *     painted;
+ *   - **ui** = the lightest colour in a hue of its own (a darker one is raised to L ≥ 0.6 before the
+ *     hue spacing is relaxed), and only when no free hue is left a same-hue pastel far enough in
+ *     RGB from everything chosen.
+ *
+ * Every accent is lifted in lightness until it clears the contrast floor (which scales with the
+ * ground's lightness), but a candidate needing more than {@link MAX_BOUNDED_LIFT} is passed over for
+ * the next one while one exists — a lifted colour must still be the colour that was measured. A
+ * reference short on hues is padded with **lightness variants** of its own accents — or, when it has
+ * none, of its ground — never a hue that is not in the picture, never a rejected dark box, and never
+ * a fixed fallback colour; the two middle slots are seeded from different accents so a two-hue
+ * picture does not fill both with one hue. Every returned colour is at least
+ * {@link PALETTE_MIN_SEPARATION} from every other, by construction: nothing is admitted or invented
+ * without clearing that floor against everything already chosen (an invented colour searches its
+ * seed's whole {@link lightnessLadder} for a rung that does), so a one-hue picture still yields five
+ * distinct colours. On a mid-lit or light ground those are the *darker* variants — contrast, not
+ * brightness, decides which way a colour moves to read.
+ *
+ * Output order is the role mapper's contract, not a ranking: index 0 = background, the **last**
+ * entry is the player pop colour, `n-2` is the hazard, index 1 the collectible, index 2 the ui
+ * colour, and anything else sits between. Shorter palettes drop roles from the middle first (`count`
+ * 3 → `[bg, hazard, player]`). Pure and deterministic: every sort breaks ties on the input index, and
+ * the variants are generated in a fixed order.
+ */
+export const pickStylePalette = (
+  swatches: readonly PaletteSwatch[],
+  count = 5,
+  accentSwatches?: readonly PaletteSwatch[]
+): string[] => {
+  const wanted = Math.max(1, Math.floor(count));
+  if (swatches.length === 0) {
+    return [];
+  }
+  const ground = pickBackground(swatches);
+  const slots = wanted - 1;
+  if (slots === 0) {
+    return [rgbToHex(ground)];
+  }
+
+  const source = accentSwatches && accentSwatches.length > 0 ? accentSwatches : swatches;
+  const pool = buildAccentPool(source, ground);
+  const groundHsl = rgbToHsl(ground);
+  const accentMinContrast =
+    groundHsl.l < DARK_GROUND_MAX_LIGHTNESS ? ACCENT_MIN_CONTRAST_DARK : ACCENT_MIN_CONTRAST_MID;
+  const playerMinContrast = accentMinContrast + PLAYER_CONTRAST_BONUS;
+
+  const chosen: RgbColor[] = [ground];
+  const taken = new Set<number>();
+  const usedHues: number[] = [];
+  const separated = (color: RgbColor, floor = PALETTE_MIN_SEPARATION): boolean =>
+    chosen.every(picked => rgbDistance(color, picked) >= floor);
+  const readsOnGround = (color: RgbColor): boolean =>
+    contrastRatio(color, ground) >= accentMinContrast;
+  const hueFree = (hue: number, spacing: number): boolean =>
+    usedHues.every(used => hueDistance(used, hue) >= spacing);
+  const available = (spacing: number): PoolEntry[] =>
+    pool.filter(entry => !taken.has(entry.index) && hueFree(entry.hsl.h, spacing));
+
+  interface Admitted {
+    readonly entry: PoolEntry;
+    readonly color: RgbColor;
+  }
+
+  /**
+   * The best of `candidates` for a slot: best tier first, then those that read on the ground as
+   * painted, then `rank`, then index. A candidate whose lift would exceed the bound is passed over
+   * while another exists; one that lands on a colour already chosen is never admitted — a role a
+   * measured colour cannot fill separately is invented instead, so the floor holds by construction.
+   */
+  const choose = (
+    candidates: readonly PoolEntry[],
+    minContrast: number,
+    rank: (entry: PoolEntry) => number,
+    minLightness = 0
+  ): Admitted | null => {
+    const reads = (entry: PoolEntry): number => (entry.contrast >= minContrast ? 1 : 0);
+    const sorted = candidates
+      .slice()
+      .sort(
+        (a, b) => a.tier - b.tier || reads(b) - reads(a) || rank(b) - rank(a) || a.index - b.index
+      );
+    let fallback: Admitted | null = null;
+    for (const entry of sorted) {
+      const raised =
+        entry.hsl.l >= minLightness
+          ? entry.color
+          : hslToRgb({ h: entry.hsl.h, s: entry.hsl.s, l: minLightness });
+      const lifted = liftToContrast(raised, ground, minContrast);
+      if (!separated(lifted.color)) {
+        continue;
+      }
+      if (lifted.amount <= MAX_BOUNDED_LIFT) {
+        return { entry, color: lifted.color };
+      }
+      if (!fallback) {
+        fallback = { entry, color: lifted.color };
+      }
+    }
+    return fallback;
+  };
+  const admit = (pick: Admitted): RgbColor => {
+    taken.add(pick.entry.index);
+    usedHues.push(pick.entry.hsl.h);
+    chosen.push(pick.color);
+    return pick.color;
+  };
+  /**
+   * `choose` over the free candidates in four passes: tintable colours (tier ≤ 2) at the standard
+   * hue spacing, then at the relaxed one, and only then the merely-vivid tier 3 at either spacing.
+   * A free hue does not make mud an accent while a real colour sits 20° from a taken hue.
+   */
+  const SELECTION_PASSES: ReadonlyArray<readonly [spacing: number, maxTier: number]> = [
+    [ACCENT_HUE_SPACING, 2],
+    [ACCENT_HUE_SPACING_RELAXED, 2],
+    [ACCENT_HUE_SPACING, 3],
+    [ACCENT_HUE_SPACING_RELAXED, 3],
+  ];
+  const chooseSpaced = (
+    filter: (entries: PoolEntry[]) => PoolEntry[],
+    minContrast: number,
+    rank: (entry: PoolEntry) => number,
+    minLightness = 0
+  ): RgbColor | null => {
+    for (const [spacing, maxTier] of SELECTION_PASSES) {
+      const free = available(spacing).filter(entry => entry.tier <= maxTier);
+      const pick = choose(filter(free), minContrast, rank, minLightness);
+      if (pick) {
+        return admit(pick);
+      }
+    }
+    return null;
+  };
+  const prominence = (entry: PoolEntry): number => entry.prominence;
+
+  // --- player: the most eye-catching colour that can actually be seen on the ground --------------
+  let player: RgbColor | null = null;
+  let playerHue = 0;
+  {
+    const candidates = available(ACCENT_HUE_SPACING);
+    const first = choose(candidates, playerMinContrast, prominence);
+    if (first) {
+      const runner = choose(
+        candidates.filter(entry => entry.index !== first.entry.index),
+        playerMinContrast,
+        prominence
+      );
+      // …unless the runner-up is the picture's gold and a collectible slot is waiting for it.
+      const isWarm = (entry: PoolEntry): boolean =>
+        entry.hsl.h >= WARM_HUE_MIN && entry.hsl.h <= WARM_HUE_MAX;
+      const swap =
+        runner !== null &&
+        runner.entry.tier === first.entry.tier &&
+        !(slots >= 3 && isWarm(runner.entry)) &&
+        contrastRatio(runner.color, ground) >=
+          contrastRatio(first.color, ground) * PLAYER_CONTRAST_SWAP_RATIO;
+      const pick = swap && runner ? runner : first;
+      playerHue = pick.entry.hsl.h;
+      player = admit(pick);
+    }
+  }
+
+  // --- collectible: a warm colour, if the picture has one, is claimed before the hazard search can
+  // spend it as "the farthest hue". A tier-3 warm is brown, not gold, and does not qualify. ---------
+  let collectible: RgbColor | null = null;
+  if (slots >= 3) {
+    collectible = chooseSpaced(
+      entries =>
+        entries.filter(
+          entry => entry.tier <= 2 && entry.hsl.h >= WARM_HUE_MIN && entry.hsl.h <= WARM_HUE_MAX
+        ),
+      accentMinContrast,
+      prominence
+    );
+  }
+
+  // --- hazard: the strong vivid colour far in hue from the player. Prominence times a hue-distance
+  // bonus rather than distance alone: the literal complement of a neon cyan is a dull orange-red,
+  // while the hot magenta a person would call "the other colour" sits at 130°. -------------------
+  let hazard: RgbColor | null = null;
+  if (slots >= 2 && player) {
+    const hue = playerHue;
+    hazard = chooseSpaced(
+      entries => {
+        // The relaxed spacing may bring a hazard closer to the collectible, never to the player.
+        const apart = entries.filter(entry => hueDistance(entry.hsl.h, hue) >= ACCENT_HUE_SPACING);
+        const painted = apart.filter(entry => entry.contrast >= HAZARD_MIN_PAINTED_CONTRAST);
+        return painted.length > 0 ? painted : apart;
+      },
+      accentMinContrast,
+      entry =>
+        entry.prominence *
+        (entry.hsl.l > PRIME_MAX_LIGHTNESS ? HAZARD_PASTEL_PENALTY : 1) *
+        (HAZARD_BASE_WEIGHT + (1 - HAZARD_BASE_WEIGHT) * (hueDistance(entry.hsl.h, hue) / 180))
+    );
+  }
+
+  // --- collectible, when nothing warm was there: the next best pop ---------------------------------
+  if (slots >= 3 && !collectible) {
+    collectible = chooseSpaced(entries => entries, accentMinContrast, prominence);
+  }
+
+  // --- ui: the lightest thing left in a hue of its own; then a pastel of a hue already in use (a pale
+  // cyan next to neon cyan is what HUD text looks like) if it is far enough in RGB from everything
+  // chosen; then the next candidate raised to L ≥ 0.6 -------------------------------------------
+  let ui: RgbColor | null = null;
+  if (slots >= 4) {
+    const lightness = (entry: PoolEntry): number => entry.hsl.l;
+    // A hue of its own beats lightness: in each pass, the lightest colour already at L ≥ 0.6, else
+    // the best remaining colour raised there — only then is the pass relaxed.
+    for (const [spacing, maxTier] of SELECTION_PASSES) {
+      const free = available(spacing).filter(entry => entry.tier <= maxTier);
+      const pick =
+        choose(
+          free.filter(entry => entry.hsl.l >= UI_MIN_LIGHTNESS),
+          accentMinContrast,
+          lightness
+        ) ?? choose(free, accentMinContrast, prominence, UI_MIN_LIGHTNESS);
+      if (pick) {
+        ui = admit(pick);
+        break;
+      }
+    }
+    if (!ui) {
+      const pastel = choose(
+        pool.filter(
+          entry =>
+            !taken.has(entry.index) &&
+            entry.hsl.l >= UI_SAME_HUE_MIN_LIGHTNESS &&
+            separated(entry.color, UI_SAME_HUE_MIN_DISTANCE)
+        ),
+        accentMinContrast,
+        lightness
+      );
+      if (pastel) {
+        ui = admit(pastel);
+      }
+    }
+  }
+
+  // --- extra middle slots (palettes wider than five): next best, hue-spaced ------------------------
+  const extras: RgbColor[] = [];
+  while (extras.length < slots - 4) {
+    const extra = chooseSpaced(entries => entries, accentMinContrast, prominence);
+    if (!extra) {
+      break;
+    }
+    extras.push(extra);
+  }
+
+  // --- invent missing roles as lightness variants of what IS there, never from what was rejected.
+  // Seeds are ordered per role so the two middle slots come from different hues when two exist. ----
+  const invent = (role: AccentRole): RgbColor => {
+    const seedsByRole: Record<AccentRole, ReadonlyArray<RgbColor | null>> = {
+      player: [hazard, collectible, ground],
+      hazard: [collectible, player, ground],
+      collectible: [player, hazard, ground],
+      ui: [player, hazard, collectible, ground],
+    };
+    const seeds = seedsByRole[role]
+      .filter((seed): seed is RgbColor => seed !== null)
+      .map(seed => rgbToHsl(seed));
+    const accept = (color: RgbColor): RgbColor => {
+      chosen.push(color);
+      return color;
+    };
+    // Seed-major: every lightness of the preferred seed before the next seed, so a hazard becomes
+    // another orange before it becomes another player-cyan. An invented colour must read on the
+    // ground and earn its slot at the full merge distance — a target that brackets its seed yields
+    // a near-twin otherwise — and only when nothing does is the palette floor enough.
+    for (const floor of [BACKGROUND_MERGE_DISTANCE, PALETTE_MIN_SEPARATION]) {
+      for (const base of seeds) {
+        for (const target of INVENT_TARGETS[role]) {
+          const variant = hslToRgb({ h: base.h, s: pinnedSaturation(base), l: target });
+          const lifted = liftToContrast(variant, ground, accentMinContrast).color;
+          if (readsOnGround(lifted) && separated(lifted, floor)) {
+            return accept(lifted);
+          }
+        }
+      }
+    }
+    // The targets, lifted, all landed on colours already chosen (the lift walks every target of a
+    // hue to the same first legible lightness — that is how a one-hue picture used to collapse to a
+    // fixed gold, twice). Walk the seeds' whole lightness ladders instead: any rung that separates,
+    // preferring one that reads, the preferred seed, its pinned saturation, the rung nearest the
+    // role's first target, then the lighter one. Still the picture's own hues, never a constant.
+    const target = INVENT_TARGETS[role][0];
+    const rungs = seeds.flatMap((base, seedRank) =>
+      lightnessLadder(base).map((rung, index) => ({ ...rung, seedRank, index }))
+    );
+    const separate = rungs.filter(rung => separated(rung.color));
+    if (separate.length > 0) {
+      separate.sort(
+        (a, b) =>
+          Number(readsOnGround(b.color)) - Number(readsOnGround(a.color)) ||
+          a.seedRank - b.seedRank ||
+          a.saturationRank - b.saturationRank ||
+          Math.abs(a.l - target) - Math.abs(b.l - target) ||
+          b.l - a.l ||
+          a.index - b.index
+      );
+      return accept(separate[0].color);
+    }
+    // Nothing on any ladder clears the floor (a palette far wider than any caller asks for): the
+    // rung farthest from everything chosen is the best the picture's hues can do.
+    const gap = (color: RgbColor): number =>
+      Math.min(...chosen.map(picked => rgbDistance(color, picked)));
+    const widest = rungs.reduce((best, rung) => (gap(rung.color) > gap(best.color) ? rung : best));
+    return accept(widest.color);
+  };
+  const playerColor = player ?? invent('player');
+  if (slots >= 2 && !hazard) {
+    hazard = invent('hazard');
+  }
+  if (slots >= 3 && !collectible) {
+    collectible = invent('collectible');
+  }
+  if (slots >= 4 && !ui) {
+    ui = invent('ui');
+  }
+  while (extras.length < slots - 4) {
+    extras.push(invent('ui'));
+  }
+
+  // --- assemble in role order ---------------------------------------------------------------------
+  const roles: RgbColor[] = [];
+  if (collectible) {
+    roles.push(collectible);
+  }
+  if (ui) {
+    roles.push(ui);
+  }
+  roles.push(...extras);
+  if (hazard) {
+    roles.push(hazard);
+  }
+  roles.push(playerColor);
+
+  // --- safety net: every admission and invention above checked the floor against everything chosen,
+  // so no pair should be closer than it. Should one be, the offender is re-seated on its own hue's
+  // lightness ladder — the separated rung that reads, nearest to where it sat — never re-lifted,
+  // because the lift walks straight back to the lightness it just left. One pass suffices: each
+  // re-seat is checked against every other role, later re-seats included. --------------------------
+  const others = (skip: number): RgbColor[] => [ground, ...roles.filter((_, i) => i !== skip)];
+  const clearOf = (color: RgbColor, rest: readonly RgbColor[]): boolean =>
+    rest.every(other => rgbDistance(color, other) >= PALETTE_MIN_SEPARATION);
+  for (let i = 0; i < roles.length; i += 1) {
+    const rest = others(i);
+    if (clearOf(roles[i], rest)) {
+      continue;
+    }
+    const base = rgbToHsl(roles[i]);
+    const rungs = lightnessLadder(base, base.s)
+      .map((rung, index) => ({ ...rung, index }))
+      .filter(rung => clearOf(rung.color, rest));
+    if (rungs.length === 0) {
+      continue;
+    }
+    rungs.sort(
+      (a, b) =>
+        Number(readsOnGround(b.color)) - Number(readsOnGround(a.color)) ||
+        a.saturationRank - b.saturationRank ||
+        Math.abs(a.l - base.l) - Math.abs(b.l - base.l) ||
+        b.l - a.l ||
+        a.index - b.index
+    );
+    roles[i] = rungs[0].color;
+  }
+
+  return [ground, ...roles].map(rgbToHex);
+};
+
+interface BinSample {
+  readonly r: number;
+  readonly g: number;
+  readonly b: number;
+  readonly pop: number;
+  readonly index: number;
+}
+
+interface BinSwatch {
+  readonly color: RgbColor;
+  readonly pop: number;
+  readonly share: number;
+  readonly index: number;
+}
+
+/**
+ * The accent candidates of an image as a **hue histogram**, packed as {@link PaletteSwatch}es whose
+ * `weight` is the share of the sampled opaque pixels in that hue — the pool
+ * {@link pickStylePalette} fills its roles from.
+ *
+ * A histogram rather than a second median cut, because a median-cut box averages the bright and
+ * the dim pixels of one hue into a muddy mid-tone, and on a painted mockup the dim pixels win: the
+ * shadow side of the purple board is most of the purple. Here every vivid pixel votes into one of
+ * {@link HUE_BINS} 15° bins (split once more into a dark/mid and a light band, so a pastel and a
+ * neon of one hue both survive), and a bin is represented by the mean of its **brightest-chroma
+ * third** — a bin that is mostly shadow with a neon core is represented by the neon. Coverage only
+ * decides whether a bin is real ({@link BIN_MIN_SHARE}); bins too close to the ground are dropped,
+ * and twin bins that came out as one colour (a hue straddling a bin edge) fold into the stronger.
+ *
+ * Sampling is a fixed stride over the raster (never a canvas resample) so the pool is byte-for-byte
+ * reproducible; the alpha threshold is the one {@link quantizePixels} uses so the accents are drawn
+ * from exactly the pixels the ground was measured over. Returns an empty list when nothing vivid is
+ * there — the caller then falls back to the full-image swatches.
+ */
+const accentHistogram = (
+  pixels: ImagePixels,
+  ground: RgbColor,
+  options: PaletteOptions
+): PaletteSwatch[] => {
+  const threshold = clamp(Math.round(options.alphaThreshold ?? 8), 0, 255);
+  const maxSamples = Math.max(1, Math.floor(options.maxSamples ?? STYLE_HISTOGRAM_SAMPLES));
+  const total = pixels.width * pixels.height;
+  if (total <= 0) {
+    return [];
+  }
+  const stride = Math.max(1, Math.ceil(total / maxSamples));
+  const bins: BinSample[][] = Array.from({ length: HUE_BINS * 2 }, () => []);
+  let sampled = 0;
+  let visited = 0;
+  for (let index = 0; index < total; index += stride) {
+    const offset = index * 4;
+    if (pixels.data[offset + 3] <= threshold) {
+      continue;
+    }
+    sampled += 1;
+    const color: RgbColor = {
+      r: pixels.data[offset],
+      g: pixels.data[offset + 1],
+      b: pixels.data[offset + 2],
+    };
+    const hsl = rgbToHsl(color);
+    if (
+      hsl.s < VIVID_MIN_SATURATION ||
+      hsl.l < VIVID_MIN_LIGHTNESS ||
+      hsl.l > VIVID_MAX_LIGHTNESS
+    ) {
+      continue;
+    }
+    const hueBin = Math.min(HUE_BINS - 1, Math.floor((hsl.h / 360) * HUE_BINS));
+    const band = hsl.l >= LIGHT_BAND_LIGHTNESS ? 1 : 0;
+    bins[hueBin * 2 + band].push({
+      r: color.r,
+      g: color.g,
+      b: color.b,
+      pop: popOf(hsl),
+      index: visited,
+    });
+    visited += 1;
+  }
+  if (sampled === 0) {
+    return [];
+  }
+
+  const represented: BinSwatch[] = [];
+  bins.forEach((bin, binIndex) => {
+    const share = bin.length / sampled;
+    if (bin.length === 0 || share < BIN_MIN_SHARE) {
+      return;
+    }
+    const sorted = bin.slice().sort((a, b) => b.pop - a.pop || a.index - b.index);
+    const coreCount = Math.max(1, Math.round(sorted.length * BIN_CORE_FRACTION));
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    for (let i = 0; i < coreCount; i += 1) {
+      r += sorted[i].r;
+      g += sorted[i].g;
+      b += sorted[i].b;
+    }
+    const color: RgbColor = {
+      r: Math.round(r / coreCount),
+      g: Math.round(g / coreCount),
+      b: Math.round(b / coreCount),
+    };
+    if (rgbDistance(color, ground) < BACKGROUND_MERGE_DISTANCE) {
+      return;
+    }
+    represented.push({ color, pop: popOf(rgbToHsl(color)), share, index: binIndex });
+  });
+
+  // Merge bins that ended up as the same colour (a hue straddling a bin edge, or a band split that
+  // produced two near-identical means): keep the stronger representative, add the shares.
+  const strength = (entry: BinSwatch): number => entry.pop * Math.pow(entry.share, SHARE_EXPONENT);
+  const byStrength = (a: BinSwatch, b: BinSwatch): number =>
+    strength(b) - strength(a) || b.share - a.share || a.index - b.index;
+  const merged: BinSwatch[] = [];
+  for (const entry of represented.slice().sort(byStrength)) {
+    const twin = merged.findIndex(
+      kept =>
+        hueDistance(rgbToHsl(kept.color).h, rgbToHsl(entry.color).h) < 360 / HUE_BINS &&
+        rgbDistance(kept.color, entry.color) < TWIN_RGB_DISTANCE
+    );
+    if (twin >= 0) {
+      const kept = merged[twin];
+      merged[twin] = { ...kept, share: kept.share + entry.share };
+    } else {
+      merged.push(entry);
+    }
+  }
+  return merged
+    .sort(byStrength)
+    .map(entry => ({ color: entry.color, hex: rgbToHex(entry.color), weight: entry.share }));
+};
+
+/**
+ * Measure already-decoded pixels the way a *game* needs a palette: quantize the whole frame for the
+ * ground colour, histogram its vivid pixels by hue for the accents ({@link accentHistogram}), then
+ * fill the roles ({@link pickStylePalette}). This is the whole shipping pipeline minus the decode,
+ * exported so it can run over pixels from any source — the palette lab under `tools/palette-lab`
+ * uses it as its regression control. Returns an empty array for an image with no opaque pixels.
+ */
+export const stylePaletteFromPixels = (
+  pixels: ImagePixels,
+  count = 5,
+  options: PaletteOptions = {}
+): string[] => {
+  const swatches = quantizePixels(pixels, STYLE_QUANTIZE_BOXES, options);
+  if (swatches.length === 0) {
+    return [];
+  }
+  const ground = pickBackground(swatches);
+  const accents = accentHistogram(pixels, ground, options);
+  return pickStylePalette(swatches, count, accents);
+};
+
+/**
+ * Measure a reference image's palette the way a *game* needs it — see {@link stylePaletteFromPixels}.
+ * Returns an empty array when the image can't be decoded — callers must treat that as "unknown",
+ * never as "no colours".
+ */
+export async function extractStylePalette(
+  source: Blob,
+  count = 5,
+  options: PaletteOptions = {}
+): Promise<string[]> {
+  const pixels = await readImagePixels(source);
+  if (!pixels) {
+    return [];
+  }
+  return stylePaletteFromPixels(pixels, count, options);
+}
+
 export interface TintOptions extends EncodeOptions {
   /**
    * How much of the tint to apply, 0..1. 1 (default) is a full multiply; lower values mix back
