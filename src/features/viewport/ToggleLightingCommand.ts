@@ -11,14 +11,15 @@ import { ToggleUIFlagOperation } from './ToggleUIFlagOperation';
 export class ToggleLightingCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-lighting',
-    title: 'Toggle System Lighting',
+    title: 'System Lighting',
     description: 'Toggle fallback viewport lighting for scenes without explicit light sources',
     keywords: ['lighting', 'viewport', 'toggle'],
     menuPath: 'view',
     keybinding: 'L',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 23,
+    menuOrder: 420,
+    checked: snapshot => snapshot.ui.showLighting,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

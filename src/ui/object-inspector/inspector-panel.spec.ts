@@ -1,13 +1,14 @@
-import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   AmbientLightNode,
   AudioPlayer,
   Camera3D,
   Group2D,
-  type NodeBase,
+  NodeBase,
   PlaySoundBehavior,
   type PropertyDefinition,
+  type PropertySchema,
 } from '@pix3/runtime';
 
 type DragLike = Pick<DragEvent, 'dataTransfer'>;
@@ -374,7 +375,11 @@ describe('InspectorPanel compact object layout', () => {
     const chips = Array.from(panel.querySelectorAll('.group-chip-list--summary .group-chip')).map(
       chip => chip.textContent?.trim()
     );
-    const trigger = panel.querySelector('.summary-toolbar-button') as HTMLButtonElement | null;
+    // Matched by the disclosure state rather than the variant class: the trigger keeps a text
+    // label (no conventional icon means no icon-only variant), and that is not what this asserts.
+    const trigger = panel.querySelector(
+      '.inspector-summary-actions .inspector-btn[aria-expanded]'
+    ) as HTMLButtonElement | null;
 
     expect(chips).toEqual(['hud', 'ui']);
     expect(panel.querySelector('.groups-popover')).toBeNull();
@@ -385,7 +390,7 @@ describe('InspectorPanel compact object layout', () => {
     expect(panel.querySelector('.groups-popover')).not.toBeNull();
   });
 
-  it('orders object sections with Transform before Anchor and renames Anchor to Align', async () => {
+  it('merges Size, Anchors and Flow into one Layout section after Transform', async () => {
     const { panel } = await setupInspectorForNode(
       new Group2D({
         id: 'group-root',
@@ -398,21 +403,32 @@ describe('InspectorPanel compact object layout', () => {
     const titles = Array.from(panel.querySelectorAll('.group-title')).map(title =>
       title.textContent?.trim()
     );
+    const subsections = Array.from(panel.querySelectorAll('.inspector-subsection__title')).map(
+      title => title.textContent?.trim()
+    );
 
     expect(titles).toContain('Transform');
-    expect(titles).toContain('Align');
+    expect(titles).toContain('Layout');
+    // Size / Anchors / Flow are sub-blocks of Layout now, not sections of their own.
     expect(titles).not.toContain('Anchor');
     // Style holds two rows (Opacity + Blend Mode), so it keeps its heading; the
     // titleless treatment is only for a group that renders a single control.
     expect(titles).toContain('Style');
-    expect(titles.indexOf('Transform')).toBeLessThan(titles.indexOf('Align'));
+    expect(titles).not.toContain('Anchors');
+    expect(titles).not.toContain('Align');
+    expect(titles).not.toContain('Flow');
+    expect(titles.filter(title => title === 'Layout')).toHaveLength(1);
+    expect(titles.indexOf('Transform')).toBeLessThan(titles.indexOf('Layout'));
+    // Reading order inside the section: how big am I, where do I sit, how do I place my children.
+    expect(subsections).toEqual(['Anchors', 'Flow']);
+    expect(panel.querySelector('.layout-section__body .layout-size-block')).not.toBeNull();
     expect(panel.textContent).toContain('Opacity');
     expect(panel.textContent).toContain('Blend Mode');
     expect(panel.querySelector('.property-group--opacity')).not.toBeNull();
   });
 
-  it('hides anchor controls until anchor layout is enabled', async () => {
-    const { panel } = await setupInspectorForNode(
+  it('gives Anchors and Flow the same switch affordance and hint while they are off', async () => {
+    const { panel, execute } = await setupInspectorForNode(
       new Group2D({
         id: 'group-root',
         name: 'HUD Root',
@@ -421,7 +437,90 @@ describe('InspectorPanel compact object layout', () => {
       })
     );
 
+    const anchors = getSubsection(panel, 'Anchors');
+    const flow = getSubsection(panel, 'Flow');
+
+    // Same component, same slot, same role — that identity IS the step.
+    for (const block of [anchors, flow]) {
+      const toggle = block?.querySelector('.inspector-subsection__actions .inspector-switch');
+      expect(toggle?.getAttribute('role')).toBe('switch');
+      expect(toggle?.getAttribute('aria-checked')).toBe('false');
+      expect(toggle?.getAttribute('aria-label')?.trim()).toBeTruthy();
+      expect(toggle?.getAttribute('title')?.trim()).toBeTruthy();
+      // Off: one hint line, no property rows and no body.
+      expect(block?.querySelector('.inspector-subsection__body')).toBeNull();
+      expect(block?.querySelectorAll('.property-group')).toHaveLength(0);
+    }
+
+    expect(anchors?.querySelector('.inspector-subsection__hint')?.textContent?.trim()).toBe(
+      "Position this node against its parent's edges."
+    );
+    expect(flow?.querySelector('.inspector-subsection__hint')?.textContent?.trim()).toBe(
+      "Stack this node's children in a row or column."
+    );
     expect(panel.querySelector('.anchor-visual-editor')).toBeNull();
+
+    // Clicking the hint flips the switch on — same handler as the switch itself.
+    flow
+      ?.querySelector<HTMLButtonElement>('.inspector-subsection__hint')
+      ?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+
+    await vi.waitFor(() => {
+      const lastCommand = execute.mock.calls.at(-1)?.[0] as {
+        params?: { propertyPath: string; value: unknown };
+      };
+      expect(lastCommand.params?.propertyPath).toBe('flowEnabled');
+      expect(lastCommand.params?.value).toBe(true);
+    });
+  });
+
+  it('produces exactly one undoable command per sub-block switch toggle', async () => {
+    const node = new Group2D({ id: 'group-root', name: 'HUD Root', width: 320, height: 180 });
+    const { panel, execute } = await setupInspectorForNode(node);
+
+    for (const [title, propertyPath] of [
+      ['Anchors', 'layoutEnabled'],
+      ['Flow', 'flowEnabled'],
+    ] as const) {
+      execute.mockClear();
+      getSubsection(panel, title)
+        ?.querySelector<HTMLButtonElement>('.inspector-switch')
+        ?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+
+      await vi.waitFor(() => {
+        expect(execute).toHaveBeenCalledTimes(1);
+      });
+      const command = execute.mock.calls[0]?.[0] as {
+        params?: { propertyPath: string; value: unknown; historyMode?: string };
+      };
+      expect(command.params?.propertyPath).toBe(propertyPath);
+      expect(command.params?.value).toBe(true);
+      expect(command.params?.historyMode).toBe('commit');
+    }
+  });
+
+  it('lists the Flow properties in reading order and drops the flowEnabled row', async () => {
+    const node = new Group2D({ id: 'group-root', name: 'HUD Root', width: 320, height: 180 });
+    node.setFlow({ enabled: true, direction: 'vertical' });
+
+    const { panel } = await setupInspectorForNode(node);
+    const flowBody = getSubsection(panel, 'Flow')?.querySelector('.inspector-subsection__body');
+    // A checkbox row carries BOTH `.property-label` and `.property-label-text`,
+    // so read one label per row rather than every matching element.
+    const labels = Array.from(flowBody?.querySelectorAll('.property-group') ?? []).map(row =>
+      row.querySelector('.property-label-text, .property-label')?.textContent?.trim()
+    );
+
+    expect(labels).toEqual([
+      'Direction',
+      'Gap',
+      'Padding X',
+      'Padding Y',
+      'Cross Axis',
+      'Auto Size',
+    ]);
+    // `flowEnabled` became the header switch; repeating it as a checkbox row was the old idiom.
+    expect(labels).not.toContain('Flow');
   });
 
   it('renders the visual anchor editor with icon buttons and dispatches anchor updates', async () => {
@@ -437,11 +536,23 @@ describe('InspectorPanel compact object layout', () => {
     const { panel } = await setupInspectorForNode(node, execute);
 
     const anchorEditor = panel.querySelector('.anchor-visual-editor');
-    const horizontalLeftButton = panel.querySelector('.anchor-control-row .anchor-mode-button');
+    // The anchor modes are one radio group per axis, not four loose buttons.
+    const horizontalOptions = getAnchorModeOptions(panel, 'horizontal');
+    const horizontalLeftButton = horizontalOptions[0];
     const leftButtonIcon = horizontalLeftButton?.querySelector('svg');
 
     expect(anchorEditor).not.toBeNull();
     expect(leftButtonIcon).not.toBeNull();
+    expect(horizontalOptions).toHaveLength(4);
+    // Exactly one option is checked, and only that one is in the tab order
+    // (roving tabindex) — that is what makes it a radio group and not four
+    // independent buttons.
+    expect(
+      horizontalOptions.filter(option => option.getAttribute('aria-checked') === 'true')
+    ).toHaveLength(1);
+    expect(horizontalOptions.map(option => option.getAttribute('tabindex'))).toEqual(
+      horizontalOptions.map(option => (option.getAttribute('aria-checked') === 'true' ? '0' : '-1'))
+    );
 
     horizontalLeftButton?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
     await vi.waitFor(() => {
@@ -464,7 +575,7 @@ describe('InspectorPanel compact object layout', () => {
     expect(lastCommand.params?.value).toBe('left');
   });
 
-  it('renders components as a flat section with text enable actions and no foldout button', async () => {
+  it('renders components as a flat section with an enabled switch and no foldout button', async () => {
     const node = new AudioPlayer({
       id: 'audio-player',
       name: 'Audio Player',
@@ -473,21 +584,147 @@ describe('InspectorPanel compact object layout', () => {
     component.enabled = false;
     node.addComponent(component);
 
-    const { panel } = await setupInspectorForNode(node);
+    const { panel, execute } = await setupInspectorForNode(node);
 
     const sectionTitle = Array.from(panel.querySelectorAll('.group-title')).find(
       title => title.textContent?.trim() === 'Components'
     );
     const foldout = panel.querySelector('.script-foldout-btn');
-    const enableAction = Array.from(panel.querySelectorAll('.component-action-link')).find(
-      action => action.textContent?.trim() === 'Enable'
+    // Enable/disable is the permanent state of an entity, so it is a switch —
+    // not a button labelled with its own current state.
+    const enableSwitch = panel.querySelector<HTMLButtonElement>('.script-actions [role="switch"]');
+    const removeButton = panel.querySelector<HTMLButtonElement>(
+      '.script-actions .inspector-btn--danger'
     );
     const disabledName = panel.querySelector('.component-block--disabled .script-name');
 
     expect(sectionTitle).not.toBeUndefined();
     expect(foldout).toBeNull();
-    expect(enableAction).not.toBeUndefined();
+    expect(enableSwitch).not.toBeNull();
+    expect(enableSwitch?.getAttribute('aria-checked')).toBe('false');
+    expect(enableSwitch?.getAttribute('aria-label')).toBe('Enable core:PlaySound');
+    expect(removeButton?.getAttribute('aria-label')).toBe('Remove core:PlaySound');
     expect(disabledName?.textContent).toContain('core:PlaySound');
+
+    enableSwitch?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    await vi.waitFor(() => {
+      const lastCommand = execute.mock.calls.at(-1)?.[0] as {
+        params?: { componentId?: string; enabled?: boolean };
+      };
+      expect(lastCommand.params?.componentId).toBe('behavior-1');
+      expect(lastCommand.params?.enabled).toBe(true);
+    });
+  });
+
+  it('gives every icon-only inspector control a non-empty aria-label and title', async () => {
+    const node = new AudioPlayer({
+      id: 'audio-player',
+      name: 'Audio Player',
+    });
+    node.addComponent(new PlaySoundBehavior('behavior-1', 'core:PlaySound'));
+
+    const { panel } = await setupInspectorForNode(node);
+
+    const iconOnly = Array.from(
+      panel.querySelectorAll<HTMLElement>('.inspector-btn--icon, .inspector-switch')
+    );
+    expect(iconOnly.length).toBeGreaterThan(0);
+
+    const unlabelled = iconOnly.filter(
+      el => !el.getAttribute('aria-label')?.trim() || !el.getAttribute('title')?.trim()
+    );
+    expect(unlabelled.map(el => el.className)).toEqual([]);
+  });
+
+  it('reflects the editor flags as aria-pressed toggle buttons', async () => {
+    const node = new AudioPlayer({
+      id: 'audio-player',
+      name: 'Audio Player',
+    });
+
+    const { panel } = await setupInspectorForNode(node);
+
+    const flags = Array.from(
+      panel.querySelectorAll<HTMLButtonElement>('.editor-flags-row .inspector-btn--toggle')
+    );
+
+    expect(flags.map(flag => flag.getAttribute('aria-label'))).toEqual(['Visible', 'Locked']);
+    expect(flags.map(flag => flag.getAttribute('aria-pressed'))).toEqual(['true', 'false']);
+  });
+
+  it('labels every icon-only control on a Node2D and keeps no pre-primitive class', async () => {
+    const node = new Group2D({ id: 'group-root', name: 'HUD Root', width: 320, height: 180 });
+    node.layoutEnabled = true;
+
+    const { panel } = await setupInspectorForNode(node);
+
+    const iconOnly = Array.from(
+      panel.querySelectorAll<HTMLElement>('.inspector-btn--icon, .inspector-switch')
+    );
+    expect(iconOnly.length).toBeGreaterThan(0);
+    expect(
+      iconOnly
+        .filter(el => !el.getAttribute('aria-label')?.trim() || !el.getAttribute('title')?.trim())
+        .map(el => el.className)
+    ).toEqual([]);
+
+    // Every idiom the button pass replaced. A survivor here means a control was
+    // migrated in one place and left behind in another.
+    const retired = [
+      'inspector-button',
+      'summary-toolbar-button',
+      'btn-icon',
+      'btn-add-behavior',
+      'btn-add-group',
+      'btn-copy-resource',
+      'size-lock-button',
+      'size-reset-button',
+      'property-revert-button',
+      'group-fit-button',
+      'localization-extract-button',
+      'anchor-mode-button',
+      'animation-preview-btn',
+      'animation-default-btn',
+      'component-action-link',
+      'editor-flag-button',
+      // G11: Anchors and Flow are one `.inspector-subsection` shape now.
+      'anchor-section-header',
+      'anchor-toggle-button',
+      'anchor-toggle-row',
+      'anchor-fields',
+    ];
+    const survivors = retired.filter(name => panel.querySelector(`.${name}`) !== null);
+    expect(survivors).toEqual([]);
+  });
+
+  it('moves the anchor mode with the arrow keys inside the radio group', async () => {
+    const execute = vi.fn().mockResolvedValue(undefined);
+    const node = new Group2D({ id: 'group-root', name: 'HUD Root', width: 320, height: 180 });
+    node.layoutEnabled = true;
+
+    const { panel } = await setupInspectorForNode(node, execute);
+
+    const modes = ['left', 'center', 'right', 'stretch'];
+    const options = getAnchorModeOptions(panel, 'horizontal');
+    expect(options).toHaveLength(modes.length);
+
+    const checkedIndex = options.findIndex(
+      option => option.getAttribute('aria-checked') === 'true'
+    );
+    expect(checkedIndex).toBeGreaterThanOrEqual(0);
+    const expectedMode = modes[(checkedIndex + 1) % modes.length];
+
+    options[checkedIndex]?.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, composed: true })
+    );
+
+    await vi.waitFor(() => {
+      const lastCommand = execute.mock.calls.at(-1)?.[0] as {
+        params?: { propertyPath: string; value: unknown };
+      };
+      expect(lastCommand.params?.propertyPath).toBe('horizontalAlign');
+      expect(lastCommand.params?.value).toBe(expectedMode);
+    });
   });
 });
 
@@ -891,7 +1128,7 @@ describe('InspectorPanel animation section', () => {
     expect(panel.querySelector('.field-grid')).toBeNull();
     expect(panel.querySelector('.mini-button')).toBeNull();
     expect(panel.querySelector('.primary-button')).toBeNull();
-    expect(panel.querySelectorAll('.inspector-button').length).toBeGreaterThan(0);
+    expect(panel.querySelectorAll('.inspector-btn').length).toBeGreaterThan(0);
   });
 
   it('marks the active clip as selected and follows the selected frame index', async () => {
@@ -947,7 +1184,9 @@ describe('InspectorPanel animation section', () => {
   it('routes clip and frame edits back to the controller', async () => {
     const { panel, controller } = await setupInspectorForAnimation();
 
-    (panel.querySelector('.animation-clip-actions .btn-icon') as HTMLButtonElement).click();
+    (
+      panel.querySelector('.animation-clip-actions .inspector-btn--primary') as HTMLButtonElement
+    ).click();
     expect(controller.addClip).toHaveBeenCalledTimes(1);
 
     const otherClip = Array.from(
@@ -956,7 +1195,7 @@ describe('InspectorPanel animation section', () => {
     otherClip.click();
     expect(controller.selectClip).toHaveBeenCalledWith('run');
 
-    const buttons = Array.from(panel.querySelectorAll('.inspector-button')) as HTMLButtonElement[];
+    const buttons = Array.from(panel.querySelectorAll('.inspector-btn')) as HTMLButtonElement[];
     const byLabel = (label: string) =>
       buttons.find(button => button.textContent?.trim() === label) as HTMLButtonElement;
 
@@ -1135,6 +1374,30 @@ async function setupInspectorForAnimation(): Promise<{
   return { panel, controller };
 }
 
+/** The `role="radio"` options of one anchor axis, in render order. */
+function getAnchorModeOptions(panel: HTMLElement, axis: 'horizontal' | 'vertical') {
+  const rows = Array.from(panel.querySelectorAll('.anchor-control-row'));
+  const row = rows[axis === 'horizontal' ? 0 : 1];
+  return Array.from(row?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? []);
+}
+
+/** One Layout sub-block (`Anchors` / `Flow`) by title. */
+function getSubsection(panel: HTMLElement, title: string): HTMLElement | null {
+  return panel.querySelector<HTMLElement>(`.inspector-subsection[data-subsection="${title}"]`);
+}
+
+/** The two `pix3-number-field`s of the Transform Position row, in x/y order. */
+async function getPositionAxisFields(panel: HTMLElement): Promise<HTMLElement[]> {
+  const group = Array.from(panel.querySelectorAll('.transform-section .property-group')).find(
+    row => row.querySelector('.property-label')?.textContent?.trim() === 'Position'
+  );
+  const editor = group?.querySelector<
+    HTMLElement & { shadowRoot: ShadowRoot | null; updateComplete?: Promise<unknown> }
+  >('pix3-vector2-editor');
+  await editor?.updateComplete;
+  return Array.from(editor?.shadowRoot?.querySelectorAll<HTMLElement>('pix3-number-field') ?? []);
+}
+
 async function setupInspectorForNode(
   node: NodeBase,
   execute = vi.fn().mockResolvedValue(undefined)
@@ -1214,3 +1477,309 @@ async function setupInspectorForNode(
 
   return { panel, execute };
 }
+
+/**
+ * G10 section spine (`.plans/ui-consistency-pass.md` §3.1). The probe node owns
+ * its whole schema (a static `getPropertySchema` REPLACES the base class one),
+ * so each test states exactly the group names and `groups` metadata it is about.
+ */
+let probeSchema: PropertySchema = { nodeType: 'ProbeNode', properties: [] };
+
+class ProbeNode extends NodeBase {
+  static getPropertySchema(): PropertySchema {
+    return probeSchema;
+  }
+}
+
+function probeProperty(name: string, group: string): PropertyDefinition {
+  return {
+    name,
+    type: 'string',
+    ui: { label: name, group },
+    getValue: () => '',
+    setValue: () => {},
+  };
+}
+
+function setProbeSchema(
+  properties: [name: string, group: string][],
+  groups?: PropertySchema['groups']
+): void {
+  probeSchema = {
+    nodeType: 'ProbeNode',
+    properties: properties.map(([name, group]) => probeProperty(name, group)),
+    ...(groups ? { groups } : {}),
+  };
+}
+
+async function setupProbeInspector() {
+  return setupInspectorForNode(new ProbeNode({ id: 'probe-1', name: 'Probe', type: 'ProbeNode' }));
+}
+
+function getSectionTitles(panel: HTMLElement): string[] {
+  return Array.from(panel.querySelectorAll('.group-title')).map(
+    title => title.textContent?.trim() ?? ''
+  );
+}
+
+function getSectionToggle(panel: HTMLElement, sectionName: string): HTMLButtonElement | null {
+  return panel.querySelector<HTMLButtonElement>(`[data-section="${sectionName}"] .group-toggle`);
+}
+
+describe('InspectorPanel section spine', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    probeSchema = { nodeType: 'ProbeNode', properties: [] };
+  });
+
+  it('folds aliased groups into Transform instead of rendering them as their own sections', async () => {
+    setProbeSchema([
+      ['positionValue', 'Position'],
+      ['orderingValue', 'Ordering'],
+      ['zebraValue', 'Zebra'],
+    ]);
+
+    const { panel } = await setupProbeInspector();
+    const titles = getSectionTitles(panel);
+    const transformBody = panel.querySelector('[data-section="Transform"]');
+
+    expect(titles).toContain('Transform');
+    expect(titles).not.toContain('Position');
+    expect(titles).not.toContain('Ordering');
+    expect(transformBody?.textContent).toContain('positionValue');
+    expect(transformBody?.textContent).toContain('orderingValue');
+    // The unaliased group keeps its own name, after the spine.
+    expect(titles.indexOf('Transform')).toBeLessThan(titles.indexOf('Zebra'));
+  });
+
+  it('renders unaliased groups in declaration order and never alphabetically', async () => {
+    setProbeSchema([
+      ['zebraValue', 'Zebra'],
+      ['alphaValue', 'Alpha'],
+    ]);
+
+    const { panel } = await setupProbeInspector();
+    const titles = getSectionTitles(panel);
+
+    expect(titles.indexOf('Zebra')).toBeLessThan(titles.indexOf('Alpha'));
+  });
+
+  it('collapses a section the schema marks `expanded: false` and keeps the spine expanded', async () => {
+    setProbeSchema(
+      [
+        ['transformValue', 'Transform'],
+        ['debugValue', 'Debug Info'],
+      ],
+      {
+        'Debug Info': { label: 'Debug Info', expanded: false },
+        Transform: { label: 'Transform', expanded: false },
+      }
+    );
+
+    const { panel } = await setupProbeInspector();
+    const debugToggle = getSectionToggle(panel, 'Debug Info');
+    const debugBody = panel.querySelector<HTMLElement>(
+      '[data-section="Debug Info"] .property-group-section__body'
+    );
+
+    expect(debugToggle?.getAttribute('aria-expanded')).toBe('false');
+    expect(debugToggle?.getAttribute('aria-controls')).toBe(debugBody?.id);
+    expect(debugBody?.hasAttribute('hidden')).toBe(true);
+    // Node/Transform/Layout never start collapsed, whatever the schema says.
+    expect(getSectionToggle(panel, 'Transform')?.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('persists a collapsed section per node type and restores it on the next mount', async () => {
+    setProbeSchema([['transformValue', 'Transform']]);
+
+    const first = await setupProbeInspector();
+    getSectionToggle(first.panel, 'Transform')?.click();
+    await first.panel.updateComplete;
+
+    expect(getSectionToggle(first.panel, 'Transform')?.getAttribute('aria-expanded')).toBe('false');
+    expect(JSON.parse(localStorage.getItem('pix3.inspector.collapsed') ?? '{}')).toEqual({
+      'ProbeNode::Transform': true,
+    });
+
+    document.body.innerHTML = '';
+    const second = await setupProbeInspector();
+
+    expect(getSectionToggle(second.panel, 'Transform')?.getAttribute('aria-expanded')).toBe(
+      'false'
+    );
+  });
+
+  it('renders every section expanded when the stored collapse state is absent or malformed', async () => {
+    setProbeSchema([
+      ['transformValue', 'Transform'],
+      ['zebraValue', 'Zebra'],
+    ]);
+
+    const absent = await setupProbeInspector();
+    expect(
+      Array.from(absent.panel.querySelectorAll('.group-toggle')).map(toggle =>
+        toggle.getAttribute('aria-expanded')
+      )
+    ).toEqual(['true', 'true']);
+
+    document.body.innerHTML = '';
+    localStorage.setItem('pix3.inspector.collapsed', '{not json');
+    const malformed = await setupProbeInspector();
+    expect(
+      Array.from(malformed.panel.querySelectorAll('.group-toggle')).map(toggle =>
+        toggle.getAttribute('aria-expanded')
+      )
+    ).toEqual(['true', 'true']);
+
+    document.body.innerHTML = '';
+    localStorage.setItem('pix3.inspector.collapsed', '["ProbeNode::Zebra"]');
+    const wrongShape = await setupProbeInspector();
+    expect(
+      Array.from(wrongShape.panel.querySelectorAll('.group-toggle')).map(toggle =>
+        toggle.getAttribute('aria-expanded')
+      )
+    ).toEqual(['true', 'true']);
+  });
+});
+
+/**
+ * The verified axis table of `.plans/ui-consistency-pass.md` §3.2. The runtime does NOT
+ * ignore anchors under a flow parent: `Node2D.applyFlowLayout()` claims the MAIN axis
+ * (per `flow.direction`) and hands the CROSS axis to the child's own anchor when
+ * `layoutEnabled`, else places it by the parent's `Cross Axis`. So exactly one Position
+ * field is driven when the child anchors itself, and both when it does not.
+ */
+describe('InspectorPanel Layout under a flow parent', () => {
+  function makeFlowChild(direction: 'vertical' | 'horizontal', anchored: boolean) {
+    const parent = new Group2D({ id: 'hud', name: 'HUD', width: 320, height: 180 });
+    const child = new Group2D({ id: 'row', name: 'Row', width: 120, height: 32 });
+    parent.add(child);
+    child.layoutEnabled = anchored;
+    parent.setFlow({ enabled: true, direction });
+    return { parent, child };
+  }
+
+  it('disables only the axis a vertical flow drives and keeps the anchored cross axis editable', async () => {
+    const { child } = makeFlowChild('vertical', true);
+    const { panel } = await setupInspectorForNode(child);
+
+    const [x, y] = await getPositionAxisFields(panel);
+
+    expect(y?.hasAttribute('disabled')).toBe(true);
+    expect(y?.getAttribute('title')).toBe('Driven by Flow on HUD');
+    expect(x?.hasAttribute('disabled')).toBe(false);
+    expect(x?.hasAttribute('title')).toBe(false);
+  });
+
+  it('disables both axes when the child does not anchor itself', async () => {
+    const { child } = makeFlowChild('vertical', false);
+    const { panel } = await setupInspectorForNode(child);
+
+    const [x, y] = await getPositionAxisFields(panel);
+
+    expect(y?.hasAttribute('disabled')).toBe(true);
+    expect(x?.hasAttribute('disabled')).toBe(true);
+    expect(x?.getAttribute('title')).toBe('Driven by Flow on HUD');
+  });
+
+  it('mirrors the table for a horizontal flow — X driven, anchored Y editable', async () => {
+    const { child } = makeFlowChild('horizontal', true);
+    const { panel } = await setupInspectorForNode(child);
+
+    const [x, y] = await getPositionAxisFields(panel);
+
+    expect(x?.hasAttribute('disabled')).toBe(true);
+    expect(x?.getAttribute('title')).toBe('Driven by Flow on HUD');
+    expect(y?.hasAttribute('disabled')).toBe(false);
+  });
+
+  it('leaves Position fully editable when no parent flow drives the node', async () => {
+    const node = new Group2D({ id: 'row', name: 'Row', width: 120, height: 32 });
+    node.layoutEnabled = true;
+    const { panel } = await setupInspectorForNode(node);
+
+    const fields = await getPositionAxisFields(panel);
+
+    expect(fields).toHaveLength(2);
+    expect(fields.map(field => field.hasAttribute('disabled'))).toEqual([false, false]);
+    expect(panel.querySelector('.inspector-callout')).toBeNull();
+  });
+
+  it('explains who owns which axis and offers to select the flow parent', async () => {
+    const { parent, child } = makeFlowChild('vertical', true);
+    const { panel, execute } = await setupInspectorForNode(child);
+
+    const callout = panel.querySelector('.inspector-callout');
+    const selectParent = callout?.querySelector<HTMLButtonElement>('.inspector-btn');
+
+    expect(callout?.getAttribute('role')).toBe('note');
+    expect(callout?.querySelector('.inspector-callout__title')?.textContent?.trim()).toBe(
+      'Position driven by Flow on HUD'
+    );
+    expect(callout?.querySelector('.inspector-callout__detail')?.textContent?.trim()).toBe(
+      "Flow sets Y; this node's Anchors set X."
+    );
+    expect(selectParent?.getAttribute('aria-label')).toBe('Select HUD');
+    expect(selectParent?.getAttribute('title')).toBe('Select HUD');
+    // The Anchors sub-block stays live: the runtime still honours the cross axis.
+    expect(getSubsection(panel, 'Anchors')?.querySelector('.anchor-visual-editor')).not.toBeNull();
+
+    selectParent?.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+
+    await vi.waitFor(() => {
+      const lastCommand = execute.mock.calls.at(-1)?.[0] as {
+        params?: { nodeId?: string | null };
+      };
+      expect(lastCommand.params?.nodeId).toBe(parent.nodeId);
+    });
+  });
+
+  it('points an un-anchored child at the parent Cross Axis instead', async () => {
+    const { child } = makeFlowChild('horizontal', false);
+    const { panel } = await setupInspectorForNode(child);
+
+    expect(
+      panel.querySelector('.inspector-callout__detail')?.textContent?.replace(/\s+/g, ' ').trim()
+    ).toBe("Flow sets X; the parent's Cross Axis sets Y. Turn Anchors on to author Y.");
+  });
+
+  it('removes `stretch` from the anchor axis the flow drives and says why', async () => {
+    const { child } = makeFlowChild('vertical', true);
+    const { panel } = await setupInspectorForNode(child);
+
+    const horizontal = getAnchorModeOptions(panel, 'horizontal').map(option =>
+      option.getAttribute('aria-label')
+    );
+    const vertical = getAnchorModeOptions(panel, 'vertical').map(option =>
+      option.getAttribute('aria-label')
+    );
+
+    // Cross axis keeps all four modes; the main axis loses `stretch` entirely —
+    // removed rather than disabled, because it fights how the flow measures the child.
+    expect(horizontal).toEqual([
+      'horizontal left',
+      'horizontal center',
+      'horizontal right',
+      'horizontal stretch',
+    ]);
+    expect(vertical).toEqual(['vertical top', 'vertical center', 'vertical bottom']);
+    expect(
+      getSubsection(panel, 'Anchors')
+        ?.querySelector('.inspector-subsection__note')
+        ?.textContent?.replace(/\s+/g, ' ')
+        .trim()
+    ).toBe('Stretch is unavailable on the V axis while Flow drives it.');
+  });
+
+  it('mirrors the removal onto the horizontal axis for a horizontal flow', async () => {
+    const { child } = makeFlowChild('horizontal', true);
+    const { panel } = await setupInspectorForNode(child);
+
+    expect(
+      getAnchorModeOptions(panel, 'horizontal').map(option => option.getAttribute('aria-label'))
+    ).toEqual(['horizontal left', 'horizontal center', 'horizontal right']);
+    expect(
+      getAnchorModeOptions(panel, 'vertical').map(option => option.getAttribute('aria-label'))
+    ).toEqual(['vertical top', 'vertical center', 'vertical bottom', 'vertical stretch']);
+  });
+});

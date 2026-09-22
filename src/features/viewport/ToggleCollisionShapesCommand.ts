@@ -20,12 +20,13 @@ import { ToggleUIFlagOperation } from './ToggleUIFlagOperation';
 export class ToggleCollisionShapesCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-collision-shapes',
-    title: 'Toggle Collision Shapes',
+    title: 'Collision Shapes',
     description: 'Show or hide authored 2D collider outlines for every node in the viewport',
     keywords: ['collision', 'collider', 'hitbox', 'polygon', 'shapes', 'viewport', 'toggle'],
     menuPath: 'view',
     addToMenu: true,
-    menuOrder: 25,
+    menuOrder: 500,
+    checked: snapshot => snapshot.ui.showCollisionShapes,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

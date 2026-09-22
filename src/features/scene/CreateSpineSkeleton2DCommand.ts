@@ -16,9 +16,7 @@ export class CreateSpineSkeleton2DCommand extends CreateNodeBaseCommand<
     id: 'scene.create-spineskeleton2d',
     title: 'Create SpineSkeleton2D',
     description: 'Create a Spine skeleton in the scene',
-    menuPath: 'create/2d',
-    addToMenu: true,
-    menuOrder: 165,
+    addToMenu: false,
     keywords: ['create', 'spine', 'skeleton', 'bones', 'animation', '2d'],
   };
 

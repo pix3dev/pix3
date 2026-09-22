@@ -35,7 +35,7 @@ export class FrameSelectedCommand extends CommandBase<void, void> {
     keybinding: 'F',
     when: '(viewportFocused || sceneTreeFocused) && !isInputFocused',
     addToMenu: true,
-    menuOrder: 30,
+    menuOrder: 700,
   };
 
   private readonly params: FrameSelectedParams;

@@ -102,31 +102,25 @@ pix3-main-menu {
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-pop);
   min-width: 200px;
-  overflow: hidden;
+  /* Create lists every registered node type, so a dropdown can be taller than the window. */
+  max-height: calc(100vh - 72px);
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
+/* Rows and their automatic separators, in one column. Keep the vertical padding in sync with
+   `PANEL_PADDING` in `pix3-main-menu.ts` — it is what top-aligns a flyout with its parent row. */
 .menu-section {
+  display: flex;
+  flex-direction: column;
   padding: 4px 0;
 }
 
-.menu-group + .menu-group {
-  border-top: 1px solid var(--line-1);
-  margin-top: 4px;
-  padding-top: 6px;
-}
-
-.menu-group-label {
-  padding: 6px 12px 4px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  color: var(--fg-3);
-  text-transform: uppercase;
-}
-
-.section-items {
-  display: flex;
-  flex-direction: column;
+/* A flyout is a sibling of its parent panel in the portal, not a child of it: the dropdown
+   scrolls, so a nested panel would be clipped by its own parent. Same object as the dropdown —
+   same radius, border and shadow — placed by script (see `positionSubmenuPanel`). */
+.menu-dropdown--submenu {
+  position: fixed;
 }
 
 .menu-item {
@@ -156,10 +150,39 @@ pix3-main-menu {
   background-color: var(--bg-2);
 }
 
+/* Keyboard navigation moves focus row to row (Up/Down, Right into a flyout), so a focused row has
+   to be as visible as a hovered one. */
+.menu-item:focus-visible {
+  background-color: var(--bg-2);
+  color: var(--fg-0);
+  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline-offset: -2px;
+}
+
 .menu-item--disabled {
   color: var(--fg-3);
   cursor: not-allowed;
   opacity: 0.6;
+}
+
+/* Check gutter of a menu row. Present on EVERY row, checked or not (and on plain actions too), so
+   every label in a dropdown starts at the same x — a gutter that appears only when something is
+   checked makes labels jump as the state changes. */
+.menu-item-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+  margin-right: 8px;
+  color: var(--accent);
+}
+
+.menu-item-check svg {
+  display: block;
+  width: 14px;
+  height: 14px;
 }
 
 .menu-item-icon {
@@ -177,6 +200,35 @@ pix3-main-menu {
   text-align: left;
 }
 
+/* Trailing chevron of a flyout row. Vector, from IconService — never a text arrow. */
+.menu-item-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 12px;
+  height: 12px;
+  margin-left: 12px;
+  color: var(--fg-2);
+}
+
+.menu-item-caret svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+/* An open flyout keeps its row highlighted, so the trail from the bar down is unbroken. */
+.menu-item--submenu[aria-expanded='true'] {
+  background-color: var(--bg-2);
+  color: var(--fg-0);
+}
+
+.menu-item--submenu[aria-expanded='true'] .menu-item-caret,
+.menu-item--submenu:hover .menu-item-caret {
+  color: var(--accent);
+}
+
 .menu-item-shortcut {
   margin-left: 12px;
   font-family: var(--font-mono);
@@ -185,8 +237,9 @@ pix3-main-menu {
   white-space: nowrap;
 }
 
-.menu-divider {
+/* Drawn automatically between two `menuOrder` bands (the hundreds digit), never authored. */
+.menu-separator {
   height: 1px;
+  margin: 4px 8px;
   background-color: var(--line-1);
-  margin: 4px 0;
 }

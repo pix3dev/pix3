@@ -12,9 +12,9 @@ export class OpenLocalizationPanelCommand extends CommandBase<void, void> {
     id: 'localization.open-panel',
     title: 'Localization',
     description: 'Open the localization panel to author locale tables and translations',
-    menuPath: 'view',
+    menuPath: 'window',
     addToMenu: true,
-    menuOrder: 50,
+    menuOrder: 300,
     keywords: ['localization', 'locale', 'translation', 'i18n', 'l10n', 'language', 'panel'],
   };
 

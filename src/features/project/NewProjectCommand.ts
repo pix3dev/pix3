@@ -5,11 +5,11 @@ import { ProjectLifecycleService } from '@/services/project/ProjectLifecycleServ
 export class NewProjectCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'project.new',
-    title: 'New Project',
+    title: 'New Project…',
     description: 'Create a new local or cloud project',
     menuPath: 'file',
     addToMenu: true,
-    menuOrder: 1,
+    menuOrder: 100,
     keywords: ['new', 'project', 'create'],
   };
 

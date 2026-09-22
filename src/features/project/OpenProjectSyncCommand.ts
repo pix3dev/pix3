@@ -11,11 +11,11 @@ import {
 export class OpenProjectSyncCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'project.open-sync-dialog',
-    title: 'Sync to Local Folder',
+    title: 'Sync to Local Folder…',
     description: 'Open the project sync dialog',
-    menuPath: 'project',
+    menuPath: 'file',
     addToMenu: true,
-    menuOrder: 120,
+    menuOrder: 300,
     keywords: ['sync', 'local', 'folder', 'cloud', 'project'],
   };
 

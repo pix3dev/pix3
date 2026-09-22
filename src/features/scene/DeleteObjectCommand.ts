@@ -14,14 +14,14 @@ import {
 export class DeleteObjectCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'scene.delete-object',
-    title: 'Delete Object',
+    title: 'Delete',
     description: 'Delete one or more nodes from the scene',
     keywords: ['delete', 'remove', 'erase', 'destroy'],
     menuPath: 'edit',
     keybinding: 'Delete | Backspace',
     when: '!isInputFocused && (viewportFocused || sceneTreeFocused)',
     addToMenu: true,
-    menuOrder: 5,
+    menuOrder: 210,
   };
 
   private readonly params?: DeleteObjectOperationParams;

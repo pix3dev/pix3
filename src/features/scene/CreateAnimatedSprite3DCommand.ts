@@ -18,9 +18,7 @@ export class CreateAnimatedSprite3DCommand extends CreateNodeBaseCommand<
     id: 'scene.create-animatedsprite3d',
     title: 'Create AnimatedSprite3D',
     description: 'Create a 3D animated sprite in the scene',
-    menuPath: 'create/3d',
-    addToMenu: true,
-    menuOrder: 160,
+    addToMenu: false,
     keywords: ['create', 'animated', 'sprite', '3d'],
   };
 

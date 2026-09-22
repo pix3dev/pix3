@@ -11,9 +11,9 @@ export class FocusAnimationTimelineCommand extends CommandBase<void, void> {
     id: 'animation-timeline.focus',
     title: 'Animation',
     description: 'Focus the keyframe animation timeline panel',
-    menuPath: 'view',
+    menuPath: 'window',
     addToMenu: true,
-    menuOrder: 40,
+    menuOrder: 200,
     keywords: ['animation', 'timeline', 'keyframe', 'tween', 'panel'],
   };
 

@@ -207,7 +207,11 @@ root:
     const graph = await loader.parseScene(withSprite, { filePath: 'res://scenes/main.pix3scene' });
     const coin = graph.nodeMap.get('coin');
     // Guard the premise: if node visuals ever stop being three.js children, this test is moot.
-    expect(coin?.children.some(child => (child as { pendingComponents?: unknown }).pendingComponents === undefined)).toBe(true);
+    expect(
+      coin?.children.some(
+        child => (child as { pendingComponents?: unknown }).pendingComponents === undefined
+      )
+    ).toBe(true);
 
     registerGameRules(registry);
     expect(() => loader.resolvePendingComponents(graph.rootNodes)).not.toThrow();

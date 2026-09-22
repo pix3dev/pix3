@@ -27,6 +27,9 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | 2D physics (bodies, colliders, sensors) / collision polygons            | `docs/nodes-and-systems.md` → "Physics — which tier to use", then "2D physics" / "2D collision"                                   |
 | Where a menu / end screen / modal belongs in a project or template      | `docs/pix3-specification.md` → "Project Templates, Target Platform and Agent Overlay" → the `scenes/ui/` paragraph                |
 | Command / Operation / undo wiring                                       | `AGENTS.md` → "Commands and Operations"; code in `src/features/<area>/`                                                           |
+| Add a menu command / which menu does it belong in / a toggle with a check | `AGENTS.md` → "Menu System" bullets, then `pix3-ui-conventions` skill §6; rationale in `.plans/done/ui-consistency-pass.md` §2        |
+| Inspector control primitives (buttons, switches, radio groups, sub-blocks) | `pix3-ui-conventions` skill §7; source `src/ui/object-inspector/inspector-controls.ts.css`                                       |
+| Inspector section order / a group lands in the wrong place              | `.plans/done/ui-consistency-pass.md` §3.1; source `src/ui/object-inspector/inspector-property-renderers.ts` (`SECTION_ALIAS`)         |
 | Editor UI (Lit, panels, icons, theming)                                 | `AGENTS.md` → "Component System" + `pix3-ui-conventions` skill                                                                    |
 | ECS / `InstancedMesh3D` bulk API                                        | `nodes-and-systems.md` → "ECS"; `node-types-reference.md` → `### InstancedMesh3D`                                                 |
 | System-overview diagrams / menu system / nav modes                      | `docs/architecture.md` (diagrams only — the spec is authoritative for prose)                                                      |

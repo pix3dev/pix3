@@ -18,9 +18,7 @@ export class CreateColorRect2DCommand extends CreateNodeBaseCommand<
     id: 'scene.create-colorrect2d',
     title: 'Create ColorRect2D',
     description: 'Create a 2D color rectangle in the scene',
-    menuPath: 'create/2d',
-    addToMenu: true,
-    menuOrder: 150,
+    addToMenu: false,
     keywords: ['create', 'color', 'rect', '2d', 'ui'],
   };
 

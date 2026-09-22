@@ -22,9 +22,9 @@ export class ClearAmbientOcclusionCommand extends CommandBase<void, void> {
     title: 'Clear Baked Ambient Occlusion',
     description: 'Remove baked AO maps from this scene and delete their lightmap files',
     keywords: ['ao', 'ambient', 'occlusion', 'clear', 'remove', 'delete', 'lightmap'],
-    menuPath: 'tools',
+    menuPath: 'project',
     addToMenu: true,
-    menuOrder: 61,
+    menuOrder: 410,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

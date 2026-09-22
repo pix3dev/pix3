@@ -16,13 +16,14 @@ import { SceneManager } from '@pix3/runtime';
 export class SaveAsSceneCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'scene.save-as',
-    title: 'Save As',
+    title: 'Save As…',
     description: 'Save the active scene to a new file',
     keywords: ['save', 'scene', 'export', 'as'],
     menuPath: 'file',
     keybinding: 'Mod+Shift+S',
     when: '!isInputFocused',
     addToMenu: true,
+    menuOrder: 210,
   };
 
   private params?: SaveAsSceneOperationParams;

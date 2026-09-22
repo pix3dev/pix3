@@ -11,7 +11,7 @@ import { subscribe } from 'valtio/vanilla';
 import { appState, type AppState, type EditorTab, type PanelVisibilityState } from '@/state';
 import { IconService, IconSize } from '@/services/editor/IconService';
 
-const PANEL_COMPONENT_TYPES = {
+export const PANEL_COMPONENT_TYPES = {
   sceneTree: 'scene-tree',
   viewport: 'viewport',
   inspector: 'inspector',
@@ -61,7 +61,7 @@ const PANEL_TAG_NAMES = {
   [PANEL_COMPONENT_TYPES.generate]: 'pix3-generate-panel',
 } as const;
 
-const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
+export const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.sceneTree]: 'Scene Tree',
   [PANEL_COMPONENT_TYPES.viewport]: 'Viewport',
   [PANEL_COMPONENT_TYPES.inspector]: 'Inspector',
@@ -82,7 +82,7 @@ const PANEL_DISPLAY_TITLES: Record<PanelComponentType, string> = {
   [PANEL_COMPONENT_TYPES.agentChat]: 'Agent',
   [PANEL_COMPONENT_TYPES.library]: 'Library',
   [PANEL_COMPONENT_TYPES.localization]: 'Localization',
-  [PANEL_COMPONENT_TYPES.generate]: 'Generate',
+  [PANEL_COMPONENT_TYPES.generate]: 'Asset Generator',
 };
 
 /**
@@ -99,6 +99,63 @@ const EDITOR_TAB_ICON_BY_COMPONENT: Partial<Record<PanelComponentType, string>> 
   [PANEL_COMPONENT_TYPES.modelLab]: 'box',
   [PANEL_COMPONENT_TYPES.uiKitForge]: 'layers',
   [PANEL_COMPONENT_TYPES.animation]: 'activity',
+};
+
+/**
+ * Component types that are *documents* in the editor stack rather than dockable panels. They are
+ * created through `EditorTabService` (a tab id plus a resource), so nothing may dock them as a
+ * plain panel.
+ */
+const EDITOR_DOCUMENT_COMPONENT_TYPES: readonly PanelComponentType[] = [
+  PANEL_COMPONENT_TYPES.viewport,
+  PANEL_COMPONENT_TYPES.animation,
+  PANEL_COMPONENT_TYPES.game,
+  PANEL_COMPONENT_TYPES.code,
+  PANEL_COMPONENT_TYPES.spriteEditor,
+  PANEL_COMPONENT_TYPES.modelLab,
+  PANEL_COMPONENT_TYPES.uiKitForge,
+];
+
+/** True for a document component type — see {@link EDITOR_DOCUMENT_COMPONENT_TYPES}. */
+export const isEditorDocumentPanel = (componentType: string | undefined): boolean =>
+  (EDITOR_DOCUMENT_COMPONENT_TYPES as readonly (string | undefined)[]).includes(componentType);
+
+/**
+ * Where a panel that is *not* in the layout should be docked when something asks to show it.
+ *
+ * The value is a list of the panel's default neighbours: `showPanel()` docks the panel into the
+ * stack that already hosts the first neighbour it finds, so a re-opened Logs tab lands back beside
+ * Assets instead of in a column of its own. A panel with no entry (or whose neighbours are all
+ * closed too) falls back to its own column just before the Inspector — the historical behaviour of
+ * the `reveal*Panel()` family, which is why Agent/Library/Localization/Asset Generator are
+ * deliberately absent from this map.
+ *
+ * This is data rather than one method per panel: every `Window` row goes through the same code
+ * path, and adding a panel type means adding a line here.
+ */
+const PANEL_HOME_NEIGHBOURS: Partial<Record<PanelComponentType, readonly PanelComponentType[]>> = {
+  [PANEL_COMPONENT_TYPES.sceneTree]: [PANEL_COMPONENT_TYPES.runtime],
+  [PANEL_COMPONENT_TYPES.runtime]: [PANEL_COMPONENT_TYPES.sceneTree],
+  [PANEL_COMPONENT_TYPES.inspector]: [
+    PANEL_COMPONENT_TYPES.profiler,
+    PANEL_COMPONENT_TYPES.agentChat,
+  ],
+  [PANEL_COMPONENT_TYPES.profiler]: [
+    PANEL_COMPONENT_TYPES.inspector,
+    PANEL_COMPONENT_TYPES.agentChat,
+  ],
+  [PANEL_COMPONENT_TYPES.assets]: [
+    PANEL_COMPONENT_TYPES.animationTimeline,
+    PANEL_COMPONENT_TYPES.logs,
+  ],
+  [PANEL_COMPONENT_TYPES.logs]: [
+    PANEL_COMPONENT_TYPES.assets,
+    PANEL_COMPONENT_TYPES.animationTimeline,
+  ],
+  [PANEL_COMPONENT_TYPES.animationTimeline]: [
+    PANEL_COMPONENT_TYPES.assets,
+    PANEL_COMPONENT_TYPES.logs,
+  ],
 };
 
 const DEFAULT_PANEL_VISIBILITY: PanelVisibilityState = {
@@ -675,53 +732,68 @@ export class LayoutManagerService {
 
   /**
    * Reveal the Agent chat panel. It lives as a docked column to the right of the viewport in the
-   * default layout, so normally this just brings it to the front of its stack. If the user closed
-   * the panel, re-add it as a new column before the Inspector (falling back to Golden Layout's
-   * default placement if the tree can't be navigated).
+   * default layout, so normally this just brings it to the front of its stack; if the user closed
+   * it, {@link showPanel} docks it again.
    */
   revealAgentPanel(): void {
-    this.revealDockedPanel(PANEL_COMPONENT_TYPES.agentChat, 'Agent');
+    this.showPanel(PANEL_COMPONENT_TYPES.agentChat);
   }
 
   /**
-   * Reveal the Localization panel. It is not part of the default layout, so the
-   * first open docks it as a new column just before the Inspector (falling back
-   * to Golden Layout's default placement if the tree can't be navigated); once
-   * present, this just brings it to the front of its stack.
+   * Reveal the Localization panel. It is not part of the default layout, so the first open docks
+   * it as a new column just before the Inspector.
    */
   revealLocalizationPanel(): void {
-    this.revealDockedPanel(PANEL_COMPONENT_TYPES.localization, 'Localization');
+    this.showPanel(PANEL_COMPONENT_TYPES.localization);
   }
 
   /**
    * Reveal the Asset Library panel. It is not part of the default layout, so the first open docks
-   * it as a new column just before the Inspector (falling back to Golden Layout's default
-   * placement if the tree can't be navigated); once present, this just brings it to the front of
-   * its stack. Being a normal docked panel, the user can drag/snap it anywhere — e.g. beside the
-   * viewport so the editor and library sit side by side.
+   * it as a new column just before the Inspector. Being a normal docked panel, the user can
+   * drag/snap it anywhere — e.g. beside the viewport so the editor and library sit side by side.
    */
   revealLibraryPanel(): void {
-    this.revealDockedPanel(PANEL_COMPONENT_TYPES.library, 'Library');
+    this.showPanel(PANEL_COMPONENT_TYPES.library);
   }
 
   /**
-   * Reveal the Generate panel (§9.8). Not part of the default layout: the first
-   * open docks it as a new column just before the Inspector, and the Sprite
-   * Editor's `Generate…` toolbar action routes here so the prompt is always one
-   * click from the canvas even though the two now live in separate docks.
+   * Reveal the Generate panel (§9.8). Not part of the default layout: the first open docks it as a
+   * new column just before the Inspector, and the Sprite Editor's `Generate…` toolbar action routes
+   * here so the prompt is always one click from the canvas even though the two now live in
+   * separate docks.
    */
   revealGeneratePanel(): void {
-    this.revealDockedPanel(PANEL_COMPONENT_TYPES.generate, 'Generate');
+    this.showPanel(PANEL_COMPONENT_TYPES.generate);
   }
 
   /**
-   * Shared body of the `reveal*Panel` family: focus the panel if it is already in
-   * the tree, otherwise dock it as its own column just before the Inspector (the
-   * last top-level child), falling back to Golden Layout's default placement when
-   * the tree can't be navigated.
+   * Open-or-focus a docked panel — the one path behind every `Window` menu row and the
+   * `reveal*Panel()` family above.
+   *
+   * Idempotent by construction: a panel already in the tree is only brought to the front of its
+   * stack, and one that is missing is docked and *then* focused. Placement is data
+   * ({@link PANEL_HOME_NEIGHBOURS}), tried in three steps:
+   *
+   * 1. the stack that already hosts one of the panel's default neighbours (so Logs returns to the
+   *    Assets stack rather than to a column of its own);
+   * 2. its own column just before the last top-level child (the Inspector stack) — the historical
+   *    behaviour for Agent/Library/Localization/Asset Generator, which have no neighbours listed;
+   * 3. Golden Layout's default placement, if the tree could not be navigated at all.
+   *
+   * Note this is deliberately *not* a toggle: closing stays on the tab's × (see the spec — a
+   * checkable Window row would invite closing a dock from the menu, which collapses its stack and
+   * moves the panels around it).
    */
-  private revealDockedPanel(componentType: PanelComponentType, logLabel: string): void {
+  showPanel(componentType: PanelComponentType): void {
     if (!this.layout) {
+      return;
+    }
+
+    // Documents (viewport/game/code/sprite-editor/…) are not dockable panels: they live in the
+    // editor stack and are created through `EditorTabService`, which needs a tab id and a resource
+    // this method has no way to invent. Focusing an existing one is all that is safe here.
+    if (isEditorDocumentPanel(componentType)) {
+      this.focusPanel(componentType);
       return;
     }
 
@@ -738,6 +810,26 @@ export class LayoutManagerService {
       isClosable: true,
     };
 
+    for (const neighbour of PANEL_HOME_NEIGHBOURS[componentType] ?? []) {
+      const sibling = this.findPanelByComponentType(rootItem, neighbour);
+      if (!sibling) {
+        continue;
+      }
+      const stack = this.findClosestStack(sibling) as
+        | (Stack & { addItem?: (config: unknown, index?: number) => number })
+        | null;
+      if (!stack || typeof stack.addItem !== 'function') {
+        continue;
+      }
+      try {
+        stack.addItem(componentConfig, undefined);
+        this.focusPanel(componentType);
+        return;
+      } catch (error) {
+        console.error(`[LayoutManager] Failed to dock ${componentType} beside ${neighbour}`, error);
+      }
+    }
+
     try {
       const root = rootItem as
         | (ContentItem & {
@@ -752,7 +844,7 @@ export class LayoutManagerService {
         return;
       }
     } catch (error) {
-      console.error(`[LayoutManager] Failed to re-add ${logLabel} panel as a column`, error);
+      console.error(`[LayoutManager] Failed to dock ${componentType} as a column`, error);
     }
 
     try {
@@ -762,7 +854,7 @@ export class LayoutManagerService {
       layoutApi.addComponent?.(componentType, undefined, PANEL_DISPLAY_TITLES[componentType]);
       this.focusPanel(componentType);
     } catch (error) {
-      console.error(`[LayoutManager] Failed to re-add ${logLabel} panel`, error);
+      console.error(`[LayoutManager] Failed to dock ${componentType}`, error);
     }
   }
 
@@ -794,15 +886,7 @@ export class LayoutManagerService {
   private isEditorTabComponentType(
     componentType: string | undefined
   ): componentType is PanelComponentType {
-    return (
-      componentType === PANEL_COMPONENT_TYPES.viewport ||
-      componentType === PANEL_COMPONENT_TYPES.animation ||
-      componentType === PANEL_COMPONENT_TYPES.game ||
-      componentType === PANEL_COMPONENT_TYPES.code ||
-      componentType === PANEL_COMPONENT_TYPES.spriteEditor ||
-      componentType === PANEL_COMPONENT_TYPES.modelLab ||
-      componentType === PANEL_COMPONENT_TYPES.uiKitForge
-    );
+    return isEditorDocumentPanel(componentType);
   }
 
   private findPanelByComponentType(

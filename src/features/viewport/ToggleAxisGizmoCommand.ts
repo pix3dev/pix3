@@ -11,12 +11,13 @@ import { ToggleUIFlagOperation } from './ToggleUIFlagOperation';
 export class ToggleAxisGizmoCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-axis-gizmo',
-    title: 'Toggle Axis Gizmo',
+    title: 'Axis Gizmo',
     description: 'Show or hide the orientation gizmo (X/Y/Z axes) in the viewport corner',
     keywords: ['axes', 'axis', 'gizmo', 'orientation', 'view cube', 'viewport', 'toggle'],
     menuPath: 'view',
     addToMenu: true,
-    menuOrder: 21,
+    menuOrder: 320,
+    checked: snapshot => snapshot.ui.showAxisGizmo,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

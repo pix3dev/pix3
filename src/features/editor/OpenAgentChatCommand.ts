@@ -10,11 +10,11 @@ import { CommandBase, type CommandMetadata, type CommandExecutionResult } from '
 export class OpenAgentChatCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'editor.open-agent-chat',
-    title: 'Agent Chat',
+    title: 'Agent',
     description: 'Open the AI agent chat to inspect and edit the project with natural language',
-    menuPath: 'tools',
+    menuPath: 'window',
     addToMenu: true,
-    menuOrder: 11,
+    menuOrder: 320,
     keybinding: 'Mod+Shift+A',
     keywords: ['ai', 'agent', 'chat', 'assistant', 'llm', 'copilot'],
   };

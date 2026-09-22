@@ -2,7 +2,7 @@ import { CommandBase, type CommandContext, type CommandExecutionResult } from '@
 import { OperationService } from '@/services/core/OperationService';
 import { SceneManager, Node3D } from '@pix3/runtime';
 import { SelectObjectOperation } from '@/features/selection/SelectObjectOperation';
-import type { NavigationMode } from '@/state';
+import type { AppStateSnapshot, NavigationMode } from '@/state';
 import {
   deriveSceneLayerCapabilities,
   isNavigationModeAvailable,
@@ -15,14 +15,16 @@ export interface ToggleNavigationModeParams {
 export class ToggleNavigationModeCommand extends CommandBase<void, void> {
   readonly metadata = {
     id: 'viewport.toggle-navigation-mode',
-    title: 'Toggle Navigation Mode',
+    title: 'Navigation Mode',
     description: 'Switch between 3D orbit navigation and 2D orthographic navigation',
     keywords: ['viewport', 'navigation', '2d', '3d', 'camera'],
     menuPath: 'view',
     keybinding: 'N',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 24,
+    menuOrder: 210,
+    // Checked = the viewport navigates in 2D; unchecked is the 3D orbit default.
+    checked: (snapshot: AppStateSnapshot) => snapshot.ui.navigationMode === '2d',
   } as const;
 
   private readonly params: ToggleNavigationModeParams;

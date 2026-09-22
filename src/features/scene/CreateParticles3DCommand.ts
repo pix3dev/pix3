@@ -16,9 +16,7 @@ export class CreateParticles3DCommand extends CreateNodeBaseCommand<
     id: 'scene.create-particles3d',
     title: 'Create Particles3D',
     description: 'Create a new 3D particle emitter in the scene',
-    menuPath: 'create/3d',
-    addToMenu: true,
-    menuOrder: 161,
+    addToMenu: false,
     keywords: ['create', 'particles', 'vfx', '3d', 'emitter', 'effects', 'add'],
   };
 

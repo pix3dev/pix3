@@ -19,8 +19,11 @@ export class CreatePrefabInstanceCommand extends CreateNodeBaseCommand<
     title: 'Create Prefab Instance',
     description: 'Instantiate a prefab scene asset in the active scene',
     keywords: ['prefab', 'instance', 'scene', 'create', 'drag-drop'],
-    menuPath: 'insert',
-    addToMenu: true,
+    // Not a menu row: the command cannot run without a `prefabPath`, so there is nothing for a
+    // zero-argument menu item to do. Prefabs are instantiated by dragging them in from the Assets
+    // browser or the Library, and from the Scene Tree's insert flow. (It carried `menuPath:'insert'`
+    // for a while, but nothing ever registered the command, so that menu never actually existed.)
+    addToMenu: false,
   };
 
   constructor(params: CreatePrefabInstanceOperationParams) {

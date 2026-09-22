@@ -23,7 +23,8 @@ export class ToggleLayer3DCommand extends CommandBase<void, void> {
     keybinding: '3',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 22,
+    menuOrder: 410,
+    checked: snapshot => snapshot.ui.showLayer3D,
   };
 
   preconditions(context: CommandContext): CommandPreconditionResult {

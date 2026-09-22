@@ -533,7 +533,13 @@ export class Label2D extends UIControl2D {
           },
         },
       ],
-      groups: baseSchema.groups,
+      // `UIControl2D` starts Label and Skin collapsed, which is right for a Button2D whose own
+      // group carries the interesting properties. On a Label2D the text IS the node, so its Label
+      // section opens; Skin (the optional backing panel) stays collapsed.
+      groups: {
+        ...baseSchema.groups,
+        Label: { ...baseSchema.groups?.Label, label: 'Label', expanded: true },
+      },
     };
   }
 

@@ -23,7 +23,7 @@ export class ZoomInCommand extends CommandBase<void, void> {
     keybinding: '=',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 28,
+    menuOrder: 600,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

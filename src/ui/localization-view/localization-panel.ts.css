@@ -4,6 +4,13 @@ pix3-localization-panel {
   min-height: 0;
 }
 
+/* `pix3-panel` must fill the pixel height Golden Layout gives the host, or the
+   panel's scroll container never gets one. Own scoped copy: this used to be
+   inherited from an unscoped rule in `scene-tree-panel.ts.css`. */
+pix3-localization-panel pix3-panel {
+  height: 100%;
+}
+
 /* ---- toolbar ---- */
 
 pix3-localization-panel .loc-toolbar {

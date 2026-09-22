@@ -25,9 +25,9 @@ export class OpenUiKitForgeCommand extends CommandBase<void, void> {
     id: 'editor.open-uikit-forge',
     title: 'UI Kit',
     description: 'Generate game UI sprites (buttons, panels, bars) from a theme',
-    menuPath: 'tools',
+    menuPath: 'window',
     addToMenu: true,
-    menuOrder: 12,
+    menuOrder: 530,
     keywords: [
       'uikit',
       'ui kit',

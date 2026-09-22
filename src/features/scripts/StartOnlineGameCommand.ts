@@ -26,9 +26,9 @@ export class StartOnlineGameCommand extends CommandBase<void, void> {
     title: 'Play Online',
     description: 'Create a multiplayer room for the active scene and share a join link',
     keywords: ['multiplayer', 'online', 'room', 'coop', 'play', 'network', 'share'],
-    menuPath: 'project',
+    menuPath: 'run',
     addToMenu: true,
-    menuOrder: 103,
+    menuOrder: 120,
   };
 
   @inject(OnlineSessionService)

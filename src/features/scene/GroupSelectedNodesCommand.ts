@@ -21,11 +21,11 @@ export class GroupSelectedNodesCommand extends CommandBase<void, void> {
     title: 'Group Selection',
     description: 'Group selected nodes under a new Node3D or Group2D container',
     keywords: ['group', 'selection', 'container'],
-    menuPath: 'edit',
+    menuPath: 'node',
     keybinding: 'Mod+G',
     when: '!isInputFocused && (viewportFocused || sceneTreeFocused)',
     addToMenu: true,
-    menuOrder: 16,
+    menuOrder: 100,
   };
 
   private readonly params?: GroupSelectedNodesOperationParams;

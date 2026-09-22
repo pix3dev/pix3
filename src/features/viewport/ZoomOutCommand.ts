@@ -23,7 +23,7 @@ export class ZoomOutCommand extends CommandBase<void, void> {
     keybinding: '-',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 29,
+    menuOrder: 610,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

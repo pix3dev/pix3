@@ -4,6 +4,13 @@ pix3-runtime-panel {
   min-height: 0;
 }
 
+/* `pix3-panel` must fill the pixel height Golden Layout gives the host, or the
+   panel's scroll container never gets one. Own scoped copy: this used to be
+   inherited from an unscoped rule in `scene-tree-panel.ts.css`. */
+pix3-runtime-panel pix3-panel {
+  height: 100%;
+}
+
 pix3-runtime-panel .runtime-toolbar {
   display: flex;
   flex-direction: column;

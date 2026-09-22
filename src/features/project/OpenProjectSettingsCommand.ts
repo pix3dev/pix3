@@ -11,11 +11,11 @@ import {
 export class OpenProjectSettingsCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'project.open-settings',
-    title: 'Project Settings',
+    title: 'Project Settings…',
     description: 'Open the project settings modal',
-    menuPath: 'file',
+    menuPath: 'project',
     addToMenu: true,
-    menuOrder: 100, // Should be towards the bottom of the File menu
+    menuOrder: 100,
     keywords: ['project', 'settings', 'config'],
   };
 

@@ -107,7 +107,11 @@ import { OpenGeneratePanelCommand } from '@/features/editor/OpenGeneratePanelCom
 import { OpenLibraryDocumentCommand } from '@/features/library/OpenLibraryDocumentCommand';
 import { CheckScriptsCommand } from '@/features/scripts/CheckScriptsCommand';
 import { AddAnimationPlayerToSelectionCommand } from '@/features/animation-timeline/AddAnimationPlayerToSelectionCommand';
-import { SetTransformModeCommand } from '@/features/viewport/SetTransformModeCommand';
+import { BrowseNodeTypesCommand } from '@/features/scene/BrowseNodeTypesCommand';
+import { createTransformModeCommands } from '@/features/viewport/SetTransformModeCommand';
+import { createShowPanelCommands } from '@/features/window/ShowPanelCommand';
+import { createAlign2DMenuCommands } from '@/features/alignment/Align2DMenuCommands';
+import { ResetLayoutCommand } from '@/features/window/ResetLayoutCommand';
 import { ToggleGridCommand } from '@/features/viewport/ToggleGridCommand';
 import { PeekShowAllCommand } from '@/features/peek/PeekCommands';
 import { PeekService } from '@/services/viewport/PeekService';
@@ -469,12 +473,18 @@ export class Pix3EditorShell extends ComponentBase {
     const openLibraryDocumentCommand = new OpenLibraryDocumentCommand();
     const checkScriptsCommand = new CheckScriptsCommand();
     const addAnimationPlayerCommand = new AddAnimationPlayerToSelectionCommand();
+    // Searchable fallback for the Create menu, whose rows are grouped by node type.
+    const browseNodeTypesCommand = new BrowseNodeTypesCommand();
+
+    // Window menu: one open-or-focus row per closable panel, plus the layout escape hatch.
+    const showPanelCommands = createShowPanelCommands();
+    const resetLayoutCommand = new ResetLayoutCommand();
+
+    // Node > Align / Node > Distribute: the viewport strip's actions, as menu rows.
+    const align2DMenuCommands = createAlign2DMenuCommands();
 
     // Register viewport commands
-    const selectModeCommand = new SetTransformModeCommand('select');
-    const translateModeCommand = new SetTransformModeCommand('translate');
-    const rotateModeCommand = new SetTransformModeCommand('rotate');
-    const scaleModeCommand = new SetTransformModeCommand('scale');
+    const transformModeCommands = createTransformModeCommands();
     const toggleGridCommand = new ToggleGridCommand();
     const toggleAxisGizmoCommand = new ToggleAxisGizmoCommand();
     const toggleSnapToGridCommand = new ToggleSnapToGridCommand();
@@ -541,6 +551,10 @@ export class Pix3EditorShell extends ComponentBase {
       openLibraryDocumentCommand,
       checkScriptsCommand,
       addAnimationPlayerCommand,
+      browseNodeTypesCommand,
+      ...showPanelCommands,
+      resetLayoutCommand,
+      ...align2DMenuCommands,
       newProjectCommand,
       closeProjectCommand,
       moveProjectToFolderCommand,
@@ -551,10 +565,7 @@ export class Pix3EditorShell extends ComponentBase {
       exportPlayableHtmlCommand,
       exportPlayableZipCommand,
       startRemotePreviewCommand,
-      selectModeCommand,
-      translateModeCommand,
-      rotateModeCommand,
-      scaleModeCommand,
+      ...transformModeCommands,
       toggleGridCommand,
       toggleAxisGizmoCommand,
       toggleSnapToGridCommand,
@@ -1267,7 +1278,7 @@ export class Pix3EditorShell extends ComponentBase {
       { id: 'game.start', label: 'Play Scene', icon: 'play', disabled: isPlaying },
       {
         id: 'game.start-main',
-        label: 'Play Game (Entry Scene)',
+        label: 'Play Game',
         icon: 'film',
         disabled: isPlaying,
       },

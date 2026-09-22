@@ -15,8 +15,9 @@ export class OpenProjectInIdeCommand extends CommandBase<void, void> {
     id: 'project.open-in-ide',
     title: 'Open in VS Code',
     description: 'Open the project folder in VS Code using the absolute path from settings',
-    menuPath: 'project',
+    menuPath: 'file',
     addToMenu: true,
+    menuOrder: 320,
     keywords: ['project', 'ide', 'vscode'],
   };
 

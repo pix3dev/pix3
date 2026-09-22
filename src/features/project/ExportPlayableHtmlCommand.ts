@@ -37,7 +37,7 @@ type HtmlDeliveryMethod = 'saved' | 'downloaded' | 'cancelled';
 export class ExportPlayableHtmlCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'project.export-playable-html',
-    title: 'Export Playable HTML',
+    title: 'Export Playable HTML…',
     description: 'Build and download a standalone playable HTML file for the current project',
     menuPath: 'project',
     addToMenu: true,

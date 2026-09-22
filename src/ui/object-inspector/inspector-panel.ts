@@ -52,11 +52,15 @@ import {
   InspectorPropertyRenderers,
   getComponentPropertyKey,
   getPropertyDisplayValue,
+  inspectorSectionStateKey,
+  readInspectorCollapsedSections,
+  writeInspectorCollapsedSections,
 } from './inspector-property-renderers';
 
 import '../shared/pix3-panel';
 import '../asset-library/library-inspector';
 import './inspector-panel.ts.css';
+import './inspector-controls.ts.css';
 import './model-asset-preview';
 import './property-editors';
 
@@ -188,6 +192,14 @@ export class InspectorPanel extends ComponentBase {
   @state()
   activeAnimationState: AnimationInspectorSnapshot | null = null;
 
+  /**
+   * Collapsed inspector sections, keyed `(nodeTypeId, sectionName)` and read
+   * once on connect from the single `pix3.inspector.collapsed` localStorage key.
+   * Pure UI state: it is not scene state, so it never goes through a Command.
+   */
+  @state()
+  private collapsedSections: Record<string, boolean> = {};
+
   private disposeSelectionSubscription?: () => void;
   private disposeSceneSubscription?: () => void;
   private disposeUiSubscription?: () => void;
@@ -224,6 +236,7 @@ export class InspectorPanel extends ComponentBase {
     // Anchor the transition detector to the play state at mount time — the panel
     // may be lazily mounted (Golden Layout) while a game is already running.
     this.isPlaying = appState.ui.isPlaying;
+    this.collapsedSections = readInspectorCollapsedSections();
     this.disposeSelectionSubscription = subscribe(appState.selection, () => {
       // Selecting a scene node takes the inspector back to node properties (last pick wins).
       if (appState.selection.nodeIds.length > 0) {
@@ -306,6 +319,27 @@ export class InspectorPanel extends ComponentBase {
     void this.assetsPreviewService.syncFromAssetSelection(path, 'file');
     window.dispatchEvent(new CustomEvent('assets-preview:reveal-path', { detail: { path } }));
   };
+
+  /**
+   * Whether a property section renders collapsed. `defaultCollapsed` comes from
+   * the schema (`groups[name].expanded === false`); a stored preference wins
+   * over it, and a missing/malformed store means "expanded".
+   */
+  isSectionCollapsed(sectionName: string, defaultCollapsed = false): boolean {
+    const key = inspectorSectionStateKey(this.primaryNode?.type ?? 'unknown', sectionName);
+    return this.collapsedSections[key] ?? defaultCollapsed;
+  }
+
+  /** Flip a section's collapse state and persist the whole record. */
+  toggleSectionCollapsed(sectionName: string, defaultCollapsed = false): void {
+    const key = inspectorSectionStateKey(this.primaryNode?.type ?? 'unknown', sectionName);
+    const next = {
+      ...this.collapsedSections,
+      [key]: !this.isSectionCollapsed(sectionName, defaultCollapsed),
+    };
+    this.collapsedSections = next;
+    writeInspectorCollapsedSections(next);
+  }
 
   disconnectedCallback() {
     super.disconnectedCallback();

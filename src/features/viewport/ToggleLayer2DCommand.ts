@@ -23,7 +23,8 @@ export class ToggleLayer2DCommand extends CommandBase<void, void> {
     keybinding: '2',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 21,
+    menuOrder: 400,
+    checked: snapshot => snapshot.ui.showLayer2D,
   };
 
   preconditions(context: CommandContext): CommandPreconditionResult {

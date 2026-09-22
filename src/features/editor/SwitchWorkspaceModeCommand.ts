@@ -1,6 +1,7 @@
 import { CommandBase, type CommandContext, type CommandExecutionResult } from '@/core/command';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { WorkspaceModeService } from '@/services/editor/WorkspaceModeService';
+import type { AppStateSnapshot } from '@/state';
 import type { WorkspaceMode } from '@/state/AppState';
 
 export interface SwitchWorkspaceModeParams {
@@ -16,12 +17,13 @@ export interface SwitchWorkspaceModeParams {
 export class SwitchWorkspaceModeCommand extends CommandBase<void, void> {
   readonly metadata = {
     id: 'editor.switch-workspace-mode',
-    title: 'Toggle Flow / Studio',
+    title: 'Flow Workspace',
     description: 'Switch between the prompt-first Flow workspace and the full Studio editor',
     keywords: ['flow', 'studio', 'workspace', 'mode', 'prompt'],
     menuPath: 'view',
     addToMenu: true,
-    menuOrder: 5,
+    menuOrder: 100,
+    checked: (snapshot: AppStateSnapshot) => snapshot.ui.workspaceMode === 'flow',
   } as const;
 
   private readonly params: SwitchWorkspaceModeParams;

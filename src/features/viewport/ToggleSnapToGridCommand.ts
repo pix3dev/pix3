@@ -11,14 +11,15 @@ import { ToggleUIFlagOperation } from './ToggleUIFlagOperation';
 export class ToggleSnapToGridCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-snap-to-grid',
-    title: 'Toggle Snap to Grid',
+    title: 'Snap to Grid',
     description: 'Snap dragged 2D nodes to the grid (hold Alt while dragging to invert)',
     keywords: ['snap', 'grid', 'align', '2d'],
     menuPath: 'view',
     keybinding: 'Shift+G',
     when: 'viewportFocused && !isInputFocused',
     addToMenu: true,
-    menuOrder: 21,
+    menuOrder: 310,
+    checked: snapshot => snapshot.ui.snapToGrid,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

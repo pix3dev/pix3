@@ -6,6 +6,7 @@
  */
 
 import { html, css, customElement, property, state } from '@/fw';
+import { ifDefined } from 'lit/directives/if-defined.js';
 import { ComponentBase } from '@/fw/component-base';
 
 export interface Vector2Value {
@@ -395,6 +396,19 @@ export class Vector2Editor extends ComponentBase {
   @property({ type: Boolean })
   disabled = false;
 
+  /**
+   * Axes another authority owns, disabled one at a time rather than as a pair —
+   * a child of a flow container keeps the cross axis editable while the flow
+   * drives the main one (`.plans/ui-consistency-pass.md` §3.2). Unity's
+   * "driven by LayoutGroup" idiom.
+   */
+  @property({ attribute: false })
+  disabledAxes: readonly ('x' | 'y')[] = [];
+
+  /** Tooltip explaining who owns an axis listed in {@link disabledAxes}. */
+  @property({ type: String })
+  disabledAxisTitle = '';
+
   static styles = css`
     :host {
       display: flex;
@@ -416,16 +430,28 @@ export class Vector2Editor extends ComponentBase {
     this.dispatchEvent(new CustomEvent(type, { detail, bubbles: true, composed: true }));
   }
 
+  private isAxisDisabled(axis: 'x' | 'y'): boolean {
+    return this.disabled || this.disabledAxes.includes(axis);
+  }
+
+  /** `title` only where it explains something: a driven axis, not a read-only pair. */
+  private axisTitle(axis: 'x' | 'y'): string | undefined {
+    return !this.disabled && this.disabledAxes.includes(axis) && this.disabledAxisTitle
+      ? this.disabledAxisTitle
+      : undefined;
+  }
+
   protected render() {
     return html`
       <div class="vector-input-group">
         <pix3-number-field
           axis="x"
+          title=${ifDefined(this.axisTitle('x'))}
           .value=${this.x}
           .step=${this.step}
           .precision=${this.precision}
           .sensitivity=${this.sensitivity}
-          ?disabled=${this.disabled}
+          ?disabled=${this.isAxisDisabled('x')}
           @preview-change=${(e: CustomEvent<{ value: number }>) =>
             this.emit('preview-change', { x: e.detail.value, y: this.y })}
           @commit-change=${(e: CustomEvent<{ value: number }>) =>
@@ -433,11 +459,12 @@ export class Vector2Editor extends ComponentBase {
         ></pix3-number-field>
         <pix3-number-field
           axis="y"
+          title=${ifDefined(this.axisTitle('y'))}
           .value=${this.y}
           .step=${this.step}
           .precision=${this.precision}
           .sensitivity=${this.sensitivity}
-          ?disabled=${this.disabled}
+          ?disabled=${this.isAxisDisabled('y')}
           @preview-change=${(e: CustomEvent<{ value: number }>) =>
             this.emit('preview-change', { x: this.x, y: e.detail.value })}
           @commit-change=${(e: CustomEvent<{ value: number }>) =>
@@ -1708,6 +1735,42 @@ export class AnimationResourceEditor extends ComponentBase {
 }
 
 /**
+ * Feather `lock` / `unlock` / `rotate-ccw`, inlined.
+ *
+ * {@link SizeEditor} renders into a shadow root, and `IconService` returns Light-DOM
+ * markup for the inspector's own tree; these three shapes are the exact Feather
+ * paths the inspector uses for the same three affordances, so the control reads
+ * identically on both sides of the shadow boundary.
+ */
+function featherPathIcon(body: string, shackle: string) {
+  return html`<svg
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="2"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+    focusable="false"
+  >
+    <path d=${body} />
+    <path d=${shackle} />
+  </svg>`;
+}
+
+const LOCK_ICON = featherPathIcon(
+  'M5 11h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z',
+  'M7 11V7a5 5 0 0 1 10 0v4'
+);
+
+const UNLOCK_ICON = featherPathIcon(
+  'M5 11h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-8a2 2 0 0 1 2-2z',
+  'M7 11V7a5 5 0 0 1 9.9-1'
+);
+
+const ROTATE_CCW_ICON = featherPathIcon('M1 4v6h6', 'M3.51 15a9 9 0 1 0 2.13-9.36L1 10');
+
+/**
  * Size Editor - Displays width and height fields with aspect ratio lock and reset button
  */
 @customElement('pix3-size-editor')
@@ -1814,79 +1877,80 @@ export class SizeEditor extends ComponentBase {
       align-items: center;
     }
 
-    button {
-      background: var(--bg-2);
-      border: 1px solid var(--line-1);
-      color: var(--fg-1);
-      border-radius: var(--radius-2);
-      padding: 0.2rem 0.4rem;
-      font-size: 0.7rem;
-      cursor: pointer;
-      white-space: nowrap;
-      flex-shrink: 0;
-    }
-
-    button.reset-btn:hover:not(:disabled) {
-      background: var(--bg-3);
-      color: var(--fg-0);
-    }
-
-    button:focus-visible {
-      outline: 2px solid var(--accent);
-      outline-offset: 1px;
-    }
-
-    button:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
     .controls {
       display: flex;
       gap: 0.4rem;
       align-items: center;
     }
 
-    .lock-toggle {
-      display: flex;
-      align-items: center;
-      gap: 0.25rem;
-    }
-
-    .lock-btn {
-      background: transparent;
-      border: 1px solid var(--line-1);
-      color: var(--fg-1);
-      border-radius: var(--radius-2);
-      padding: 0.2rem 0.4rem;
-      font-size: 0.8rem;
-      cursor: pointer;
-      display: flex;
+    /* The .inspector-btn primitives, copied into this shadow root.
+     * inspector-controls.ts.css is a Light-DOM sheet scoped under
+     * pix3-inspector-panel, so it cannot cross this component's shadow
+     * boundary — the class names are kept identical on purpose so the control
+     * stays one idiom with the rest of the inspector. Keep the two in sync. */
+    .inspector-btn {
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      height: 30px;
-      min-width: 28px;
+      gap: 0.35rem;
+      box-sizing: border-box;
+      height: 24px;
+      min-width: 24px;
+      padding: 0 0.5rem;
+      border: 1px solid var(--line-1);
+      border-radius: var(--radius-1);
+      background: var(--bg-2);
+      color: var(--fg-1);
+      font-family: var(--font-ui);
+      font-size: 0.74rem;
+      line-height: 1;
+      cursor: pointer;
+      flex: 0 0 auto;
     }
 
-    .lock-btn:hover:not(:disabled) {
-      background: var(--bg-2);
+    .inspector-btn svg {
+      display: block;
+      width: 14px;
+      height: 14px;
+    }
+
+    .inspector-btn:hover:not(:disabled) {
+      border-color: var(--line-2);
+      background: var(--bg-3);
       color: var(--fg-0);
     }
 
-    .lock-btn:focus-visible {
-      outline: 2px solid var(--accent);
+    .inspector-btn:focus-visible {
+      outline: 2px solid var(--accent-line);
       outline-offset: 1px;
     }
 
-    .lock-btn.locked {
-      color: var(--accent);
-      border-color: var(--accent-line);
-      background: var(--accent-soft);
+    .inspector-btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
     }
 
-    .lock-btn:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
+    .inspector-btn--icon {
+      width: 24px;
+      padding: 0;
+      background: transparent;
+      border-color: transparent;
+    }
+
+    .inspector-btn--icon:hover:not(:disabled) {
+      border-color: var(--line-2);
+    }
+
+    .inspector-btn--toggle[aria-pressed='true'] {
+      border-color: var(--accent-line);
+      background: var(--accent-soft);
+      color: var(--accent);
+    }
+
+    .inspector-btn--toggle[aria-pressed='true']:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: var(--accent-soft);
+      color: var(--accent);
     }
   `;
 
@@ -1922,38 +1986,27 @@ export class SizeEditor extends ComponentBase {
         </div>
 
         <div class="controls">
-          <div class="lock-toggle" title="Lock aspect ratio when resizing">
-            <button
-              class="lock-btn ${this.aspectRatioLocked ? 'locked' : ''}"
-              type="button"
-              ?disabled=${this.disabled}
-              @click=${() => this.onToggleLock()}
-            >
-              <svg
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path>
-                <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path>
-              </svg>
-            </button>
-          </div>
+          <button
+            class="inspector-btn inspector-btn--icon inspector-btn--toggle"
+            type="button"
+            aria-pressed=${String(this.aspectRatioLocked)}
+            aria-label="Lock aspect ratio"
+            title=${this.aspectRatioLocked ? 'Unlock aspect ratio' : 'Lock aspect ratio'}
+            ?disabled=${this.disabled}
+            @click=${() => this.onToggleLock()}
+          >
+            ${this.aspectRatioLocked ? LOCK_ICON : UNLOCK_ICON}
+          </button>
 
           <button
+            class="inspector-btn inspector-btn--icon"
             type="button"
-            class="reset-btn"
+            aria-label="Reset to original size"
+            title="Reset to original size"
             ?disabled=${this.disabled || !this.hasOriginalSize}
             @click=${() => this.onResetSize()}
-            title="Reset to original size"
           >
-            Reset
+            ${ROTATE_CCW_ICON}
           </button>
         </div>
       </div>

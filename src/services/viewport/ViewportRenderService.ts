@@ -68,7 +68,7 @@ import { SceneManager, InputService } from '@pix3/runtime';
 import { OperationService } from '@/services/core/OperationService';
 import { ResourceManager } from '@/services/assets/ResourceManager';
 import { IconService } from '@/services/editor/IconService';
-import { appState } from '@/state';
+import { appState, type TransformMode } from '@/state';
 import { subscribe } from 'valtio/vanilla';
 import { type CanvasScreenshot, type CanvasScreenshotOptions } from '@/core/canvas-screenshot';
 import { Nudge2DNodesOperation } from '@/features/properties/Nudge2DNodesOperation';
@@ -85,7 +85,10 @@ import {
 import { isDocumentActive } from '@/services/core/page-activity';
 import { isPointerBlocked } from './peek-gating';
 
-export type TransformMode = 'select' | 'translate' | 'rotate' | 'scale';
+// The transform tool is UI state (`appState.ui.transformMode`) — the four `view.transform-mode-*`
+// commands report it as their checked state. Re-exported here so the many modules that already
+// import `TransformMode` from this service keep working.
+export type { TransformMode };
 const EDITOR_ORTHOGRAPHIC_FRUSTUM_HEIGHT = 12;
 
 const LAYER_3D = 0;

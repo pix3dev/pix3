@@ -13,9 +13,9 @@ export class OpenSpriteEditorCommand extends CommandBase<void, void> {
     id: 'editor.open-sprite-editor',
     title: 'Sprite Editor',
     description: 'Open the sprite editor to edit or generate images',
-    menuPath: 'tools',
+    menuPath: 'window',
     addToMenu: true,
-    menuOrder: 10,
+    menuOrder: 510,
     // Keep legacy "asset generator" terms so command-palette muscle memory keeps working.
     keywords: [
       'sprite',

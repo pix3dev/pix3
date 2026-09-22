@@ -28,10 +28,11 @@ export class StartGameCommand extends CommandBase<void, void> {
     title: 'Play Scene',
     description: 'Start the game from the active scene',
     keywords: ['play', 'game', 'start', 'scene', 'current'],
-    menuPath: 'project',
-    keybinding: 'Mod+Ctrl+Enter',
+    menuPath: 'run',
+    keybinding: 'F6',
+    when: '!isInputFocused',
     addToMenu: true,
-    menuOrder: 102,
+    menuOrder: 110,
   };
 
   private readonly gamePlaySessionService: GamePlaySessionService;

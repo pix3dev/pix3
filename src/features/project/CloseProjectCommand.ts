@@ -15,7 +15,7 @@ export class CloseProjectCommand extends CommandBase<void, void> {
     description: 'Close the current project and return to the welcome screen',
     menuPath: 'file',
     addToMenu: true,
-    menuOrder: 90,
+    menuOrder: 900,
     keywords: ['close', 'project', 'welcome'],
   };
 

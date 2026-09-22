@@ -53,7 +53,12 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 - **Operations**: Encapsulate mutation logic. Implement `perform()` returning `undo`/`redo` closures.
 - **Commands**: Thin wrappers around operations. Validate state in `preconditions()`.
 - **Dispatcher**: All actions **MUST** flow through `CommandDispatcher.execute(CommandClass, args)`.
-- **Menu System**: Commands opt-in via metadata: `menuPath`, `shortcut`, `addToMenu`. Register in `CommandRegistry`.
+- **Menu System**: Commands opt-in via metadata: `menuPath`, `menuOrder`, `addToMenu`, `keybinding`. Register in `CommandRegistry`. Four rules the registry's spec enforces or the menu depends on:
+  - Sections are `file`, `edit`, `create`, `node`, `view`, `run`, `project`, `window` — anything that opens a panel or editor belongs to `window`.
+  - `menuOrder` is **mandatory and unique per `menuPath`**, and banded: hundreds = semantic group, tens = slot. Separators are drawn where the hundreds digit changes, so numbering *is* the grouping. `CommandRegistry.menu.spec.ts` fails and names offenders.
+  - A two-state command declares `checked: snapshot => boolean` and is titled with the noun (`Grid`, never `Toggle Grid`); `CommandRegistry.isChecked(id)` feeds both the menu check and the toolbar's pressed state, so they cannot disagree.
+  - `menuPath: 'node/align'` makes a flyout submenu; the row is not a command, so its label and slot live in `SUBMENU_ROWS`. A title ends in `…` only when the command asks something before acting.
+- **Inspector controls**: one primitive set in `src/ui/object-inspector/inspector-controls.ts.css` (`.inspector-btn` + `--icon/--primary/--danger/--toggle`, `.inspector-switch`, `.inspector-segment`, `.inspector-subsection`), every rule scoped under the host tag. Enabled state is a switch, a single choice is a radio group, icon-only controls carry `title` + `aria-label`. See the `pix3-ui-conventions` skill.
 
 ### Property Schema System
 

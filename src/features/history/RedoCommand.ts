@@ -17,7 +17,7 @@ export class RedoCommand extends CommandBase<void, void> {
     keybinding: 'Mod+Shift+Z | Ctrl+Y',
     when: '!isInputFocused',
     addToMenu: true,
-    menuOrder: 1,
+    menuOrder: 110,
   };
 
   private readonly operations: OperationService;

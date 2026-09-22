@@ -17,9 +17,9 @@ export class CheckScriptsCommand extends CommandBase<void, void> {
     description:
       'Type-check all project scripts and list any errors (with file and line) in the Logs panel',
     keywords: ['script', 'check', 'type', 'error', 'diagnostics', 'lint', 'problems'],
-    menuPath: 'project',
+    menuPath: 'run',
     addToMenu: true,
-    menuOrder: 110,
+    menuOrder: 400,
   };
 
   @inject(ProjectDiagnosticsService)

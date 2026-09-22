@@ -11,12 +11,13 @@ import { ToggleUIFlagOperation } from './ToggleUIFlagOperation';
 export class ToggleDirectionAxesCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'view.toggle-direction-axes',
-    title: 'Toggle Direction Axes',
+    title: 'Direction Axes',
     description: 'Show or hide per-node direction-axis gizmos (X/Y/Z) in the running game preview',
     keywords: ['axes', 'axis', 'direction', 'orientation', 'gizmo', 'debug', 'toggle'],
     menuPath: 'view',
     addToMenu: true,
-    menuOrder: 25,
+    menuOrder: 520,
+    checked: snapshot => snapshot.ui.showDirectionAxes,
   };
 
   preconditions(_context: CommandContext): CommandPreconditionResult {

@@ -22,7 +22,7 @@ export class MoveProjectToFolderCommand extends CommandBase<void, void> {
     description: 'Copy this in-browser project to a folder on disk',
     menuPath: 'file',
     addToMenu: true,
-    menuOrder: 2,
+    menuOrder: 310,
     keywords: ['move', 'save', 'folder', 'browser', 'local', 'export', 'disk'],
   };
 

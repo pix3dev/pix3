@@ -1,0 +1,500 @@
+/* Inspector control primitives — see `.plans/ui-consistency-pass.md` §3.3.
+ *
+ * One button system for the whole Object Inspector, replacing the six ad-hoc
+ * idioms it grew (`component-action-link`, `editor-flag-button`, `btn-icon`,
+ * `btn-add-*`, `anchor-toggle-button`, `summary-toolbar-button`).
+ *
+ * EVERY rule here is scoped under `pix3-inspector-panel`. These are Light-DOM
+ * styles, so an unscoped selector is a global one: the sibling
+ * `inspector-panel.ts.css` shipped `pix3-panel { height: 100% }` unscoped and it
+ * styled every panel in the editor. Do not add a bare `.class` rule to this
+ * file.
+ *
+ * Sizes are fixed on purpose: 24px control height, 14px (IconSize.SMALL) icons.
+ */
+
+/* ── .inspector-btn — quiet "icon + label" action ─────────────────────────── */
+pix3-inspector-panel .inspector-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  height: 24px;
+  min-width: 24px;
+  padding: 0 0.5rem;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-1);
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  line-height: 1;
+  cursor: pointer;
+  /* Keep the control from being squeezed by a flexing sibling (card headers put
+     it next to an ellipsised name). */
+  flex: 0 0 auto;
+}
+
+pix3-inspector-panel .inspector-btn svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+pix3-inspector-panel .inspector-btn:hover:not(:disabled) {
+  border-color: var(--line-2);
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-inspector-panel .inspector-btn:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+pix3-inspector-panel .inspector-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* Row container for a set of `.inspector-btn`s. Named after the primitive
+   (`.inspector-btn-row`), not after the old `.inspector-button` idiom it
+   replaced, so the row and the buttons in it read as one system. */
+pix3-inspector-panel .inspector-btn-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+/* ── --icon — icon only, 24×24. `aria-label` + `title` are mandatory. ─────── */
+pix3-inspector-panel .inspector-btn--icon {
+  width: 24px;
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+}
+
+pix3-inspector-panel .inspector-btn--icon:hover:not(:disabled) {
+  border-color: var(--line-2);
+}
+
+/* ── --primary — the single "add" affordance of a list ────────────────────── */
+pix3-inspector-panel .inspector-btn--primary {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+pix3-inspector-panel .inspector-btn--primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ── --danger — neutral at rest, red only on hover/focus ──────────────────── */
+pix3-inspector-panel .inspector-btn--danger:hover:not(:disabled),
+pix3-inspector-panel .inspector-btn--danger:focus-visible:not(:disabled) {
+  border-color: var(--danger-line);
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+
+/* ── --toggle — a button that carries state via `aria-pressed` ────────────── */
+pix3-inspector-panel .inspector-btn--toggle[aria-pressed='true'] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+pix3-inspector-panel .inspector-btn--toggle[aria-pressed='true']:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* A disclosure trigger (`aria-expanded`) reads open with the same treatment as
+   a pressed toggle — it is a state, not a second idiom. `aria-pressed` is not
+   reused here: the button opens a popover, it does not hold a value. */
+pix3-inspector-panel .inspector-btn[aria-expanded='true'] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* ── .inspector-switch — the permanent on/off of an *entity* ───────────────
+ * `role="switch"` + `aria-checked`. Used for "this component is enabled", not
+ * for actions: a text button labelled with the current state reads inverted.
+ */
+pix3-inspector-panel .inspector-switch {
+  --inspector-switch-knob: 12px;
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  box-sizing: border-box;
+  flex: 0 0 auto;
+  width: 28px;
+  height: 16px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  background: var(--bg-2);
+  cursor: pointer;
+  transition: background 120ms ease;
+}
+
+pix3-inspector-panel .inspector-switch::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  left: 1px;
+  width: var(--inspector-switch-knob);
+  height: var(--inspector-switch-knob);
+  border-radius: 50%;
+  background: var(--fg-2);
+  transition:
+    transform 120ms ease,
+    background 120ms ease;
+}
+
+pix3-inspector-panel .inspector-switch[aria-checked='true'] {
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
+pix3-inspector-panel .inspector-switch[aria-checked='true']::after {
+  background: var(--accent);
+  transform: translateX(calc(28px - 2px - 2px - var(--inspector-switch-knob)));
+}
+
+pix3-inspector-panel .inspector-switch:hover:not(:disabled) {
+  border-color: var(--line-strong);
+}
+
+pix3-inspector-panel .inspector-switch[aria-checked='true']:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+pix3-inspector-panel .inspector-switch:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+pix3-inspector-panel .inspector-switch:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* ── .inspector-subsection — titled block with a right slot (G11) ──────────
+ * `header (title + right slot) + body`; the right slot holds an
+ * `.inspector-switch`, so Anchors and Flow get one shape.
+ */
+pix3-inspector-panel .inspector-subsection {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+pix3-inspector-panel .inspector-subsection__header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  padding-bottom: 0.3rem;
+  border-bottom: 1px solid var(--line-1);
+}
+
+pix3-inspector-panel .inspector-subsection__title {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin: 0;
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--fg-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+pix3-inspector-panel .inspector-subsection__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+pix3-inspector-panel .inspector-subsection__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+/* One muted hint line shown instead of the body while the subsection is off;
+   clicking it turns the subsection on (cheap discoverability). */
+pix3-inspector-panel .inspector-subsection__hint {
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  line-height: 1.35;
+  text-align: left;
+  cursor: pointer;
+}
+
+pix3-inspector-panel .inspector-subsection__hint:hover {
+  color: var(--fg-2);
+}
+
+pix3-inspector-panel .inspector-subsection__hint:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 1px;
+}
+
+/* A non-interactive muted line inside a subsection body — the counterpart of
+   `__hint`, for a caveat about a control that IS shown (e.g. `stretch` missing
+   from the axis a flow drives). */
+pix3-inspector-panel .inspector-subsection__note {
+  margin: 0;
+  color: var(--fg-3);
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+/* ── .inspector-callout — "another authority owns this" (G11) ─────────
+ * Explains a control the inspector has taken away rather than silently
+ * disabling it: which node drives this one, on which axis, and a way to get
+ * there. Informational, so it is a `<p>`/`role="note"`, not an alert.
+ */
+pix3-inspector-panel .inspector-callout {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  box-sizing: border-box;
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--accent-line);
+  border-radius: var(--radius-1);
+  background: var(--accent-soft);
+}
+
+pix3-inspector-panel .inspector-callout__icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 14px;
+  height: 16px;
+  color: var(--accent);
+}
+
+pix3-inspector-panel .inspector-callout__icon svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+pix3-inspector-panel .inspector-callout__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+pix3-inspector-panel .inspector-callout__title {
+  margin: 0;
+  color: var(--fg-0);
+  font-family: var(--font-ui);
+  font-size: 0.74rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+pix3-inspector-panel .inspector-callout__detail {
+  margin: 0;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 0.7rem;
+  line-height: 1.35;
+}
+
+pix3-inspector-panel .inspector-callout__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 0 auto;
+}
+
+/* ── One Layout section: Size, then the Anchors/Flow subsections (G11) ──── */
+pix3-inspector-panel .layout-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+
+pix3-inspector-panel .layout-size-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+/* ── .inspector-segment — segmented radio group (G11 anchor modes) ─────────
+ * `role="radiogroup"` wrapper with `role="radio"` options: these are mutually
+ * exclusive modes, not independent buttons.
+ */
+pix3-inspector-panel .inspector-segment {
+  display: inline-flex;
+  box-sizing: border-box;
+  height: 24px;
+  padding: 1px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-1);
+  overflow: hidden;
+}
+
+pix3-inspector-panel .inspector-segment__option {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  box-sizing: border-box;
+  min-width: 24px;
+  height: 100%;
+  padding: 0 0.45rem;
+  border: none;
+  border-radius: calc(var(--radius-1) - 1px);
+  background: transparent;
+  color: var(--fg-2);
+  font-family: var(--font-ui);
+  font-size: 0.72rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+pix3-inspector-panel .inspector-segment__option svg {
+  display: block;
+  width: 14px;
+  height: 14px;
+}
+
+pix3-inspector-panel .inspector-segment__option:hover:not(:disabled) {
+  background: var(--bg-3);
+  color: var(--fg-0);
+}
+
+pix3-inspector-panel .inspector-segment__option[aria-checked='true'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+pix3-inspector-panel .inspector-segment__option:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: -2px;
+}
+
+pix3-inspector-panel .inspector-segment__option:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* --equal — the group fills its row and every option takes the same slice
+   (the H/V anchor mode rows: four equal-width glyph cells). */
+pix3-inspector-panel .inspector-segment--equal {
+  flex: 1 1 auto;
+}
+
+pix3-inspector-panel .inspector-segment--equal .inspector-segment__option {
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0;
+}
+
+/* Hand-drawn option glyphs (anchor modes) paint with both fill and stroke, so
+   they cannot share the plain-stroke treatment Feather icons come with — hence
+   an explicit class rather than a blanket `.inspector-segment__option svg`
+   rule, which would flatten every Feather icon dropped into a segment. */
+pix3-inspector-panel .inspector-segment__glyph {
+  fill: currentColor;
+  stroke: currentColor;
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+pix3-inspector-panel .inspector-segment__glyph rect {
+  stroke: none;
+}
+
+/* ── Collapsible property sections (G10, §3.1) ─────────────────────────────
+ * Godot-style flat sections, not a Unity accordion: the section title row IS
+ * the disclosure button, so Enter/Space come from the native `<button>` and no
+ * key handler is needed. The `<h4>` stays for heading semantics and `.group-title`
+ * stays the label element (a non-collapsible section still renders it directly).
+ */
+pix3-inspector-panel .group-heading {
+  margin: 0;
+  font: inherit;
+}
+
+pix3-inspector-panel .group-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-1);
+  background: transparent;
+  color: var(--fg-0);
+  text-align: left;
+  cursor: pointer;
+}
+
+pix3-inspector-panel .group-toggle .group-title {
+  /* The standalone `<h4 class="group-title">` carries a bottom margin; inside
+     the button row it would push the caret off-centre. */
+  margin: 0;
+}
+
+pix3-inspector-panel .group-toggle:hover .group-title {
+  color: var(--accent);
+}
+
+pix3-inspector-panel .group-toggle:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+
+pix3-inspector-panel .group-toggle-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  color: var(--fg-2);
+}
+
+pix3-inspector-panel .group-toggle-caret svg {
+  display: block;
+  width: 12px;
+  height: 12px;
+}
+
+pix3-inspector-panel .property-group-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+/* `display: flex` above would beat the `hidden` attribute, so restate it. */
+pix3-inspector-panel .property-group-section__body[hidden] {
+  display: none;
+}

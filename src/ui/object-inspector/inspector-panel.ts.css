@@ -1,9 +1,13 @@
-inspector-panel {
+/* NOTE: the rest of this file is still unscoped Light-DOM (global) CSS — see
+ * `.plans/ui-consistency-pass.md` §3.3. New inspector styles belong in the
+ * sibling `inspector-controls.ts.css`, where every rule is scoped under
+ * `pix3-inspector-panel`. */
+pix3-inspector-panel {
   display: block;
   height: 100%;
 }
 
-pix3-panel {
+pix3-inspector-panel pix3-panel {
   height: 100%;
 }
 
@@ -269,47 +273,6 @@ pix3-panel {
   white-space: nowrap;
 }
 
-/* One button treatment for inspector actions, shared with the summary toolbar. */
-.inspector-button-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35rem;
-}
-
-.inspector-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-2);
-  background: var(--bg-2);
-  color: var(--fg-2);
-  padding: 0.3rem 0.55rem;
-  font-size: 0.74rem;
-  cursor: pointer;
-}
-
-.inspector-button:hover:not(:disabled) {
-  border-color: var(--accent-line);
-  color: var(--fg-0);
-}
-
-.inspector-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.inspector-button--primary {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.inspector-button--primary:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--accent);
-}
-
 .group-header {
   display: flex;
   align-items: center;
@@ -418,25 +381,6 @@ pix3-panel {
   flex-shrink: 0;
 }
 
-.summary-toolbar-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-2);
-  background: var(--bg-2);
-  color: var(--fg-2);
-  padding: 0.35rem 0.5rem;
-  font-size: 0.74rem;
-  cursor: pointer;
-}
-
-.summary-toolbar-button:hover,
-.summary-toolbar-button.is-open {
-  border-color: var(--accent-line);
-  color: var(--fg-0);
-}
-
 .group-chip-list--summary {
   min-height: 1.3rem;
 }
@@ -475,113 +419,6 @@ pix3-panel {
   align-items: center;
   gap: 0.45rem;
   flex-wrap: wrap;
-}
-
-.editor-flag-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.35rem;
-  border: 1px solid var(--line-1);
-  border-radius: 999px;
-  background: transparent;
-  color: var(--fg-2);
-  padding: 0.28rem 0.55rem;
-  font-size: 0.75rem;
-  cursor: pointer;
-}
-
-.editor-flag-button:hover:not(:disabled),
-.editor-flag-button.is-active {
-  color: var(--fg-0);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-}
-
-.editor-flag-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.anchor-section {
-  gap: 0.4rem;
-}
-
-.anchor-section--collapsed {
-  padding-top: 0.15rem;
-  padding-bottom: 0.15rem;
-}
-
-.anchor-toggle-row,
-.anchor-section-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 0.5rem;
-}
-
-.anchor-toggle-button {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  padding: 0.28rem 0.55rem;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-2);
-  background: var(--bg-2);
-  color: var(--fg-2);
-  font-size: 0.76rem;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.anchor-toggle-button:hover:not(:disabled) {
-  border-color: var(--accent-line);
-  color: var(--fg-0);
-}
-
-.anchor-toggle-button.is-active {
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.anchor-toggle-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.group-fit-button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 1.85rem;
-  height: 1.85rem;
-  padding: 0;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-2);
-  background: var(--bg-2);
-  color: var(--fg-2);
-  cursor: pointer;
-}
-
-.group-fit-button:hover:not(:disabled) {
-  border-color: var(--accent-line);
-  color: var(--fg-0);
-}
-
-.group-fit-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.anchor-fields {
-  display: flex;
-  flex-direction: column;
-  gap: 0.35rem;
-}
-
-.anchor-section--visual {
-  gap: 0.55rem;
 }
 
 .anchor-visual-editor {
@@ -683,53 +520,6 @@ pix3-panel {
   font-size: 12px;
   text-align: center;
   flex-shrink: 0;
-}
-
-.anchor-mode-group {
-  flex: 1;
-  display: inline-flex;
-  padding: 1px;
-  background: var(--bg-2);
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-2);
-}
-
-.anchor-mode-button {
-  flex: 1;
-  height: 1.6rem;
-  border: 0;
-  border-radius: var(--radius-1);
-  background: transparent;
-  color: var(--fg-2);
-  cursor: pointer;
-  padding: 0;
-}
-
-.anchor-mode-button:hover:not(:disabled),
-.anchor-mode-button.is-active {
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.anchor-mode-button:disabled {
-  opacity: 0.55;
-  cursor: not-allowed;
-}
-
-.anchor-mode-button svg {
-  width: 0.82rem;
-  height: 0.82rem;
-  display: block;
-  margin: 0 auto;
-  fill: currentColor;
-  stroke: currentColor;
-  stroke-width: 1.4;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.anchor-mode-button rect {
-  stroke: none;
 }
 
 .anchor-preview-edge {
@@ -848,22 +638,6 @@ pix3-panel {
 .property-label--overridden {
   color: var(--accent);
   font-weight: 700;
-}
-
-.property-revert-button {
-  border: 1px solid var(--accent-line);
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-radius: 3px;
-  padding: 2px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-}
-
-.property-revert-button:hover {
-  background: var(--accent-soft);
 }
 
 .property-label--checkbox {
@@ -1016,20 +790,6 @@ pix3-panel {
   flex: 1;
 }
 
-.btn-add-group {
-  border: 1px solid var(--line-1);
-  background: transparent;
-  color: var(--fg-0);
-  border-radius: 4px;
-  padding: 0 10px;
-  cursor: pointer;
-  font-size: 0.75rem;
-}
-
-.btn-add-group:hover {
-  border-color: var(--accent);
-}
-
 .groups-error {
   color: var(--danger);
   margin-top: 6px;
@@ -1046,25 +806,6 @@ pix3-panel {
 .group-actions {
   display: flex;
   gap: 4px;
-}
-
-.btn-add-behavior {
-  background: transparent;
-  border: 1px solid var(--line-1);
-  color: var(--fg-0);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 0.75rem;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  transition: all 0.15s ease;
-}
-
-.btn-add-behavior:hover {
-  background: var(--bg-3);
-  border-color: var(--accent);
 }
 
 .scripts-list {
@@ -1141,45 +882,9 @@ pix3-panel {
 
 .script-actions {
   display: flex;
-  gap: 0.6rem;
-  flex-shrink: 0;
-}
-
-.component-action-link {
-  background: transparent;
-  border: none;
-  color: var(--fg-2);
-  cursor: pointer;
-  padding: 0;
-  font-size: 0.74rem;
-}
-
-.component-action-link:hover {
-  color: var(--fg-0);
-}
-
-.component-action-link--danger:hover {
-  color: var(--danger);
-}
-
-.btn-icon {
-  background: transparent;
-  border: none;
-  color: var(--fg-2);
-  cursor: pointer;
-  padding: 2px;
-  display: flex;
   align-items: center;
-  border-radius: 2px;
-}
-
-.btn-icon:hover {
-  color: var(--fg-0);
-  background: var(--bg-3);
-}
-
-.btn-icon[title='Remove']:hover {
-  color: var(--danger);
+  gap: 0.3rem;
+  flex-shrink: 0;
 }
 
 .no-scripts {
@@ -1331,37 +1036,6 @@ pix3-panel {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-}
-
-.size-reset-button,
-.size-lock-button {
-  width: 1.6rem;
-  height: 1.6rem;
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-1);
-  background: var(--bg-2);
-  color: var(--fg-2);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  cursor: pointer;
-  transition:
-    color 0.15s ease,
-    border-color 0.15s ease,
-    background 0.15s ease;
-}
-
-.size-reset-button:hover,
-.size-lock-button:hover {
-  color: var(--fg-0);
-  border-color: var(--accent);
-  background: var(--accent-soft);
-}
-
-.size-lock-button.locked {
-  color: var(--accent);
-  border-color: var(--accent-line);
-  background: var(--accent-soft);
 }
 
 .size-fields {
@@ -1672,25 +1346,6 @@ pix3-panel {
   min-width: 0;
 }
 
-.btn-copy-resource {
-  background: transparent;
-  border: none;
-  color: var(--fg-2);
-  padding: 4px;
-  cursor: pointer;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-  transition: all 0.15s ease;
-}
-
-.btn-copy-resource:hover {
-  background: var(--bg-3);
-  color: var(--accent);
-}
-
 .asset-path {
   font-family: var(--font-mono);
   font-size: 0.74rem;
@@ -1717,26 +1372,11 @@ pix3-panel {
   border: 1px solid transparent;
   border-radius: 4px;
   color: var(--fg-0);
-  cursor: pointer;
   font-size: 0.8rem;
   text-align: left;
   transition:
     border-color 0.15s ease,
     background 0.15s ease;
-}
-
-.animation-preview-btn {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex: 1;
-  min-width: 0;
-  background: transparent;
-  border: none;
-  color: inherit;
-  text-align: left;
-  padding: 0;
-  cursor: pointer;
 }
 
 .animation-item:hover {
@@ -1747,19 +1387,6 @@ pix3-panel {
 .animation-item--active {
   border-color: var(--accent);
   background: var(--accent-soft);
-}
-
-.animation-play-icon {
-  width: 14px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--fg-2);
-  flex-shrink: 0;
-}
-
-.animation-item--active .animation-play-icon {
-  color: var(--accent);
 }
 
 .animation-name {
@@ -1781,51 +1408,9 @@ pix3-panel {
   font-variant-numeric: tabular-nums;
 }
 
-.animation-default-btn {
-  border: 1px solid var(--line-1);
-  background: transparent;
-  color: var(--fg-2);
-  border-radius: 4px;
-  font-size: 0.68rem;
-  padding: 3px 6px;
-  cursor: pointer;
-  flex-shrink: 0;
-}
-
-.animation-default-btn:hover {
-  border-color: var(--accent);
-  color: var(--fg-0);
-}
-
-.animation-default-btn--active {
-  border-color: var(--accent);
-  color: var(--accent);
-  background: var(--accent-soft);
-}
-
 .animation-default-row {
   display: flex;
   justify-content: flex-end;
-}
-
-.animation-default-clear {
-  border: 1px solid var(--line-1);
-  background: transparent;
-  color: var(--fg-2);
-  border-radius: 4px;
-  font-size: 0.72rem;
-  padding: 4px 8px;
-  cursor: pointer;
-}
-
-.animation-default-clear:hover:not(:disabled) {
-  border-color: var(--fg-0);
-  color: var(--fg-0);
-}
-
-.animation-default-clear:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
 }
 
 /* Localization-key property editor (labelKey / textureKey) */
@@ -1862,24 +1447,6 @@ pix3-panel {
 
 .localization-key-status.is-missing {
   color: var(--danger);
-}
-
-.localization-extract-button {
-  flex: 0 0 auto;
-  padding: 3px 8px;
-  font-family: var(--font-ui);
-  font-size: 11px;
-  color: var(--fg-2);
-  background: var(--bg-2);
-  border: 1px solid var(--line-1);
-  border-radius: var(--radius-1);
-  cursor: pointer;
-}
-
-.localization-extract-button:hover {
-  color: var(--fg-0);
-  background: var(--bg-3);
-  border-color: var(--accent);
 }
 
 .localization-key-preview {

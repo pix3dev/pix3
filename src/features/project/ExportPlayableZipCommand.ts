@@ -38,11 +38,11 @@ type WindowWithSavePicker = Window & {
 export class ExportPlayableZipCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'project.export-playable-zip',
-    title: 'Export HTML + Assets (Zip)',
+    title: 'Export HTML + Assets (Zip)…',
     description: 'Build a zip archive with index.html and project assets as separate files',
     menuPath: 'project',
     addToMenu: true,
-    menuOrder: 211,
+    menuOrder: 220,
     keywords: ['export', 'zip', 'archive', 'html', 'assets', 'build', 'project'],
   };
 

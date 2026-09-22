@@ -13,11 +13,11 @@ import { CommandBase, type CommandExecutionResult, type CommandMetadata } from '
 export class OpenGeneratePanelCommand extends CommandBase<void, void> {
   readonly metadata: CommandMetadata = {
     id: 'editor.open-generate-panel',
-    title: 'Generate',
-    description: 'Open the Generate panel to create images with AI',
-    menuPath: 'view',
+    title: 'Asset Generator',
+    description: 'Open the Asset Generator panel to create images with AI',
+    menuPath: 'window',
     addToMenu: true,
-    menuOrder: 51,
+    menuOrder: 310,
     keywords: ['generate', 'ai', 'image', 'sprite', 'prompt', 'texture', 'panel'],
   };
 

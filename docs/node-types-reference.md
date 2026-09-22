@@ -105,7 +105,7 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
 | `flow.direction`                  | enum    | vertical | `vertical` (a column) or `horizontal` (a row)                                                                                 |
 | `flow.gap`                        | number  | 0        | Space between two children, px                                                                                                |
 | `flow.paddingX` / `flow.paddingY` | number  | 0        | Inset from the container's edges                                                                                              |
-| `flow.align`                      | enum    | start    | Cross-axis placement of each child: `start`, `center`, `end`                                                                  |
+| `flow.align`                      | enum    | start    | Cross-axis placement of each child: `start`, `center`, `end`. Inspector label: **Cross Axis**                                  |
 | `flow.autoSize`                   | boolean | false    | Grow the container along the flow axis so the last child fits                                                                 |
 
 **Usage Notes:**
@@ -115,6 +115,17 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
   container owns the main axis and each child's own anchor still owns the cross
   one — a settings row can pin its toggle to the right edge while the column
   decides how far down the row sits. This is why no `Layout2D` node exists.
+- **Vocabulary and how the inspector shows it.** Three different things used to be
+  called "align", so the words are now fixed: **Anchors** is the persistent rule
+  placing this node in its parent (`layout*` properties), **Flow** is the
+  persistent rule placing this node's children, **Cross Axis** is the flow's
+  perpendicular placement (`flow.align`), and **Align** / **Distribute** are the
+  one-shot operations on a selection (the viewport strip and `Node ▸ Align ▸`).
+  Because Anchors and Flow are orthogonal — a panel can stretch to its parent
+  *and* stack its children — the inspector shows them as two sub-blocks of one
+  **Layout** section, each with its own switch, rather than as one mode selector.
+  A child of a flow container sees only its *driven* Position axis disabled:
+  the main axis always, the cross axis only when its own Anchors are off.
 - Cannot have children by default (set `isContainer = true` to enable)
 - Transforms affect all children in local space
 - Rotation is clockwise, in degrees
