@@ -182,7 +182,7 @@ class BridgeAgentCliProvider extends AnthropicLlmProvider {
    * model fills perfectly; `main` needs tools and `vision` needs images, and this lane may have
    * neither.
    */
-  readonly defaultModelIds = { advisor: 'gemini-3.1-pro' } as const;
+  readonly defaultModelIds: { readonly advisor: string };
 
   override readonly models: readonly LlmModel[];
 
@@ -192,6 +192,7 @@ class BridgeAgentCliProvider extends AnthropicLlmProvider {
     this.label = label;
     this.defaultBaseUrl = baseUrl;
     const supportsTools = status?.tools === 'enabled';
+    this.defaultModelIds = { advisor: id === 'codex' ? 'gpt-5.6-sol' : 'gemini-3.1-pro' };
     const seed = (
       modelId: string,
       modelLabel: string,
@@ -200,7 +201,10 @@ class BridgeAgentCliProvider extends AnthropicLlmProvider {
     ): LlmModel => ({
       id: modelId,
       label: modelLabel,
-      description: 'Antigravity CLI — runs on your Antigravity subscription, no metered key.',
+      description:
+        id === 'codex'
+          ? 'Uses your Codex CLI sign-in and configured model.'
+          : 'Antigravity CLI — runs on your Antigravity subscription, no metered key.',
       capabilities: {
         supportsTools,
         supportsImages: false,
@@ -211,12 +215,33 @@ class BridgeAgentCliProvider extends AnthropicLlmProvider {
       },
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     });
-    this.models = [
-      seed('gemini-3.1-pro', 'Gemini 3.1 Pro (agy)', 1_000_000, ['low', 'high']),
-      seed('gemini-3.8-flash', 'Gemini 3.8 Flash (agy)', 1_000_000, ['low', 'medium', 'high']),
-      seed('claude-opus-4-6-thinking', 'Claude Opus 4.6 Thinking (agy)', 200_000),
-      seed('claude-sonnet-4-6', 'Claude Sonnet 4.6 (agy)', 200_000),
-    ];
+    this.models =
+      id === 'codex'
+        ? [
+            seed('gpt-5.6-sol', 'GPT-5.6 Sol (Codex)', 200_000, ['low', 'medium', 'high', 'xhigh']),
+            seed('gpt-5.6-terra', 'GPT-5.6 Terra (Codex)', 200_000, [
+              'low',
+              'medium',
+              'high',
+              'xhigh',
+            ]),
+            seed('gpt-5.6-luna', 'GPT-5.6 Luna (Codex)', 200_000, [
+              'low',
+              'medium',
+              'high',
+              'xhigh',
+            ]),
+          ]
+        : [
+            seed('gemini-3.1-pro', 'Gemini 3.1 Pro (agy)', 1_000_000, ['low', 'high']),
+            seed('gemini-3.8-flash', 'Gemini 3.8 Flash (agy)', 1_000_000, [
+              'low',
+              'medium',
+              'high',
+            ]),
+            seed('claude-opus-4-6-thinking', 'Claude Opus 4.6 Thinking (agy)', 200_000),
+            seed('claude-sonnet-4-6', 'Claude Sonnet 4.6 (agy)', 200_000),
+          ];
   }
 
   /** Same reasoning as the Claude lane: a local plain-HTTP hop needs only the pairing token. */

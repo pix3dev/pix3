@@ -53,6 +53,7 @@ describe('bridge HTTP surface', () => {
         // Detection for the Antigravity lane spawns a real `agy`, which a hermetic HTTP test must
         // not do — and would make these assertions depend on whatever is installed on the machine.
         PIX3_AGY_DISABLED: '1',
+        PIX3_CODEX_DISABLED: '1',
       },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -168,6 +169,12 @@ describe('bridge HTTP surface', () => {
     assert.equal(agy.kind, 'agent-cli');
     assert.equal(agy.available, false);
     assert.equal(agy.tools, 'disabled');
+    assert.equal(body.providers.some(provider => provider.id === 'codex'), false);
+    const codex = body.agents.find(agent => agent.id === 'codex');
+    assert.ok(codex, 'the Codex lane must be advertised even when it is unavailable');
+    assert.equal(codex.kind, 'agent-cli');
+    assert.equal(codex.available, false);
+    assert.equal(codex.tools, 'disabled');
   });
 
   it('answers /agents/agy/v1/models with a reason, not a stack trace, when agy is absent', async () => {

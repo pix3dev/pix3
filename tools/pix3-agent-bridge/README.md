@@ -3,14 +3,16 @@
 A small **local** service that connects the Pix3 editor's in-editor AI agent to LLM providers a
 browser can't reach on its own — and keeps your API keys on your machine, never in the browser.
 
-It runs on `127.0.0.1` and does two things:
+It runs on `127.0.0.1` and serves four lanes:
 
 1. **Claude Code (MAX) lane** — serves the agent from a real Claude Agent SDK session using your
    Claude Code Pro/MAX subscription (`claude login`). No API key, no per-token cost.
 2. **Antigravity (`agy`) lane** — the same thing for the [Antigravity CLI](https://antigravity.google),
    driven as a subprocess. Also a subscription you already pay for, also $0 marginal cost. See
    [Antigravity lane](#antigravity-agy-lane) below.
-3. **Provider proxy lane** — a credential-injecting reverse proxy for **OpenAI**, the **Anthropic
+3. **Codex CLI lane** — serves your signed-in Codex CLI at `/agents/codex/v1/*`, using the same
+   editor model picker and conversation wire. See [Codex lane](#codex-lane) below.
+4. **Provider proxy lane** — a credential-injecting reverse proxy for **OpenAI**, the **Anthropic
    API**, **OpenCode Zen**, and any **custom OpenAI-compatible** endpoint. The editor authenticates
    to the bridge with a pairing token; the bridge adds the real provider key and forwards the request
    to the provider. Your keys live only in `~/.pix3/agent-bridge.json`.
@@ -23,6 +25,8 @@ unlocks the other providers.
 
 - Node.js **24+**
 - For the Claude Code lane: a logged-in Claude Code (`claude login`, Pro/MAX)
+- For the Codex lane: an up-to-date, signed-in Codex CLI (`npm install -g @openai/codex@latest`,
+  then `codex login`)
 
 ## Run
 
@@ -105,6 +109,28 @@ with `--conversation` instead of replaying the transcript.
 
 Set `PIX3_AGY_DISABLED=1` to switch the lane off entirely (the bridge then never spawns `agy`).
 
+## Codex lane
+
+The bridge discovers a recent `codex` executable on PATH and exposes GPT-5.6 Sol, Terra, and Luna
+through your Codex sign-in. The bridge uses `codex exec --json` and resumes its thread for follow-up
+messages. It runs from a scratch directory and ignores your user config and rules, so a model selected
+for unrelated Codex work does not silently change the Pix3 model picker. Set `PIX3_CODEX_BIN` to an
+explicit executable path if discovery misses your installation. Set `PIX3_CODEX_DISABLED=1` to skip
+the lane. The bridge reports an outdated CLI in discovery with an upgrade instruction.
+
+Editor tools are **off by default**. `codex exec` denies MCP calls that need approval in unattended
+mode. To let Codex use Pix3 editor tools, start the bridge with `PIX3_CODEX_ALLOW_TOOLS=1`. This uses
+Codex's `--dangerously-bypass-approvals-and-sandbox` flag, so Codex runs with full local access for
+those turns. The bridge disables its shell, image, and web tools and tells it to use Pix3 MCP tools,
+but the flag still removes Codex's sandbox; enable it only when that access is acceptable. Without
+the opt-in the lane answers text requests, including the editor's advisor role, and advertises
+`supportsTools: false`.
+
+The Pix3 MCP shim is configured only for each Codex subprocess. It receives the relay URL, session
+id and separate MCP token through environment variables. No permanent change to your Codex MCP
+configuration is needed. Codex conversation ids are saved in `~/.pix3/codex-sessions.json` so chats
+can continue after a bridge restart.
+
 ## Manage providers
 
 ```bash
@@ -143,7 +169,7 @@ changes (a base-URL/kind change to a provider you're actively using is picked up
   you ask for it: `agy setup --allow-tools` lets `agy` use its own shell/file/browser tools too,
   because that is the only way it will answer an MCP call at all. It runs in a throwaway working
   directory and is told the project is not on this disk, but the capability is real — that is why it
-  is off by default.
+  is off by default. The Codex lane has a similar full-access tool opt-in, described above.
 - The MCP relay has its own token (`mcpToken`), so the shim file on disk cannot spend provider keys
   or the MAX subscription even if it is read by another local process.
 

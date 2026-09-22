@@ -21,7 +21,7 @@ import path from 'node:path';
  * `claude-bridge` in discovery). The CLI rejects adding a provider under one of these so `GET
  * /v1/providers` can never emit duplicate ids.
  */
-export const RESERVED_PROVIDER_IDS = ['claude-bridge', 'agy'] as const;
+export const RESERVED_PROVIDER_IDS = ['claude-bridge', 'agy', 'codex'] as const;
 
 /** Upstream auth scheme: how the bridge presents the stored key to the provider. */
 export type ProviderKind = 'openai' | 'anthropic';

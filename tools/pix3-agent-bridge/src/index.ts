@@ -57,6 +57,8 @@ import { runAgyCommand, runProviderCommand, usage } from './cli.ts';
 import { forwardToProvider } from './proxy.ts';
 import { AgyLane } from './agy-lane.ts';
 import { AGY_AGENT_ID } from './agy.ts';
+import { CodexLane } from './codex-lane.ts';
+import { CODEX_AGENT_ID } from './codex.ts';
 import { installShim } from './mcp-shim.ts';
 
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
@@ -195,6 +197,7 @@ const parseMcpBody = (raw: string): { method: string; params: Record<string, unk
 const startServer = (config: BridgeConfig): void => {
   const manager = new SessionManager(log, { stallTimeoutMs: config.stallTimeoutMs });
   const agy = new AgyLane(config, log);
+  const codex = new CodexLane(config, log);
   // Keep the on-disk shim in step with this bridge version. Registering it with agy stays a
   // deliberate `agy setup`, but a stale shim serving an older relay protocol is nobody's intent.
   try {
@@ -298,7 +301,9 @@ const startServer = (config: BridgeConfig): void => {
      * and the MCP spec recommends exactly this against DNS-rebinding (the Host check above is the
      * other half).
      */
-    if (req.method === 'POST' && pathname.startsWith(`/agents/${AGY_AGENT_ID}/mcp/`)) {
+    const relayAgent = pathname.startsWith(`/agents/${AGY_AGENT_ID}/mcp/`) ? AGY_AGENT_ID
+      : pathname.startsWith(`/agents/${CODEX_AGENT_ID}/mcp/`) ? CODEX_AGENT_ID : null;
+    if (req.method === 'POST' && relayAgent) {
       if (origin) {
         sendError(res, 403, 'The MCP relay does not serve browsers.', null);
         return;
@@ -308,15 +313,18 @@ const startServer = (config: BridgeConfig): void => {
         sendError(res, 401, 'Invalid or missing MCP relay token.', null);
         return;
       }
-      const sessionId = decodeURIComponent(pathname.slice(`/agents/${AGY_AGENT_ID}/mcp/`.length));
+      const sessionId = decodeURIComponent(pathname.slice(`/agents/${relayAgent}/mcp/`.length));
       try {
         const { method, params } = parseMcpBody((await readBody(req)).toString('utf8'));
-        sendJson(res, 200, await agy.handleMcp(sessionId, method, params), null);
+        const result = relayAgent === AGY_AGENT_ID
+          ? await agy.handleMcp(sessionId, method, params)
+          : await codex.handleMcp(sessionId, method, params);
+        sendJson(res, 200, result, null);
       } catch (error) {
         if (error instanceof HttpError) sendError(res, error.status, error.message, null);
         else if (error instanceof SyntaxError) sendError(res, 400, 'MCP relay body is not valid JSON.', null);
         else {
-          log(`agy MCP relay error: ${error instanceof Error ? error.message : String(error)}`);
+          log(`${relayAgent} MCP relay error: ${error instanceof Error ? error.message : String(error)}`);
           sendError(res, 500, 'MCP relay failed.', null);
         }
       }
@@ -340,9 +348,10 @@ const startServer = (config: BridgeConfig): void => {
         .map(([id, p]) => ({ id, label: p.label, kind: p.kind, enabled: true }));
       // Local CLI agents live in their OWN array, never in `providers`: an older editor maps an
       // unknown `kind` to 'openai' and would build a broken provider pointed at /providers/agy.
-      const agents = [await agy.discoveryEntry()];
+      const agents = await Promise.all([agy.discoveryEntry(), codex.discoveryEntry()]);
       const sdkStats = manager.stats();
       const agyStats = agy.manager.stats();
+      const codexStats = codex.manager.stats();
       // `sessions` is additive: older editors ignore it, newer ones can surface "1 stalled session"
       // and offer the reset below. Counts only — no ids, no content.
       sendJson(
@@ -352,9 +361,9 @@ const startServer = (config: BridgeConfig): void => {
           providers: [...providers, AGENT_SDK_PROVIDER],
           agents,
           sessions: {
-            total: sdkStats.total + agyStats.total,
-            busy: sdkStats.busy + agyStats.busy,
-            stalled: sdkStats.stalled + agyStats.stalled,
+            total: sdkStats.total + agyStats.total + codexStats.total,
+            busy: sdkStats.busy + agyStats.busy + codexStats.busy,
+            stalled: sdkStats.stalled + agyStats.stalled + codexStats.stalled,
             stallTimeoutMs: sdkStats.stallTimeoutMs,
           },
         },
@@ -400,6 +409,32 @@ const startServer = (config: BridgeConfig): void => {
       return;
     }
 
+    if (req.method === 'GET' && pathname === `/agents/${CODEX_AGENT_ID}/v1/models`) {
+      try {
+        sendJson(res, 200, { models: await codex.listModels() }, origin);
+      } catch (error) {
+        sendError(res, error instanceof HttpError ? error.status : 503,
+          error instanceof Error ? error.message : 'Could not list Codex models.', origin);
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === `/agents/${CODEX_AGENT_ID}/v1/messages`) {
+      const abort = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+      try {
+        const request = parseMessagesRequest(JSON.parse((await readBody(req)).toString('utf8')));
+        const response = await codex.handleMessages(request, abort.signal);
+        sendJson(res, response.status, response.body, origin);
+      } catch (error) {
+        if (res.writableEnded || abort.signal.aborted) return;
+        if (error instanceof HttpError) sendError(res, error.status === 499 ? 400 : error.status, error.message, origin);
+        else if (error instanceof SyntaxError) sendError(res, 400, 'Request body is not valid JSON.', origin);
+        else sendError(res, 500, error instanceof Error ? error.message : 'Codex bridge error.', origin);
+      }
+      return;
+    }
+
     /**
      * Escape hatch for a wedged Agent-SDK session: the editor can force the bridge to drop it so the
      * next message starts from a healthy one. Closing zero sessions is a success — the caller only
@@ -413,17 +448,21 @@ const startServer = (config: BridgeConfig): void => {
         const agyKey = options.sessionKey?.startsWith(`${AGY_AGENT_ID}-`)
           ? options.sessionKey.slice(AGY_AGENT_ID.length + 1)
           : undefined;
-        const sdkResult = agyKey ? null : manager.reset(options);
-        const agyResult = agy.manager.reset(agyKey ? { sessionKey: agyKey } : options);
-        const merged = sdkResult
-          ? {
-              closed: sdkResult.closed + agyResult.closed,
-              remaining: sdkResult.remaining + agyResult.remaining,
-              stalled: sdkResult.stalled + agyResult.stalled,
-              scope: sdkResult.scope,
-              ...(sdkResult.note && agyResult.note ? { note: sdkResult.note } : {}),
-            }
-          : agyResult;
+        const codexKey = options.sessionKey?.startsWith(`${CODEX_AGENT_ID}-`)
+          ? options.sessionKey.slice(CODEX_AGENT_ID.length + 1) : undefined;
+        const sdkResult = agyKey || codexKey ? null : manager.reset(options);
+        const agyResult = codexKey ? null : agy.manager.reset(agyKey ? { sessionKey: agyKey } : options);
+        const codexResult = agyKey ? null : codex.manager.reset(codexKey ? { sessionKey: codexKey } : options);
+        const results = [sdkResult, agyResult, codexResult].filter(result => result !== null);
+        const merged = {
+          closed: results.reduce((sum, result) => sum + result.closed, 0),
+          remaining: results.reduce((sum, result) => sum + result.remaining, 0),
+          stalled: results.reduce((sum, result) => sum + result.stalled, 0),
+          scope: results[0]?.scope ?? 'stalled',
+          ...(results.length > 0 && results.every(result => result.note)
+            ? { note: results[0].note }
+            : {}),
+        };
         sendJson(res, 200, merged, origin);
       } catch (error) {
         if (error instanceof HttpError) {
@@ -547,6 +586,9 @@ const startServer = (config: BridgeConfig): void => {
           `editor tools ${status.toolsEnabled ? 'enabled' : 'disabled (pix3-agent-bridge agy setup --allow-tools)'}.`
       );
     });
+    void codex.getStatus(true).then(status => {
+      console.log(`  Codex CLI lane: ${status.available ? `${status.version ?? 'installed'}, editor tools enabled` : 'not available'}.`);
+    });
     console.log(
       `  Wedged-session watchdog: ${Math.round(config.stallTimeoutMs / 1000)}s (--stall-timeout-ms / PIX3_BRIDGE_STALL_TIMEOUT_MS).`
     );
@@ -557,6 +599,7 @@ const startServer = (config: BridgeConfig): void => {
     log('shutting down');
     manager.closeAll('bridge shutting down');
     agy.closeAll('bridge shutting down');
+    codex.closeAll('bridge shutting down');
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 2000).unref();
   };

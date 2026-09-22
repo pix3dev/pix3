@@ -5,6 +5,7 @@ import {
   readPairingTokenFromHash,
   stripPairingTokenFromHash,
 } from '@/services/llm/BridgeConnectionService';
+import { createBridgeProvider } from '@/services/llm/BridgeProviders';
 
 /**
  * The pairing link (`<editor>/#bridge-token=…`) is how the bridge hands the editor its token without
@@ -101,6 +102,27 @@ describe('bridge discovery parsing', () => {
       tools: 'disabled',
       diagnostics: [{ reason: 'mcp-not-registered', severity: 'warning', message: 'no shim' }],
     });
+  });
+
+  it('maps Codex discovery to its own endpoint and models', () => {
+    const [entry] = parseEntries({
+      agents: [
+        {
+          id: 'codex',
+          label: 'Codex CLI',
+          kind: 'agent-cli',
+          available: true,
+          auth: 'ok',
+          mcp: 'missing',
+          tools: 'disabled',
+        },
+      ],
+    });
+    const provider = createBridgeProvider(entry, 'http://127.0.0.1:8484');
+    expect(provider.id).toBe('codex');
+    expect(provider.defaultBaseUrl).toBe('http://127.0.0.1:8484/agents/codex/v1');
+    expect(provider.models.map(model => model.id)).toContain('gpt-5.6-sol');
+    expect(provider.models[0].capabilities.supportsTools).toBe(false);
   });
 
   it('still reads a bridge that predates the explicit provider kind', () => {
