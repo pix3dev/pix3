@@ -129,6 +129,13 @@ id and separate MCP token through environment variables. No permanent change to 
 configuration is needed. Codex conversation ids are saved in `~/.pix3/codex-sessions.json` so chats
 can continue after a bridge restart.
 
+For image generation, pair the bridge and select **Codex (ChatGPT)** as the image provider in
+Pix3 Settings → AI Images, or pass `providerId: "codex"` to `generate_asset`. The bridge's
+`POST /agents/codex/v1/images` starts an isolated ephemeral Codex app-server turn, captures its
+native `imageGeneration` result and returns raster bytes to Pix3. It uses the local `codex login`
+session rather than an image API key. Account limits still apply. A turn can take several minutes.
+The image turn has no Pix3 editor tools; its temporary working directory is removed on exit.
+
 ## Manage providers
 
 ```bash

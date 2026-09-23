@@ -60,6 +60,8 @@ export interface BridgeAgentStatus {
   readonly mcp: 'registered' | 'missing';
   /** 'disabled' means the lane answers, but cannot run editor tools — see the bridge's `agy setup`. */
   readonly tools: 'enabled' | 'disabled';
+  /** Native Codex image tool, when the bridge has probed that CLI capability. */
+  readonly imageGeneration?: boolean;
   readonly diagnostics?: readonly BridgeAgentDiagnostic[];
 }
 

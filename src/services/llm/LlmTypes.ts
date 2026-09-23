@@ -60,6 +60,8 @@ export interface LlmToolResultBlock {
   readonly toolName?: string;
   readonly content: string;
   readonly isError?: boolean;
+  /** Editor-side elapsed wall time of the tool, omitted from provider wire payloads. */
+  readonly durationMs?: number;
 }
 
 export type LlmContentBlock = LlmTextBlock | LlmImageBlock | LlmToolUseBlock | LlmToolResultBlock;

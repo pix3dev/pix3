@@ -92,6 +92,23 @@ describe('bridge HTTP surface', () => {
     assert.match(body.error.message, /pairing token/i);
   });
 
+  it('authenticates image generation and reports an unavailable Codex CLI', async () => {
+    const url = `${base}/agents/codex/v1/images`;
+    const unauthenticated = await fetch(url, {
+      method: 'POST', body: JSON.stringify({ prompt: 'a red square' }),
+    });
+    assert.equal(unauthenticated.status, 401);
+
+    const unavailable = await fetch(url, {
+      method: 'POST',
+      headers: { 'x-pix3-bridge-token': token, 'content-type': 'application/json' },
+      body: JSON.stringify({ prompt: 'a red square' }),
+    });
+    assert.equal(unavailable.status, 503);
+    const payload = (await unavailable.json()) as { error: { message: string } };
+    assert.match(payload.error.message, /Codex CLI is unavailable/);
+  });
+
   it('rejects a reset with a wrong pairing token', async () => {
     const res = await fetch(`${base}/v1/sessions/reset`, {
       method: 'POST',

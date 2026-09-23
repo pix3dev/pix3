@@ -1961,7 +1961,7 @@ export class AgentToolRegistry {
       {
         name: 'generate_asset',
         description:
-          "Generate an image with the project's AI image provider (uses the user's saved image key), post-process it to be game-ready (background removal, trim to content, downscale), and save it into the project. For schematic, placeholder or UI graphics (icons, buttons, bars, arrows, flat props, blockout art) prefer providerId 'svg-llm': it draws with the agent's own LLM as SVG and bakes it locally, so you get the EXACT width×height you ask for, real transparency with no background-removal pass, and it costs a text completion instead of a metered image. Use a raster model (the default) for painterly, textured or photographic art. For sprites/icons set transparent:true and describe a SINGLE centered subject on a plain background, carrying the art style as prompt keywords (see the references warning before passing screenshots). Returns the saved path, original vs saved size, and a small preview you can see.",
+          "Generate an image with the configured AI image provider, post-process it to be game-ready (background removal, trim to content, downscale), and save it into the project. For schematic, placeholder or UI graphics (icons, buttons, bars, arrows, flat props, blockout art) prefer providerId 'svg-llm': it draws with the agent's own LLM as SVG and bakes it locally, so you get the EXACT width×height you ask for, real transparency with no background-removal pass, and it costs a text completion instead of a metered image. For painterly or textured raster art without an image API key, use providerId 'codex' when the paired bridge has a signed-in Codex CLI. For sprites/icons set transparent:true and describe a SINGLE centered subject on a plain background, carrying the art style as prompt keywords (see the references warning before passing screenshots). Returns the saved path, original vs saved size, and a small preview you can see.",
         inputSchema: {
           type: 'object',
           properties: {
@@ -1969,7 +1969,7 @@ export class AgentToolRegistry {
             providerId: {
               type: 'string',
               description:
-                "Override the configured image provider for this call. 'svg-llm' = vector art via the agent's LLM (exact size, real alpha, fast and cheap — best for placeholder/UI/schematic graphics). Omit to use the user's configured provider.",
+                "Override the configured image provider for this call. 'svg-llm' = vector art via the agent's LLM; 'codex' = raster art via signed-in Codex CLI and the paired local bridge, without an image API key. Omit to use the user's configured provider.",
             },
             width: {
               type: 'integer',
@@ -4339,7 +4339,7 @@ export class AgentToolRegistry {
       return {
         ok: false,
         error: providerId
-          ? `The "${providerId}" image provider is not ready. For "svg-llm", the user must configure an LLM in Settings → AI Agent; for the others, an image API key in Settings → AI Providers.`
+          ? `The "${providerId}" image provider is not ready. For "svg-llm", configure an LLM in Settings → Agent (LLM); for "codex", pair the local bridge and sign in with codex login; for API providers, configure an image key in Settings → AI Images.`
           : 'No image-generation API key is configured. Ask the user to set one (Sprite Editor panel or Settings → AI Providers).',
       };
     }
@@ -4379,6 +4379,7 @@ export class AgentToolRegistry {
       // Preview the ORIENTED handle (what was actually saved), not the raw generation.
       return {
         ok: true,
+        provider: status.providerLabel ?? status.providerId,
         saved,
         preset,
         original: { width: generated.width, height: generated.height },

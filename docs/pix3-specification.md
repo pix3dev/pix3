@@ -1215,6 +1215,38 @@ any other prefab.
   artifact, and a sliced skin is excluded from the pre-launch texture atlas because
   patch geometry needs the whole source rect.
 
+## 6.24 AI Image Generation through Codex
+
+**Product use.** In Generate, Sprite Editor, or Settings → AI Images, select **Codex (ChatGPT)**
+to generate raster art with the local Codex CLI sign-in. The agent's `generate_asset` tool can
+select the same lane with `providerId: "codex"`; generated images then use the normal Pix3
+post-processing and project-save flow. This lane does not require an image API key. Its output
+uses the account's Codex image-generation allowance, so a limit error asks the user to retry
+after the allowance resets or choose another provider.
+The Codex chat model picker offers GPT-6 Sol, Luna, and Astra alongside GPT-5.6 models.
+While `generate_asset` runs, its chat row names the image provider actually selected for that
+call (including SVG via the agent LLM); once it finishes, the row shows elapsed generation,
+post-processing, and save time.
+
+**Setup and data flow.** The user starts Pix3AgentBridge, signs in with `codex login`, and pairs
+the editor with the bridge token in Settings → Agent (LLM). Pix3 reports the Codex image provider
+ready only when the paired bridge discovers an available, signed-in Codex lane. A prompt, optional
+reference images, aspect ratio, and transparent-background request go from the browser to the
+loopback bridge; the bridge invokes Codex's native image-generation tool and returns encoded raster
+bytes. Pix3 holds the image in generation history or saves it into the open project. The bridge
+does not store the generated image in its config.
+
+**Developer contract.** `CodexImageProvider` implements the same `ImageGenProvider` contract as
+the other image lanes, so `AssetGenService`, the Generate panel, and Sprite Editor share the
+result handling. `BridgeConnectionService` supplies the loopback URL and pairing token. The
+bridge route `POST /agents/codex/v1/images` requires that token, accepts `prompt`, `transparent`,
+`aspectRatio`, and up to three `{ mimeType, data }` reference images, and returns `{ mimeType,
+data, revisedPrompt? }`. `generateCodexImage` runs one ephemeral app-server turn in a temporary
+workspace, reads its `imageGeneration` item, validates the raster signature, and discards the
+workspace after exit. Cancellation follows the browser request. Image-result limits, missing
+Codex auth, and unsupported output are surfaced as generation errors; no CLI filesystem path is
+trusted as an output asset.
+
 ## 7. Scene File Format (\*.pix3scene)
 
 The scene file uses the YAML format to ensure readability for both humans and machines (including AI agents).

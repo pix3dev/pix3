@@ -6,6 +6,7 @@ import { DialogService } from '@/services/editor/DialogService';
 import { IconService } from '@/services/editor/IconService';
 import { LightboxService } from '@/services/editor/LightboxService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { appState } from '@/state';
 
 const DOC_PATH = 'design/gdd.md';
 
@@ -157,6 +158,38 @@ afterEach(() => {
 });
 
 describe('pix3-idea-doc', () => {
+  it('clears the previous GDD before loading another project', async () => {
+    const element = await mount();
+    expect(element.textContent).toContain('Colony versus colony.');
+
+    const previousId = appState.project.id;
+    const previousStatus = appState.project.status;
+    let finishRead!: (value: string) => void;
+    const pendingRead = new Promise<string>(resolve => {
+      finishRead = resolve;
+    });
+    const readTextFile = storage().readTextFile.getMockImplementation();
+    storage().readTextFile.mockImplementation((path: string) =>
+      path === DOC_PATH ? pendingRead : readTextFile!(path)
+    );
+    appState.project.id = 'new-idea-doc-test';
+    appState.project.status = 'ready';
+    try {
+      await Promise.resolve();
+      await element.updateComplete;
+      expect(element.textContent).not.toContain('Colony versus colony.');
+
+      finishRead('# New project\n\nA different prototype.');
+      await settle(element);
+      expect(element.textContent).toContain('A different prototype.');
+      expect(element.textContent).not.toContain('Colony versus colony.');
+    } finally {
+      storage().readTextFile.mockImplementation(readTextFile!);
+      appState.project.id = previousId;
+      appState.project.status = previousStatus;
+    }
+  });
+
   it('renders the document in doc mode', async () => {
     storage().files.set(
       DOC_PATH,

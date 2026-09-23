@@ -1,5 +1,6 @@
 import type { PropertyValues } from 'lit';
-import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
+import { ComponentBase, customElement, html, inject, property, state, subscribe } from '@/fw';
+import { appState } from '@/state';
 import {
   AgentChatService,
   type AgentChatState,
@@ -126,6 +127,9 @@ export class Pix3IdeaDoc extends ComponentBase {
   private readonly blobUrls = new Map<string, string>();
 
   private disposeAgent?: () => void;
+  private disposeProject?: () => void;
+  private projectId: string | null = null;
+  private projectReady = false;
   /** Tool name seen on the previous agent-state tick, so a write is reacted to once. */
   private lastTool: string | null = null;
   /** Whether the previous tick was mid-turn, so the end of a turn triggers exactly one re-read. */
@@ -138,6 +142,9 @@ export class Pix3IdeaDoc extends ComponentBase {
     // The overlay lives on `document.body`, outside every panel that clips with `overflow: hidden`.
     ensureLightboxHost();
     this.disposeAgent = this.agentChat.subscribe(state => this.onAgentState(state));
+    this.projectId = appState.project.id ?? null;
+    this.projectReady = appState.project.status === 'ready';
+    this.disposeProject = subscribe(appState.project, () => this.onProjectChanged());
     // `selectionchange` is the only event that fires when a selection is *dropped* — pointerup
     // never reports the click that deselects.
     document.addEventListener('selectionchange', this.onSelectionChange);
@@ -148,6 +155,8 @@ export class Pix3IdeaDoc extends ComponentBase {
     super.disconnectedCallback();
     this.disposeAgent?.();
     this.disposeAgent = undefined;
+    this.disposeProject?.();
+    this.disposeProject = undefined;
     document.removeEventListener('selectionchange', this.onSelectionChange);
     // The chip stands for a selection in *this* view; leaving the view takes it back with us.
     this.retractSelection();
@@ -157,6 +166,23 @@ export class Pix3IdeaDoc extends ComponentBase {
     }
     this.blobUrls.clear();
     this.reloadToken++;
+  }
+
+  private onProjectChanged(): void {
+    const projectId = appState.project.id ?? null;
+    const ready = appState.project.status === 'ready';
+    if (projectId === this.projectId && ready === this.projectReady) return;
+    this.projectId = projectId;
+    this.projectReady = ready;
+    // This element can outlive a project. Clear its rendered source before the next project's
+    // asynchronous file read, and invalidate any read still returning from the previous project.
+    this.reloadToken++;
+    this.source = '';
+    this.missing = false;
+    this.decisions = [];
+    this.stagedRange = null;
+    this.syncImageBlobs('', this.reloadToken);
+    if (ready) void this.reload();
   }
 
   protected willUpdate(changed: PropertyValues): void {
@@ -196,19 +222,19 @@ export class Pix3IdeaDoc extends ComponentBase {
    * project with no `design/decisions.md` still has a document to show, and a document that failed
    * to read must not blank a decision list that is perfectly readable.
    */
-  private async reloadDecisions(): Promise<void> {
+  private async reloadDecisions(token: number): Promise<void> {
     try {
       const text = await this.storage.readTextFile(DECISIONS_PATH);
-      this.decisions = extractDecisionEntries(text);
+      if (token === this.reloadToken) this.decisions = extractDecisionEntries(text);
     } catch {
-      this.decisions = [];
+      if (token === this.reloadToken) this.decisions = [];
     }
   }
 
   /** Re-read the document from disk. Public so the shell can refresh it after a stage change. */
   async reload(): Promise<void> {
-    void this.reloadDecisions();
     const token = ++this.reloadToken;
+    void this.reloadDecisions(token);
     let text: string;
     try {
       text = await this.storage.readTextFile(this.docPath);

@@ -13,6 +13,7 @@ import {
   type ChatParams,
   type LlmMessage,
   type LlmResult,
+  type LlmToolResultBlock,
 } from '@/services/llm/LlmTypes';
 
 const textResult = (text: string): LlmResult => ({
@@ -304,6 +305,26 @@ describe('AgentChatService', () => {
     // The follow-up request must carry the full history.
     const secondCallMessages = (chat.mock.calls[1][0] as { messages: LlmMessage[] }).messages;
     expect(secondCallMessages).toHaveLength(3);
+  });
+
+  it('records the elapsed time of asset generation in its tool result', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('generate_asset', 'asset-1', { name: 'hero.png', prompt: 'hero' })
+      )
+      .mockResolvedValueOnce(textResult('done'));
+    const service = buildService({
+      chat,
+      execute: vi.fn(async () => ({ ok: true, provider: 'SVG (Agent LLM)' })),
+      put: vi.fn(async () => undefined),
+    });
+
+    await service.send('draw a hero');
+
+    const result = (service.getState().messages[2].content as LlmToolResultBlock[])[0];
+    expect(result.durationMs).toBeGreaterThanOrEqual(0);
+    expect(JSON.parse(result.content)).toMatchObject({ provider: 'SVG (Agent LLM)' });
   });
 
   /**

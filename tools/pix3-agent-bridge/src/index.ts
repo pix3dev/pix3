@@ -59,6 +59,7 @@ import { AgyLane } from './agy-lane.ts';
 import { AGY_AGENT_ID } from './agy.ts';
 import { CodexLane } from './codex-lane.ts';
 import { CODEX_AGENT_ID } from './codex.ts';
+import type { CodexImageRequest } from './codex-image.ts';
 import { installShim } from './mcp-shim.ts';
 
 const MAX_BODY_BYTES = 64 * 1024 * 1024;
@@ -431,6 +432,35 @@ const startServer = (config: BridgeConfig): void => {
         if (error instanceof HttpError) sendError(res, error.status === 499 ? 400 : error.status, error.message, origin);
         else if (error instanceof SyntaxError) sendError(res, 400, 'Request body is not valid JSON.', origin);
         else sendError(res, 500, error instanceof Error ? error.message : 'Codex bridge error.', origin);
+      }
+      return;
+    }
+
+    if (req.method === 'POST' && pathname === `/agents/${CODEX_AGENT_ID}/v1/images`) {
+      const abort = new AbortController();
+      res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+      try {
+        const body: unknown = JSON.parse((await readBody(req)).toString('utf8'));
+        if (!isRecord(body) || typeof body.prompt !== 'string' ||
+          (body.transparent !== undefined && typeof body.transparent !== 'boolean') ||
+          (body.aspectRatio !== undefined && typeof body.aspectRatio !== 'string') ||
+          (body.references !== undefined && (!Array.isArray(body.references) ||
+            !body.references.every(ref => isRecord(ref) && typeof ref.mimeType === 'string' &&
+              typeof ref.data === 'string')))) {
+          throw new HttpError(400, 'Invalid Codex image request.');
+        }
+        const request: CodexImageRequest = {
+          prompt: body.prompt,
+          ...(typeof body.transparent === 'boolean' ? { transparent: body.transparent } : {}),
+          ...(typeof body.aspectRatio === 'string' ? { aspectRatio: body.aspectRatio } : {}),
+          ...(Array.isArray(body.references) ? { references: body.references as CodexImageRequest['references'] } : {}),
+        };
+        sendJson(res, 200, await codex.generateImage(request, abort.signal), origin);
+      } catch (error) {
+        if (res.writableEnded || abort.signal.aborted) return;
+        if (error instanceof HttpError) sendError(res, error.status === 499 ? 400 : error.status, error.message, origin);
+        else if (error instanceof SyntaxError) sendError(res, 400, 'Request body is not valid JSON.', origin);
+        else sendError(res, 500, error instanceof Error ? error.message : 'Codex image generation failed.', origin);
       }
       return;
     }

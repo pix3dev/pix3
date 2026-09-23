@@ -15,7 +15,13 @@ export interface CodexStatus {
   readonly auth: 'ok' | 'missing' | 'unknown';
   readonly mcp: 'registered' | 'missing';
   readonly toolsEnabled: boolean;
-  readonly diagnostics: Array<{ reason: string; severity: 'error' | 'warning'; message: string; detail?: string }>;
+  readonly imageGenerationEnabled?: boolean;
+  readonly diagnostics: Array<{
+    reason: string;
+    severity: 'error' | 'warning';
+    message: string;
+    detail?: string;
+  }>;
 }
 
 /** npm's Windows launcher is a .cmd script; spawn the package's native executable directly. */
@@ -29,8 +35,10 @@ export const nativeCodexPath = (candidate: string): string => {
       path.join(root, 'node_modules', '@openai', 'codex', 'node_modules', '@openai', pkg),
       path.join(root, 'node_modules', '@openai', pkg),
     ]) {
-      for (const tail of [path.join('vendor', triple, 'bin', 'codex.exe'),
-        path.join('vendor', triple, 'codex', 'codex.exe')]) {
+      for (const tail of [
+        path.join('vendor', triple, 'bin', 'codex.exe'),
+        path.join('vendor', triple, 'codex', 'codex.exe'),
+      ]) {
         const executable = path.join(packageRoot, tail);
         if (fs.existsSync(executable)) return executable;
       }
@@ -41,49 +49,121 @@ export const nativeCodexPath = (candidate: string): string => {
 
 export const detectCodex = async (): Promise<CodexStatus> => {
   if (process.env.PIX3_CODEX_DISABLED === '1') {
-    return { available: false, auth: 'unknown', mcp: 'missing', toolsEnabled: false,
-      diagnostics: [{ reason: 'disabled', severity: 'warning', message: 'Codex lane disabled by PIX3_CODEX_DISABLED=1.' }] };
+    return {
+      available: false,
+      auth: 'unknown',
+      mcp: 'missing',
+      toolsEnabled: false,
+      diagnostics: [
+        {
+          reason: 'disabled',
+          severity: 'warning',
+          message: 'Codex lane disabled by PIX3_CODEX_DISABLED=1.',
+        },
+      ],
+    };
   }
   const found = resolveExecutable('codex', {
     override: process.env.PIX3_CODEX_BIN,
-    wellKnownDirs: [path.join(os.homedir(), '.local', 'bin'), '/usr/local/bin', '/opt/homebrew/bin'],
+    wellKnownDirs: [
+      path.join(os.homedir(), '.local', 'bin'),
+      '/usr/local/bin',
+      '/opt/homebrew/bin',
+    ],
   });
   if (!found) {
-    return { available: false, auth: 'unknown', mcp: 'missing', toolsEnabled: false,
-      diagnostics: [{ reason: 'not-installed', severity: 'error', message: 'Codex CLI was not found.',
-        detail: 'Install @openai/codex or set PIX3_CODEX_BIN to the executable path.' }] };
+    return {
+      available: false,
+      auth: 'unknown',
+      mcp: 'missing',
+      toolsEnabled: false,
+      diagnostics: [
+        {
+          reason: 'not-installed',
+          severity: 'error',
+          message: 'Codex CLI was not found.',
+          detail: 'Install @openai/codex or set PIX3_CODEX_BIN to the executable path.',
+        },
+      ],
+    };
   }
   const binary = nativeCodexPath(found);
   const probe = await probeExecutable(binary, ['--version'], { timeoutMs: 15_000 });
   if (!probe.ok) {
-    return { available: false, auth: 'unknown', mcp: 'missing', toolsEnabled: false,
-      diagnostics: [{ reason: 'version-probe-failed', severity: 'error', message: 'Codex CLI could not start.',
-        detail: (probe.stderr || probe.stdout).trim().slice(0, 400) }] };
+    return {
+      available: false,
+      auth: 'unknown',
+      mcp: 'missing',
+      toolsEnabled: false,
+      diagnostics: [
+        {
+          reason: 'version-probe-failed',
+          severity: 'error',
+          message: 'Codex CLI could not start.',
+          detail: (probe.stderr || probe.stdout).trim().slice(0, 400),
+        },
+      ],
+    };
   }
   const help = await probeExecutable(binary, ['exec', '--help'], { timeoutMs: 15_000 });
   if (!help.ok || !help.stdout.includes('--ignore-user-config')) {
-    return { available: false, path: binary, version: probe.stdout.trim(), auth: 'unknown',
-      mcp: 'missing', toolsEnabled: false, diagnostics: [{ reason: 'outdated-cli', severity: 'error',
-        message: 'Codex CLI is too old for the Pix3 bridge.',
-        detail: 'Update @openai/codex to the latest release and restart the bridge.' }] };
+    return {
+      available: false,
+      path: binary,
+      version: probe.stdout.trim(),
+      auth: 'unknown',
+      mcp: 'missing',
+      toolsEnabled: false,
+      diagnostics: [
+        {
+          reason: 'outdated-cli',
+          severity: 'error',
+          message: 'Codex CLI is too old for the Pix3 bridge.',
+          detail: 'Update @openai/codex to the latest release and restart the bridge.',
+        },
+      ],
+    };
   }
   const login = await probeExecutable(binary, ['login', 'status'], { timeoutMs: 15_000 });
-  const auth = login.ok ? 'ok' : /not logged|not signed|login required/i.test(login.stdout + login.stderr)
-    ? 'missing' : 'unknown';
+  const features = await probeExecutable(binary, ['features', 'list'], { timeoutMs: 15_000 });
+  const imageGenerationEnabled =
+    features.ok && /^image_generation\s+\S+\s+true\s*$/m.test(features.stdout);
+  const auth = login.ok
+    ? 'ok'
+    : /not logged|not signed|login required/i.test(login.stdout + login.stderr)
+      ? 'missing'
+      : 'unknown';
   // A Codex lane without editor tools cannot act on the browser-held project, so every available
   // Codex session gets the Pix3 MCP relay. CodexSession still disables Codex's built-in shell,
   // image, and web tools; the full-access flag is used only because unattended `codex exec`
   // otherwise rejects MCP calls that require approval.
-  return { available: true, path: binary, version: probe.stdout.trim().split(/\r?\n/)[0],
-    auth, mcp: 'registered', toolsEnabled: true,
+  return {
+    available: true,
+    path: binary,
+    version: probe.stdout.trim().split(/\r?\n/)[0],
+    auth,
+    mcp: 'registered',
+    toolsEnabled: true,
+    imageGenerationEnabled,
     diagnostics: [
-      ...(auth === 'missing' ? [{ reason: 'not-authenticated', severity: 'error' as const,
-        message: 'Codex CLI is not signed in.', detail: 'Run `codex login`.' }] : []),
-    ] };
+      ...(auth === 'missing'
+        ? [
+            {
+              reason: 'not-authenticated',
+              severity: 'error' as const,
+              message: 'Codex CLI is not signed in.',
+              detail: 'Run `codex login`.',
+            },
+          ]
+        : []),
+    ],
+  };
 };
 
 const model = (id: string, label: string, description: string, toolsEnabled: boolean) => ({
-  id, label, description,
+  id,
+  label,
+  description,
   capabilities: {
     supportsTools: toolsEnabled,
     supportsImages: false,
@@ -96,7 +176,20 @@ const model = (id: string, label: string, description: string, toolsEnabled: boo
 });
 
 export const codexModels = (toolsEnabled: boolean) => [
+  model('gpt-6-sol', 'GPT-6 Sol (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),
+  model('gpt-6-luna', 'GPT-6 Luna (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),
+  model('gpt-6-astra', 'GPT-6 Astra (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),
   model('gpt-5.6-sol', 'GPT-5.6 Sol (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),
-  model('gpt-5.6-terra', 'GPT-5.6 Terra (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),
-  model('gpt-5.6-luna', 'GPT-5.6 Luna (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),
+  model(
+    'gpt-5.6-terra',
+    'GPT-5.6 Terra (Codex)',
+    'Runs through your Codex CLI sign-in.',
+    toolsEnabled
+  ),
+  model(
+    'gpt-5.6-luna',
+    'GPT-5.6 Luna (Codex)',
+    'Runs through your Codex CLI sign-in.',
+    toolsEnabled
+  ),
 ];

@@ -85,6 +85,7 @@ export class Pix3ProjectHome extends ComponentBase {
   private refreshInFlight = false;
   private refreshQueued = false;
   private thumbsInFlight = false;
+  private thumbsQueued = false;
   private readonly handleActivate = () => void this.refresh();
   private readonly handleDocumentClick = (event: MouseEvent) => {
     if (!this.newSceneMenuOpen) return;
@@ -121,6 +122,8 @@ export class Pix3ProjectHome extends ComponentBase {
     if (projectId !== this.lastProjectId) {
       this.lastProjectId = projectId;
       this.thumbs = {};
+      this.data = null;
+      this.loading = true;
     }
     if (this.refreshInFlight) {
       this.refreshQueued = true;
@@ -129,12 +132,14 @@ export class Pix3ProjectHome extends ComponentBase {
     this.refreshInFlight = true;
     try {
       const next = await this.homeService.load();
-      this.data = next;
-      void this.loadThumbnails(next.scenes);
+      if (projectId === (appState.project.id ?? null)) {
+        this.data = next;
+        void this.loadThumbnails(next.scenes, projectId);
+      }
     } catch {
       // Keep the previous snapshot on failure; never blank the dashboard.
     } finally {
-      this.loading = false;
+      if (projectId === (appState.project.id ?? null)) this.loading = false;
       this.refreshInFlight = false;
       if (this.refreshQueued) {
         this.refreshQueued = false;
@@ -144,17 +149,27 @@ export class Pix3ProjectHome extends ComponentBase {
   }
 
   /** Lazily fill in scene thumbnails one at a time (cache-first, off the hot path). */
-  private async loadThumbnails(scenes: HomeSceneEntry[]): Promise<void> {
-    if (this.thumbsInFlight) return;
+  private async loadThumbnails(scenes: HomeSceneEntry[], projectId: string | null): Promise<void> {
+    if (this.thumbsInFlight) {
+      this.thumbsQueued = true;
+      return;
+    }
     this.thumbsInFlight = true;
     try {
       for (const scene of scenes) {
+        if (projectId !== (appState.project.id ?? null)) break;
         if (this.thumbs[scene.path]) continue;
         const url = await this.homeService.getSceneThumbnail(scene);
-        if (url) this.thumbs = { ...this.thumbs, [scene.path]: url };
+        if (url && projectId === (appState.project.id ?? null)) {
+          this.thumbs = { ...this.thumbs, [scene.path]: url };
+        }
       }
     } finally {
       this.thumbsInFlight = false;
+      if (this.thumbsQueued && this.data) {
+        this.thumbsQueued = false;
+        void this.loadThumbnails(this.data.scenes, appState.project.id ?? null);
+      }
     }
   }
 

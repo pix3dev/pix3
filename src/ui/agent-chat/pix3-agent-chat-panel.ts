@@ -18,6 +18,8 @@ import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService'
 import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
 import { FlowAutopilotService } from '@/services/flow/FlowAutopilotService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { AiImageSettingsService } from '@/services/image-gen/AiImageSettingsService';
+import { ImageGenProviderRegistry } from '@/services/image-gen/ImageGenProviderRegistry';
 import { LlmModelCatalogService } from '@/services/llm/LlmModelCatalogService';
 import {
   formatPricingHint,
@@ -877,6 +879,12 @@ const buildDiff = (call: LlmToolUseBlock): ToolDiff | null => {
  */
 @customElement('pix3-agent-chat-panel')
 export class AgentChatPanel extends ComponentBase {
+  @inject(AiImageSettingsService)
+  private readonly imageSettings!: AiImageSettingsService;
+
+  @inject(ImageGenProviderRegistry)
+  private readonly imageProviders!: ImageGenProviderRegistry;
+
   @inject(AgentChatService)
   private readonly chat!: AgentChatService;
 
@@ -1977,10 +1985,44 @@ export class AgentChatPanel extends ComponentBase {
     `;
   }
 
+  /** The effective image provider is visible while generating and retained in completed results. */
+  private assetProviderLabel(entry: ToolEntry): string | null {
+    if (entry.call.name !== 'generate_asset') return null;
+    if (entry.result) {
+      try {
+        const payload: unknown = JSON.parse(entry.result.content);
+        if (
+          payload &&
+          typeof payload === 'object' &&
+          'provider' in payload &&
+          typeof payload.provider === 'string'
+        )
+          return payload.provider;
+      } catch {
+        // Older or failed results may have no provider metadata.
+      }
+    }
+    const input = entry.call.input;
+    const requestedId =
+      input &&
+      typeof input === 'object' &&
+      'providerId' in input &&
+      typeof input.providerId === 'string'
+        ? input.providerId
+        : null;
+    const provider = requestedId
+      ? this.imageProviders.get(requestedId)
+      : entry.result
+        ? undefined
+        : this.imageSettings.getSelectedProvider();
+    return provider?.label ?? requestedId;
+  }
+
   private renderToolRow(entry: ToolEntry, running: boolean, firstPendingId: string | undefined) {
     const { call, result } = entry;
     const status = this.toolStatus(entry, running, firstPendingId);
     const descriptor = describeToolCall(call);
+    const assetProvider = this.assetProviderLabel(entry);
     const diff = buildDiff(call);
     const affordance = diff ? 'diff' : result ? 'output' : 'args';
 
@@ -1990,6 +2032,9 @@ export class AgentChatPanel extends ComponentBase {
           ${this.renderStatusBadge(status, 'row')}
           <span class="agent-row-argicon">${this.argIcon(call.name)}</span>
           <code class="agent-row-name">${call.name}</code>
+          ${assetProvider
+            ? html`<span class="agent-row-provider" title=${assetProvider}>${assetProvider}</span>`
+            : null}
           ${descriptor ? html`<span class="agent-row-arg">${descriptor}</span>` : null}
           <span class="agent-row-right">
             ${diff ? this.renderDiffStat(diff.plus, diff.minus) : null}
@@ -1997,7 +2042,11 @@ export class AgentChatPanel extends ComponentBase {
               ? html`<span class="agent-row-note is-running">running…</span>`
               : status === 'queued'
                 ? html`<span class="agent-row-note">queued</span>`
-                : null}
+                : call.name === 'generate_asset' && result?.durationMs !== undefined
+                  ? html`<span class="agent-row-note" title="Generation and asset processing time"
+                      >${formatElapsed(result.durationMs)}</span
+                    >`
+                  : null}
             <span class="agent-row-affordance"
               >${affordance}<span class="agent-row-affordance-caret"
                 >${this.icons.getIcon('chevron-right-caret', IconSize.SMALL)}</span

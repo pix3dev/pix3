@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 
 import { CodexSession, codexLaunchArgs } from './codex-session.ts';
+import { codexModels } from './codex.ts';
 import type { WireMessagesRequest } from './wire.ts';
 
 const request = {
@@ -12,6 +13,14 @@ const request = {
 } as WireMessagesRequest;
 
 describe('CodexSession editor tools', () => {
+  it('offers the GPT-6 Codex models', () => {
+    assert.deepEqual(
+      codexModels(true)
+        .slice(0, 3)
+        .map(model => model.id),
+      ['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra']
+    );
+  });
   it('always exposes the editor tool catalog', () => {
     const session = new CodexSession(request, () => {}, {
       binary: 'codex',

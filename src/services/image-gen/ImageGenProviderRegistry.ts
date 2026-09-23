@@ -4,6 +4,8 @@ import { OpenAIImageProvider } from './OpenAIImageProvider';
 import { StropheImageProvider } from './StropheImageProvider';
 import { SvgLlmImageProvider } from './SvgLlmImageProvider';
 import { SvgSpriteGenerator } from './SvgSpriteGenerator';
+import { CodexImageProvider } from './CodexImageProvider';
+import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
 import type { ImageGenProvider } from './ImageGenTypes';
 
 /**
@@ -23,6 +25,9 @@ export class ImageGenProviderRegistry {
   @inject(SvgSpriteGenerator)
   private readonly svgGenerator!: SvgSpriteGenerator;
 
+  @inject(BridgeConnectionService)
+  private readonly bridge!: BridgeConnectionService;
+
   private readonly providers = new Map<string, ImageGenProvider>();
   private readonly order: string[] = [];
 
@@ -30,6 +35,7 @@ export class ImageGenProviderRegistry {
     this.register(new GeminiImageProvider());
     this.register(new OpenAIImageProvider());
     this.register(new StropheImageProvider());
+    this.register(new CodexImageProvider(() => this.bridge));
     this.register(new SvgLlmImageProvider(() => this.svgGenerator));
   }
 

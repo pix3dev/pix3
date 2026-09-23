@@ -79,6 +79,7 @@ const asAgentStatus = (item: Record<string, unknown>): BridgeAgentStatus => {
     auth: item.auth === 'ok' || item.auth === 'missing' ? item.auth : 'unknown',
     mcp: item.mcp === 'registered' ? 'registered' : 'missing',
     tools: item.tools === 'enabled' ? 'enabled' : 'disabled',
+    ...(typeof item.imageGeneration === 'boolean' ? { imageGeneration: item.imageGeneration } : {}),
     ...(diagnostics.length > 0 ? { diagnostics } : {}),
   };
 };

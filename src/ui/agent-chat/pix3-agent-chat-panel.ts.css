@@ -851,6 +851,16 @@ pix3-agent-chat-panel .agent-row-name {
   color: var(--accent);
 }
 
+pix3-agent-chat-panel .agent-row-provider {
+  flex: 0 0 auto;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--fg-2);
+}
+
 pix3-agent-chat-panel .agent-row.is-error .agent-row-name {
   color: var(--reag-err);
 }

@@ -2119,6 +2119,7 @@ export class AgentChatService {
     call: LlmToolUseBlock
   ): Promise<{ result: LlmToolResultBlock; images: LlmImageBlock[] }> {
     const base = { type: 'tool-result' as const, toolUseId: call.id, toolName: call.name };
+    const startedAt = performance.now();
     try {
       const args = isRecord(call.input) ? call.input : {};
       const value = await this.toolRegistry.execute(call.name, args);
@@ -2146,10 +2147,25 @@ export class AgentChatService {
         payload = rest;
       }
 
-      return { result: { ...base, content: truncate(JSON.stringify(payload)) }, images };
+      return {
+        result: {
+          ...base,
+          content: truncate(JSON.stringify(payload)),
+          ...(call.name === 'generate_asset' ? { durationMs: performance.now() - startedAt } : {}),
+        },
+        images,
+      };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return { result: { ...base, content: truncate(message), isError: true }, images: [] };
+      return {
+        result: {
+          ...base,
+          content: truncate(message),
+          isError: true,
+          ...(call.name === 'generate_asset' ? { durationMs: performance.now() - startedAt } : {}),
+        },
+        images: [],
+      };
     }
   }
 

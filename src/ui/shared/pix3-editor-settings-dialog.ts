@@ -449,6 +449,7 @@ export class EditorSettingsDialog extends ComponentBase {
     // settings that have just been decided under it.
     this.disposeBridgeSubscription = this.bridge.subscribe(() => {
       this.bridgeAvailable = this.bridge.isAvailable();
+      void this.refreshAiKeyStatus();
       const prefs = this.agentSettings.getPreferences();
       this.advisorProviderId = prefs.advisorProviderId;
       this.advisorModelId = prefs.advisorModelId;
@@ -1782,21 +1783,23 @@ export class EditorSettingsDialog extends ComponentBase {
                 </option>`
             )}
           </select>
-          ${this.renderKeyToggle(
-            'image',
-            ownsKey ? this.aiKeyConfigured : false,
-            `${provider?.label ?? 'Provider'} API key`
-          )}
+          ${ownsKey
+            ? this.renderKeyToggle(
+                'image',
+                this.aiKeyConfigured,
+                `${provider?.label ?? 'Provider'} API key`
+              )
+            : null}
         </div>
-        ${this.renderKeyPanel(
-          'image',
-          ownsKey
-            ? this.renderImageKeyBody(helpUrl)
-            : html`<div class="field-note">
-                This provider has no key of its own — it draws with the model the Agent chat is set
-                to. Configure that in the Agent (LLM) tab.
-              </div>`
-        )}
+        ${ownsKey
+          ? this.renderKeyPanel('image', this.renderImageKeyBody(helpUrl))
+          : html`<div class="field-note">
+              ${provider?.id === 'codex'
+                ? this.aiKeyConfigured
+                  ? 'Codex CLI is signed in and the local bridge is paired. Image generation uses your Codex account allowance.'
+                  : 'Pair the local bridge in Agent (LLM) settings and sign in with codex login to generate images.'
+                : 'This provider draws with the model selected in Agent (LLM) settings; it needs no separate image key.'}
+            </div>`}
       </div>
 
       <div class="settings-field">
@@ -2170,12 +2173,16 @@ export class EditorSettingsDialog extends ComponentBase {
   }
 
   private async refreshAiKeyStatus(): Promise<void> {
-    if (!this.aiProviderId) {
+    const provider = this.imageProviders.get(this.aiProviderId);
+    if (!provider) {
       this.aiKeyConfigured = false;
       return;
     }
     try {
-      this.aiKeyConfigured = await this.aiImageSettings.hasApiKey(this.aiProviderId);
+      this.aiKeyConfigured =
+        provider.requiresApiKey === false
+          ? ((await provider.isAvailable?.()) ?? true)
+          : await this.aiImageSettings.hasApiKey(this.aiProviderId);
     } catch {
       this.aiKeyConfigured = false;
     }

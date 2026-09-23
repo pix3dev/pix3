@@ -5,6 +5,7 @@ import path from 'node:path';
 import { conversationKey, ConversationStore } from './agy-conversations.ts';
 import { CODEX_AGENT_ID, CODEX_LABEL, codexModels, detectCodex, type CodexStatus } from './codex.ts';
 import { CodexSession } from './codex-session.ts';
+import { generateCodexImage, type CodexImageRequest, type CodexImageResult } from './codex-image.ts';
 import { SessionManager, type BridgeResponse, type ManagedSession } from './sessions.ts';
 import type { BridgeConfig } from './config.ts';
 import type { Logger } from './util.ts';
@@ -55,6 +56,7 @@ export class CodexLane {
       id: CODEX_AGENT_ID, label: CODEX_LABEL, kind: 'agent-cli' as const,
       available: status.available, auth: status.auth, mcp: status.mcp,
       tools: status.toolsEnabled ? 'enabled' as const : 'disabled' as const,
+      imageGeneration: status.imageGenerationEnabled === true,
       ...(status.version ? { version: status.version } : {}),
       ...(status.path ? { path: status.path } : {}),
       ...(status.diagnostics.length ? { diagnostics: status.diagnostics } : {}),
@@ -76,6 +78,15 @@ export class CodexLane {
       throw new HttpError(400, `Unknown Codex model "${request.model}".`);
     }
     return this.manager.handle(request, signal);
+  }
+
+  async generateImage(request: CodexImageRequest, signal: AbortSignal): Promise<CodexImageResult> {
+    const status = await this.getStatus();
+    if (!status.available || !status.path) throw new HttpError(503, 'Codex CLI is unavailable.');
+    if (status.auth !== 'ok') throw new HttpError(401, 'Codex CLI is not signed in. Run `codex login`.');
+    if (!status.imageGenerationEnabled) throw new HttpError(503,
+      'This Codex CLI does not provide native image generation. Update Codex CLI and restart the bridge.');
+    return generateCodexImage(status.path, request, signal);
   }
 
   async handleMcp(sessionId: string, method: string, params: Record<string, unknown>): Promise<unknown> {
