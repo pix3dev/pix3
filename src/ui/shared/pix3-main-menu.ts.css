@@ -30,14 +30,14 @@ pix3-main-menu {
   align-items: center;
   justify-content: center;
   flex: none;
-  height: 32px;
-  padding: 0 12px;
+  height: 28px;
+  padding: 0 9px;
   background: none;
   border: none;
   color: inherit;
   cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 400;
   border-radius: var(--radius-1);
   user-select: none;
   transition: background-color 0.12s ease;
@@ -68,7 +68,7 @@ pix3-main-menu {
   align-items: center;
   flex: none;
   padding: 2px 4px;
-  margin-right: 12px;
+  margin-right: 8px;
   border: none;
   background: transparent;
   border-radius: var(--radius-1);
@@ -90,7 +90,7 @@ pix3-main-menu {
 }
 
 .menu-logo {
-  height: 32px;
+  height: 28px;
   width: auto;
   object-fit: contain;
   display: block;
@@ -128,11 +128,11 @@ pix3-main-menu {
   align-items: center;
   width: 100%;
   min-height: 26px;
-  padding: 6px 12px;
+  padding: 4px 10px;
   background: none;
   border: none;
   color: var(--fg-1);
-  font-size: 13px;
+  font-size: 12px;
   text-align: left;
   cursor: pointer;
   user-select: none;

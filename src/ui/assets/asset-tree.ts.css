@@ -30,7 +30,7 @@ asset-tree {
   display: flex;
   align-items: center;
   gap: 0.35rem;
-  min-height: 26px;
+  min-height: 24px;
   padding: 0 0.18rem;
   border-left: 2px solid transparent;
   cursor: pointer;

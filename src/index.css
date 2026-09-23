@@ -59,8 +59,8 @@
   --font-mono: 'Cascadia Code', 'Roboto Mono', 'Consolas', ui-monospace, monospace;
 
   /* Density */
-  --row-h: 26px;
-  --pad-x: 10px;
+  --row-h: 24px;
+  --pad-x: 8px;
   --radius-1: 4px;
   --radius-2: 6px;
   --radius-3: 10px;
@@ -76,8 +76,8 @@
   --pix3-accent-rgb: 245, 174, 57; /* sRGB of oklch(0.8 0.15 75) */
 
   font-family: var(--font-ui);
-  font-size: 13px;
-  line-height: 1.4;
+  font-size: 12.5px;
+  line-height: 1.35;
   letter-spacing: -0.005em;
   color-scheme: dark;
   color: var(--fg-0);
@@ -240,7 +240,7 @@ body > pix3-editor {
 .lm_header {
   background: var(--bg-1);
   border-bottom: 1px solid var(--line-1);
-  min-height: 34px;
+  min-height: 30px;
   user-select: none;
 }
 
@@ -253,23 +253,23 @@ body > pix3-editor {
   display: inline-flex;
   align-items: center;
   height: 100%;
-  min-height: 33px;
+  min-height: 29px;
   margin: 0;
   /* reserve room on the right so the close button never overlaps the title */
-  padding: 0 26px 0 10px;
+  padding: 0 23px 0 8px;
   background: transparent;
   border: none;
   box-shadow: none;
   color: var(--fg-2);
   font-family: var(--font-ui);
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 400;
   letter-spacing: 0;
 }
 
 /* Tabs with no close button (fixed panels) don't need the reserved gutter. */
 .lm_header .lm_tab:not(:has(.lm_close_tab)) {
-  padding-right: 10px;
+  padding-right: 8px;
 }
 
 .lm_header .lm_tab span {
@@ -312,7 +312,8 @@ body > pix3-editor {
   border: none;
   box-shadow: none;
   color: var(--fg-0);
-  font-weight: 600;
+  font-weight: 500;
+  padding-bottom: 0;
 }
 
 .lm_header .lm_tab.lm_active:hover {
@@ -342,16 +343,16 @@ body > pix3-editor {
 /* Document tabs (§4.2) — the stack hosting scene/code editors gets card-style tabs:
    active = small card on the viewport background, inactive = plain quiet text. */
 .lm_stack:has(pix3-editor-tab, pix3-code-tab, pix3-game-tab) .lm_header .lm_tab {
-  font-size: 12.5px;
-  font-weight: 500;
+  font-size: 12px;
+  font-weight: 400;
   letter-spacing: 0;
   text-transform: none;
 }
 
 .lm_stack:has(pix3-editor-tab, pix3-code-tab, pix3-game-tab) .lm_header .lm_tab.lm_active {
-  height: 26px;
-  min-height: 26px;
-  margin: 4px 4px 0 4px;
+  height: 24px;
+  min-height: 24px;
+  margin: 3px 3px 0 3px;
   padding: 0 24px 0 8px;
   background: var(--bg-0);
   border: 1px solid var(--line-1);

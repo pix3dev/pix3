@@ -5,16 +5,16 @@ pix3-toolbar-button {
   border-radius: var(--radius-2);
   background: transparent;
   color: var(--fg-1);
-  font-size: 13px;
-  font-weight: 500;
-  letter-spacing: 0.01em;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0;
   text-transform: none;
   line-height: 1;
   cursor: pointer;
   user-select: none;
-  padding: 0 12px;
-  min-width: 32px;
-  height: 32px;
+  padding: 0 9px;
+  min-width: 28px;
+  height: 28px;
   transition:
     background 120ms ease,
     color 120ms ease;
@@ -52,8 +52,8 @@ pix3-toolbar-button[disabled] {
 }
 
 pix3-toolbar-button[icon-only] {
-  width: 32px;
-  min-width: 32px;
+  width: 28px;
+  min-width: 28px;
   padding: 0;
 }
 

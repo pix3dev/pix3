@@ -3,12 +3,13 @@
 }
 
 .toolbar {
+  box-sizing: border-box;
   display: flex;
   align-items: center;
   inline-size: 100%;
-  min-height: 48px;
-  padding: 0 14px;
-  gap: 8px;
+  min-height: 38px;
+  padding: 0 10px;
+  gap: 6px;
   background: var(--bg-1);
   color: var(--fg-1);
   border-bottom: 1px solid var(--line-1);
@@ -16,14 +17,14 @@
 }
 
 :host([dense]) .toolbar {
-  min-height: 34px;
+  min-height: 30px;
 }
 
 /* Panel variant — sits inside a panel header slot; the slot owns the border. */
 :host([variant='panel']) .toolbar {
   align-items: center;
-  min-height: 34px;
-  padding: 2px 6px;
+  min-height: 30px;
+  padding: 2px 5px;
   background: transparent;
   border-bottom: none;
 }
@@ -35,7 +36,7 @@
 .toolbar__section {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .toolbar__section--start {

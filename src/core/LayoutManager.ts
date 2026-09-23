@@ -179,7 +179,7 @@ const DEFAULT_LAYOUT_CONFIG: LayoutConfig = {
   dimensions: {
     minItemHeight: 120,
     minItemWidth: 200,
-    headerHeight: 34,
+    headerHeight: 30,
   },
   root: {
     type: 'row',
