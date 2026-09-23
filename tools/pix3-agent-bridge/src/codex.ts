@@ -70,13 +70,13 @@ export const detectCodex = async (): Promise<CodexStatus> => {
   const login = await probeExecutable(binary, ['login', 'status'], { timeoutMs: 15_000 });
   const auth = login.ok ? 'ok' : /not logged|not signed|login required/i.test(login.stdout + login.stderr)
     ? 'missing' : 'unknown';
-  const toolsEnabled = process.env.PIX3_CODEX_ALLOW_TOOLS === '1';
+  // A Codex lane without editor tools cannot act on the browser-held project, so every available
+  // Codex session gets the Pix3 MCP relay. CodexSession still disables Codex's built-in shell,
+  // image, and web tools; the full-access flag is used only because unattended `codex exec`
+  // otherwise rejects MCP calls that require approval.
   return { available: true, path: binary, version: probe.stdout.trim().split(/\r?\n/)[0],
-    auth, mcp: toolsEnabled ? 'registered' : 'missing', toolsEnabled,
+    auth, mcp: 'registered', toolsEnabled: true,
     diagnostics: [
-      ...(!toolsEnabled ? [{ reason: 'tools-disabled', severity: 'warning' as const,
-        message: 'Codex editor tools are disabled.',
-        detail: 'Set PIX3_CODEX_ALLOW_TOOLS=1 and restart the bridge to enable them. This uses Codex full-access mode.' }] : []),
       ...(auth === 'missing' ? [{ reason: 'not-authenticated', severity: 'error' as const,
         message: 'Codex CLI is not signed in.', detail: 'Run `codex login`.' }] : []),
     ] };

@@ -19,7 +19,6 @@ const WEDGE_MIN_TURN_MS = 120_000;
 
 export interface CodexSessionOptions {
   readonly binary: string;
-  readonly allowTools: boolean;
   readonly mcpUrl: string;
   readonly mcpToken: string;
   readonly conversationId?: string;
@@ -35,6 +34,38 @@ const messageText = (request: WireMessagesRequest, index: number): string => {
 
 /** TOML string literal for a `codex -c key=value` override. */
 const tomlString = (value: string): string => JSON.stringify(value);
+
+export interface CodexLaunchArgsOptions {
+  readonly conversationId: string | null;
+  readonly model: string;
+  readonly effort?: WireEffort;
+  readonly toolNames: readonly string[];
+}
+
+/** Build the fixed, tool-enabled Codex invocation used for every editor session. */
+export const codexLaunchArgs = (options: CodexLaunchArgsOptions): string[] => {
+  const config = [
+    '-c', 'approval_policy="on-request"',
+    '-c', 'sandbox_mode="read-only"',
+    '-c', 'features.shell_tool=false',
+    '-c', 'tools.view_image=false',
+    '-c', 'tools.web_search=false',
+    '-c', `mcp_servers.pix3.command=${tomlString(process.execPath)}`,
+    '-c', `mcp_servers.pix3.args=[${tomlString(agyShimPath())}]`,
+    '-c', 'mcp_servers.pix3.env_vars=["PIX3_BRIDGE_SESSION","PIX3_BRIDGE_MCP_URL","PIX3_BRIDGE_MCP_TOKEN"]',
+    '-c', 'mcp_servers.pix3.required=true',
+    '-c', 'mcp_servers.pix3.default_tools_approval_mode="auto"',
+    ...options.toolNames.flatMap(name => [
+      '-c', `mcp_servers.pix3.tools.${tomlString(name)}.approval_mode="auto"`,
+    ]),
+    '-c', 'mcp_servers.pix3.tool_timeout_sec=1200',
+  ];
+  return ['exec', ...(options.conversationId ? ['resume', options.conversationId] : []),
+    '--json', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
+    '--dangerously-bypass-approvals-and-sandbox', ...config,
+    '-m', options.model,
+    ...(options.effort ? ['-c', `model_reasoning_effort=${tomlString(options.effort)}`] : []), '-'];
+};
 
 export class CodexSession implements ManagedSession {
   readonly id = randomUUID().slice(0, 8);
@@ -78,7 +109,7 @@ export class CodexSession implements ManagedSession {
     this.conversationId = options.conversationId ?? null;
     this.resumes = !!options.conversationId;
     this.workspace = path.join(os.homedir(), '.pix3', 'codex-workspaces', this.id);
-    this.relay.setTools(options.allowTools ? request.tools : []);
+    this.relay.setTools(request.tools);
     this.relay.setParkListener(() => this.onToolParked());
   }
 
@@ -87,7 +118,7 @@ export class CodexSession implements ManagedSession {
   get wedged(): boolean { return this.wedgedSince !== null; }
   hasPendingToolUse(id: string): boolean { return this.relay.hasPendingToolUse(id); }
   toolsMatch(tools: readonly WireToolDefinition[] | undefined): boolean {
-    return !this.options.allowTools || this.relay.toolsMatch(tools);
+    return this.relay.toolsMatch(tools);
   }
   effortMatches(request: WireMessagesRequest): boolean { return effortOf(request) === this.effort; }
   matchesChat(request: WireMessagesRequest): boolean {
@@ -144,9 +175,7 @@ export class CodexSession implements ManagedSession {
     let preamble = '';
     if (!this.conversationId) {
       preamble = 'You are the assistant inside the Pix3 editor. The project is held in the browser, ' +
-        'not in this scratch directory. ' + (this.options.allowTools
-          ? 'Use only the pix3 MCP tools for editor work. '
-          : 'You have no editor tools in this conversation. ') +
+        'not in this scratch directory. Use only the pix3 MCP tools for editor work. ' +
         'Do not use shell, file editing, or other local tools. The following are operating instructions for ' +
         `this Pix3 chat:\n<operating-instructions>\n${system}\n</operating-instructions>\n\n`;
     } else if (system !== this.lastSystem) {
@@ -163,29 +192,12 @@ export class CodexSession implements ManagedSession {
     this.textBlocks = [];
     this.promptTokens = 0;
     this.outputTokens = 0;
-    const config = [
-      '-c', 'approval_policy="on-request"',
-      '-c', 'sandbox_mode="read-only"',
-      '-c', 'features.shell_tool=false',
-      '-c', 'tools.view_image=false',
-      '-c', 'tools.web_search=false',
-      ...(this.options.allowTools ? [
-      '-c', `mcp_servers.pix3.command=${tomlString(process.execPath)}`,
-      '-c', `mcp_servers.pix3.args=[${tomlString(agyShimPath())}]`,
-      '-c', 'mcp_servers.pix3.env_vars=["PIX3_BRIDGE_SESSION","PIX3_BRIDGE_MCP_URL","PIX3_BRIDGE_MCP_TOKEN"]',
-      '-c', 'mcp_servers.pix3.required=true',
-      '-c', 'mcp_servers.pix3.default_tools_approval_mode="auto"',
-      ...this.relay.getToolNames().flatMap(name => [
-        '-c', `mcp_servers.pix3.tools.${tomlString(name)}.approval_mode="auto"`,
-      ]),
-      '-c', 'mcp_servers.pix3.tool_timeout_sec=1200',
-      ] : []),
-    ];
-    const args = ['exec', ...(this.conversationId ? ['resume', this.conversationId] : []),
-      '--json', '--ignore-user-config', '--ignore-rules', '--skip-git-repo-check',
-      ...(this.options.allowTools ? ['--dangerously-bypass-approvals-and-sandbox'] : []), ...config,
-      '-m', this.model,
-      ...(this.effort ? ['-c', `model_reasoning_effort=${tomlString(this.effort)}`] : []), '-'];
+    const args = codexLaunchArgs({
+      conversationId: this.conversationId,
+      model: this.model,
+      effort: this.effort,
+      toolNames: this.relay.getToolNames(),
+    });
     const env = agentLaunchEnv(this.options.binary, {
       PIX3_BRIDGE_SESSION: this.id,
       PIX3_BRIDGE_MCP_URL: this.options.mcpUrl,

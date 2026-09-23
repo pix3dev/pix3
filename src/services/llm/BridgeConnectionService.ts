@@ -2,6 +2,7 @@ import { inject, injectable } from '@/fw/di';
 import { SecretStorageService } from '@/services/core/SecretStorageService';
 import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
 import { LlmProviderRegistry } from './LlmProviderRegistry';
+import { LlmModelCatalogService } from './LlmModelCatalogService';
 import {
   BRIDGE_TOKEN_SECRET_ID,
   DEFAULT_BRIDGE_URL,
@@ -147,6 +148,9 @@ export class BridgeConnectionService {
 
   @inject(AgentSettingsService)
   private readonly settings!: AgentSettingsService;
+
+  @inject(LlmModelCatalogService)
+  private readonly modelCatalog!: LlmModelCatalogService;
 
   @inject(SecretStorageService)
   private readonly secrets!: SecretStorageService;
@@ -331,10 +335,22 @@ export class BridgeConnectionService {
   }
 
   private apply(available: boolean, entries: BridgeProviderEntry[]): void {
+    const previousById = new Map(this.entries.map(entry => [entry.id, entry]));
+    const changedCliAgents = entries
+      .filter(entry => {
+        if (entry.kind !== 'agent-cli') return false;
+        const previous = previousById.get(entry.id);
+        return JSON.stringify(previous?.status ?? null) !== JSON.stringify(entry.status ?? null);
+      })
+      .map(entry => entry.id);
     this.available = available;
     this.entries = entries;
     const bridgeUrl = this.getBridgeUrl();
     this.registry.setBridgeProviders(entries.map(entry => createBridgeProvider(entry, bridgeUrl)));
+    // A cached live model list includes capabilities. When a CLI lane changes from tools-disabled
+    // to tools-enabled, keeping that cache would make AgentChatService strip every tool even though
+    // discovery and the rebuilt provider both say the lane can use them.
+    this.modelCatalog.invalidate(changedCliAgents);
     // The bridge is the only provider set that nominates a model per role (advisor / vision helper),
     // and it only exists once a probe succeeds — so this is where those defaults can first be filled
     // in. Deliberate picks are pinned and left alone.

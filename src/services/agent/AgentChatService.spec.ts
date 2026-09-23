@@ -40,6 +40,8 @@ interface Fakes {
   ) => Promise<Array<{ name: string; kind: 'file' | 'directory'; path: string }>>;
   /** When set, the model catalog reports this vision capability for the active model. */
   supportsImages?: boolean;
+  /** When set, the model catalog reports this tool capability for the active model. */
+  supportsTools?: boolean;
   /** When set, the model catalog reports this context window (drives the context watermarks). */
   contextWindow?: number;
   /** When true, the advisor service resolves (the ask_advisor rule joins the system prompt). */
@@ -54,6 +56,8 @@ interface Fakes {
   customSoulPrompt?: string;
   /** Fake for `BridgeConnectionService.resetSessions()`. Defaults to a no-op success. */
   resetSessions?: ReturnType<typeof vi.fn>;
+  /** Fake for the per-turn bridge capability refresh. */
+  probeBridge?: ReturnType<typeof vi.fn>;
   /** Fake for `AgentToolRegistry.recordDecision()` — the auto-filed `ask_user` answer. */
   recordDecision?: ReturnType<typeof vi.fn>;
   /** Fake for `AgentToolRegistry.specs()`; defaults to "this agent has no tools". */
@@ -95,13 +99,18 @@ const buildService = (fakes: Fakes): AgentChatService => {
     },
     modelCatalog: {
       getModel: () =>
-        fakes.supportsImages === undefined && fakes.contextWindow === undefined
+        fakes.supportsImages === undefined &&
+        fakes.supportsTools === undefined &&
+        fakes.contextWindow === undefined
           ? undefined
           : {
               capabilities: {
                 ...(fakes.supportsImages === undefined
                   ? {}
                   : { supportsImages: fakes.supportsImages }),
+                ...(fakes.supportsTools === undefined
+                  ? {}
+                  : { supportsTools: fakes.supportsTools }),
                 ...(fakes.contextWindow === undefined
                   ? {}
                   : { contextWindow: fakes.contextWindow }),
@@ -128,6 +137,7 @@ const buildService = (fakes: Fakes): AgentChatService => {
     },
     sceneManager: { getActiveSceneGraph: () => null },
     bridgeConnection: {
+      probe: fakes.probeBridge ?? vi.fn(async () => undefined),
       resetSessions: fakes.resetSessions ?? vi.fn(async () => true),
     },
     storage: {
@@ -220,6 +230,37 @@ describe('AgentChatService', () => {
     await service.send('hi');
 
     expect(service.getState().turnMetrics[1]?.origin?.viaBridge).toBe(true);
+  });
+
+  it('refreshes bridge capabilities before building a bridge-backed tool request', async () => {
+    const order: string[] = [];
+    const probeBridge = vi.fn(async () => {
+      order.push('probe');
+    });
+    const toolSpecs = vi.fn(() => {
+      order.push('tools');
+      return [{ name: 'fs_read', description: 'Read a file', inputSchema: { type: 'object' } }];
+    });
+    const chat = vi.fn(async (params: ChatParams) => {
+      order.push('chat');
+      expect(params.tools?.map(tool => tool.name)).toEqual(['fs_read']);
+      return textResult('read it');
+    });
+    const service = buildService({
+      chat,
+      execute: vi.fn(),
+      put: vi.fn(async () => undefined),
+      apiKeySecretId: 'ai-provider:pix3-bridge:token',
+      supportsTools: true,
+      probeBridge,
+      toolSpecs,
+    });
+
+    await service.send('read the design');
+
+    expect(probeBridge).toHaveBeenCalledOnce();
+    expect(order.indexOf('probe')).toBeLessThan(order.indexOf('tools'));
+    expect(order.indexOf('tools')).toBeLessThan(order.indexOf('chat'));
   });
 
   it('persists turn metrics so a reopened conversation keeps its attribution', async () => {

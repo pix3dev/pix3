@@ -105,7 +105,6 @@ export class CodexLane {
       ? remembered.conversationId : undefined;
     const session = new CodexSession(request, log, {
       binary,
-      allowTools: this.status?.toolsEnabled === true,
       mcpUrl: `http://127.0.0.1:${this.config.port}/agents/${CODEX_AGENT_ID}/mcp`,
       mcpToken: this.config.mcpToken,
       ...(conversationId ? { conversationId } : {}),

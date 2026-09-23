@@ -1150,9 +1150,17 @@ export class AgentChatService {
   // ── Agentic loop ────────────────────────────────────────────────────────────
 
   private async runLoop(signal: AbortSignal): Promise<void> {
-    const provider = this.settings.getSelectedProvider();
+    let provider = this.settings.getSelectedProvider();
     if (!provider) {
       throw new LlmError('unknown', 'No LLM provider available.');
+    }
+    // A bridge may be restarted with different CLI capabilities while this editor tab stays open.
+    // Refresh discovery before consulting the model catalog; BridgeConnectionService invalidates
+    // any cached CLI catalog whose tools status changed. Without this, a former text-only Codex
+    // entry can keep sending zero tools for the catalog's full 12-hour TTL.
+    if (provider.apiKeySecretId === BRIDGE_TOKEN_SECRET_ID) {
+      await this.bridgeConnection.probe().catch(() => undefined);
+      provider = this.settings.getSelectedProvider() ?? provider;
     }
     const modelId = this.settings.getSelectedModelId(provider.id) ?? '';
     const apiKey = (await this.settings.getApiKey(provider.id)) ?? '';

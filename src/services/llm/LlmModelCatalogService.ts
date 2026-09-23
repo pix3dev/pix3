@@ -69,6 +69,26 @@ export class LlmModelCatalogService {
   }
 
   /**
+   * Drop persisted live catalogs whose provider-side capabilities changed.
+   *
+   * Bridge CLI lanes can change from text-only to tool-capable while the editor stays open. Their
+   * discovery status is newer than a 12-hour model cache, so the next synchronous read must fall
+   * back to the provider's freshly rebuilt static catalog instead of serving stale capabilities.
+   */
+  invalidate(providerIds: readonly string[]): void {
+    const cache = this.ensureLoaded();
+    let changed = false;
+    for (const providerId of providerIds) {
+      if (!(providerId in cache)) continue;
+      delete cache[providerId];
+      changed = true;
+    }
+    if (!changed) return;
+    this.persist();
+    this.notify();
+  }
+
+  /**
    * Fetch the provider's live catalog now (concurrent calls share one request). Rejects with the
    * provider's `LlmError` on failure — the cached/static list stays in place.
    */

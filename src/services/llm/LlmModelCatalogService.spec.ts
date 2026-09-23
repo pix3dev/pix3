@@ -118,4 +118,17 @@ describe('LlmModelCatalogService', () => {
     await Promise.all([service.refresh('fake'), service.refresh('fake')]);
     expect(listModels).toHaveBeenCalledTimes(1);
   });
+
+  it('invalidates a fresh live catalog so changed provider capabilities win immediately', async () => {
+    const listModels = vi.fn(async () => [model('live-1')]);
+    const { service } = buildService({ listModels });
+    await service.refresh('fake');
+    expect(service.getModels('fake').map(m => m.id)).toEqual(['live-1']);
+
+    service.invalidate(['fake']);
+
+    // The synchronous fallback is the provider's rebuilt static model; a live refresh may follow.
+    expect(service.getModels('fake').map(m => m.id)).toEqual(['s1']);
+    expect(service.getFetchedAt('fake')).toBeUndefined();
+  });
 });

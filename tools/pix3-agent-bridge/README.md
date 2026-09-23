@@ -118,13 +118,11 @@ for unrelated Codex work does not silently change the Pix3 model picker. Set `PI
 explicit executable path if discovery misses your installation. Set `PIX3_CODEX_DISABLED=1` to skip
 the lane. The bridge reports an outdated CLI in discovery with an upgrade instruction.
 
-Editor tools are **off by default**. `codex exec` denies MCP calls that need approval in unattended
-mode. To let Codex use Pix3 editor tools, start the bridge with `PIX3_CODEX_ALLOW_TOOLS=1`. This uses
-Codex's `--dangerously-bypass-approvals-and-sandbox` flag, so Codex runs with full local access for
-those turns. The bridge disables its shell, image, and web tools and tells it to use Pix3 MCP tools,
-but the flag still removes Codex's sandbox; enable it only when that access is acceptable. Without
-the opt-in the lane answers text requests, including the editor's advisor role, and advertises
-`supportsTools: false`.
+Editor tools are always enabled for the Codex lane: a Pix3 agent without them cannot inspect or
+change the browser-held project. `codex exec` denies MCP calls that need approval in unattended
+mode, so the bridge uses Codex's `--dangerously-bypass-approvals-and-sandbox` flag. The bridge
+disables Codex's shell, image, and web tools and tells it to use only Pix3 MCP tools, but the flag
+still removes Codex's process sandbox; run the bridge only when that local access is acceptable.
 
 The Pix3 MCP shim is configured only for each Codex subprocess. It receives the relay URL, session
 id and separate MCP token through environment variables. No permanent change to your Codex MCP
@@ -169,7 +167,8 @@ changes (a base-URL/kind change to a provider you're actively using is picked up
   you ask for it: `agy setup --allow-tools` lets `agy` use its own shell/file/browser tools too,
   because that is the only way it will answer an MCP call at all. It runs in a throwaway working
   directory and is told the project is not on this disk, but the capability is real — that is why it
-  is off by default. The Codex lane has a similar full-access tool opt-in, described above.
+  is off by default. The Codex lane also uses full-access mode, but always enables its Pix3 MCP relay;
+  its built-in shell, image, and web tools remain disabled, as described above.
 - The MCP relay has its own token (`mcpToken`), so the shim file on disk cannot spend provider keys
   or the MAX subscription even if it is read by another local process.
 
