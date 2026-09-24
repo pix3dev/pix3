@@ -515,6 +515,29 @@ describe('runGameTestLoop — time-mode discipline', () => {
     expect(result.time?.leftPaused).toBe(false);
   });
 
+  it('releases the manual clock when a supervising caller cancels the probe', async () => {
+    const runner = makeRunner();
+    const controller = new AbortController();
+    const deps = makeDeps(runner, {
+      signal: controller.signal,
+      beforeFrame: frame => {
+        if (frame === 4) controller.abort();
+      },
+    });
+
+    await expect(
+      runGameTestLoop(
+        deps,
+        makeSpec({
+          until: [{ kind: 'frames', n: 100 }],
+          pauseOnOutcome: false,
+        })
+      )
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(runner.getTimeMode().mode).toBe('realtime');
+    expect(runner.paused).toBe(false);
+  });
+
   it('resumes a paused game to be able to step it, and re-pauses it afterwards', async () => {
     const runner = makeRunner({ startPaused: true });
     const result = await runGameTestLoop(

@@ -365,7 +365,7 @@ export type FlowAutopilotMode = 'off' | 'armed' | 'autonomous';
  * autopilot at `idle`, which is what tells `AgentChatService` that a human is at the keyboard and
  * a question should end the turn for them to answer.
  */
-export type FlowAutopilotPhase = 'idle' | 'countdown' | 'running' | 'paused' | 'done';
+export type FlowAutopilotPhase = 'idle' | 'countdown' | 'running' | 'testing' | 'paused' | 'done';
 
 /**
  * Live state of one autopilot run.
@@ -384,7 +384,7 @@ export interface FlowAutopilotState {
   runId: string | null;
   /** Epoch ms the run started (0 when there is no run), for the wall-clock budget. */
   startedAt: number;
-  /** Increments the supervisor has started in this run. */
+  /** Agent turns the supervisor has started, including answers to open questions. */
   increments: number;
   /** Tool calls observed across the run — the hop budget (§5). */
   toolIterations: number;

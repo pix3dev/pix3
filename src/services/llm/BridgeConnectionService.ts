@@ -125,6 +125,13 @@ export const parseEntries = (payload: unknown): BridgeProviderEntry[] => {
         id: item.id,
         label: typeof item.label === 'string' && item.label ? item.label : item.id,
         kind: (item.kind as BridgeProviderKind | undefined) ?? 'openai',
+        ...(Array.isArray(item.models)
+          ? {
+              models: item.models.filter(
+                (model): model is string => typeof model === 'string' && model.trim().length > 0
+              ),
+            }
+          : {}),
       });
     }
   }
@@ -337,11 +344,13 @@ export class BridgeConnectionService {
 
   private apply(available: boolean, entries: BridgeProviderEntry[]): void {
     const previousById = new Map(this.entries.map(entry => [entry.id, entry]));
-    const changedCliAgents = entries
+    const changedProviders = entries
       .filter(entry => {
-        if (entry.kind !== 'agent-cli') return false;
         const previous = previousById.get(entry.id);
-        return JSON.stringify(previous?.status ?? null) !== JSON.stringify(entry.status ?? null);
+        return (
+          JSON.stringify(previous?.status ?? null) !== JSON.stringify(entry.status ?? null) ||
+          JSON.stringify(previous?.models ?? null) !== JSON.stringify(entry.models ?? null)
+        );
       })
       .map(entry => entry.id);
     this.available = available;
@@ -351,7 +360,7 @@ export class BridgeConnectionService {
     // A cached live model list includes capabilities. When a CLI lane changes from tools-disabled
     // to tools-enabled, keeping that cache would make AgentChatService strip every tool even though
     // discovery and the rebuilt provider both say the lane can use them.
-    this.modelCatalog.invalidate(changedCliAgents);
+    this.modelCatalog.invalidate(changedProviders);
     // The bridge is the only provider set that nominates a model per role (advisor / vision helper),
     // and it only exists once a probe succeeds — so this is where those defaults can first be filled
     // in. Deliberate picks are pinned and left alone.

@@ -42,7 +42,7 @@ export class OpenAICompatLlmProvider implements LlmProvider {
   readonly requiresBaseUrl: boolean = true;
   readonly defaultBaseUrl: string = DEFAULT_BASE_URL;
 
-  readonly models: readonly LlmModel[] = [
+  models: readonly LlmModel[] = [
     {
       id: 'gpt-4.1',
       label: 'GPT-4.1 (OpenAI)',

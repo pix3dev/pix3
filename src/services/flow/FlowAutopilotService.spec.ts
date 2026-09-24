@@ -12,6 +12,14 @@ const IDLE: AgentChatState = {
   errorKind: null,
   notice: null,
   activeTool: null,
+  turnExecution: {
+    iterations: 0,
+    toolCalls: 0,
+    consecutivePlayStartFailures: 0,
+    verifyOutcome: 'unchanged',
+    loopEscalations: 0,
+    forcedOverwrites: 0,
+  },
   totalUsage: {},
   turnMetrics: {},
   conversations: [],
@@ -76,6 +84,11 @@ class FakeChat {
 interface Options {
   readonly files?: Record<string, string>;
   readonly preferences?: Partial<Record<keyof typeof AUTOPILOT_DEFAULTS, number>>;
+  readonly smoke?: (signal?: AbortSignal) => Promise<{
+    status: 'passed' | 'failed' | 'inconclusive' | 'skipped';
+    reason: string;
+    reportPath: string | null;
+  }>;
 }
 
 const build = (options: Options = {}): { service: FlowAutopilotService; chat: FakeChat } => {
@@ -88,11 +101,18 @@ const build = (options: Options = {}): { service: FlowAutopilotService; chat: Fa
       getPreferences: () => ({ ...AUTOPILOT_DEFAULTS, ...options.preferences }),
     },
     planService: { load: async () => ({ title: 'Sky Defender', pitch: 'shoot', steps: [] }) },
+    playtest: {
+      smoke:
+        options.smoke ?? (async () => ({ status: 'passed', reason: 'clean', reportPath: null })),
+    },
     storage: {
       readTextFile: async (path: string) => {
         const text = files[path];
         if (text === undefined) throw new Error(`missing ${path}`);
         return text;
+      },
+      writeTextFile: async (path: string, contents: string) => {
+        files[path] = contents;
       },
     },
   };
@@ -233,18 +253,63 @@ describe('FlowAutopilotService', () => {
     service.dispose();
   });
 
+  it('pauses instead of scheduling another turn after the per-turn cap', async () => {
+    const { service, chat } = build();
+    service.armFromUser();
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    chat.emit({ status: 'idle', notice: 'Stopped after 40 tool iterations.' });
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+
+    expect(appState.ui.flowAutopilot.phase).toBe('paused');
+    expect(appState.ui.flowAutopilot.stopReason).toContain('tool-iteration limit');
+    expect(chat.sent).toHaveLength(1);
+    service.dispose();
+  });
+
+  it('gives an explicitly resumed run a new identity and fresh budgets', async () => {
+    const { service, chat } = build({ preferences: { autopilotMaxIncrements: 1 } });
+    service.armFromUser();
+    const firstRun = appState.ui.flowAutopilot.runId;
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    await settleTurn(chat);
+    expect(appState.ui.flowAutopilot.phase).toBe('paused');
+
+    service.resumeRun();
+
+    expect(appState.ui.flowAutopilot.runId).not.toBe(firstRun);
+    expect(appState.ui.flowAutopilot.increments).toBe(0);
+    expect(appState.ui.flowAutopilot.phase).toBe('countdown');
+    service.dispose();
+  });
+
+  it('stops a turn after three failed attempts to start the game', async () => {
+    const { service, chat } = build();
+    service.armFromUser();
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    chat.emit({
+      turnExecution: {
+        ...chat.state.turnExecution,
+        toolCalls: 3,
+        consecutivePlayStartFailures: 3,
+      },
+    });
+
+    expect(appState.ui.flowAutopilot.phase).toBe('paused');
+    expect(appState.ui.flowAutopilot.stopReason).toContain('failed to start three times');
+    expect(chat.stopped).toBe(1);
+    service.dispose();
+  });
+
   it('counts tool calls across the run for the hop budget', async () => {
     const { service, chat } = build({ preferences: { autopilotMaxToolIterations: 2 } });
     service.armFromUser();
     await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
 
-    chat.emit({ activeTool: 'fs_read' });
-    chat.emit({ activeTool: null });
-    chat.emit({ activeTool: 'fs_read' });
+    chat.emit({ turnExecution: { ...chat.state.turnExecution, toolCalls: 1 } });
+    chat.emit({ turnExecution: { ...chat.state.turnExecution, toolCalls: 2 } });
     expect(appState.ui.flowAutopilot.toolIterations).toBe(2);
-
-    await settleTurn(chat);
     expect(appState.ui.flowAutopilot.stopReason).toBe('Budget reached: 2 tool calls this run.');
+    expect(chat.stopped).toBe(1);
     service.dispose();
   });
 
@@ -287,7 +352,7 @@ describe('FlowAutopilotService', () => {
     service.dispose();
   });
 
-  it('calls the run done when every item on the checklist is ticked', async () => {
+  it('calls the run done only after a final smoke passes', async () => {
     const { service } = build({
       files: { 'design/progress.md': '# Progress\n\n- [x] drone flies\n' },
     });
@@ -295,7 +360,87 @@ describe('FlowAutopilotService', () => {
     await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
 
     expect(appState.ui.flowAutopilot.phase).toBe('done');
-    expect(appState.ui.flowAutopilot.stopReason).toContain('ticked');
+    expect(appState.ui.flowAutopilot.stopReason).toContain('smoke run passed');
+    service.dispose();
+  });
+
+  it('smoke tests each completed increment before scheduling the next one', async () => {
+    const smoke = vi.fn(async () => ({
+      status: 'passed' as const,
+      reason: 'clean',
+      reportPath: null,
+    }));
+    const { service, chat } = build({ smoke });
+    service.armFromUser();
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    await settleTurn(chat);
+
+    expect(smoke).toHaveBeenCalledTimes(1);
+    expect(appState.ui.flowAutopilot.phase).toBe('countdown');
+    service.dispose();
+  });
+
+  it('queues a failed increment smoke as the next FIX turn', async () => {
+    const files = { 'design/progress.md': PROGRESS };
+    const { service, chat } = build({
+      files,
+      smoke: async () => ({
+        status: 'failed',
+        reason: 'new runtime error',
+        reportPath: 'design/tests/reports/smoke.json',
+      }),
+    });
+    service.armFromUser();
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    await settleTurn(chat);
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+
+    expect(files['design/progress.md']).toContain('FIX (P0): new runtime error');
+    expect(chat.sent).toHaveLength(2);
+    expect(chat.sent[1]).toContain('Fix this defect');
+    service.dispose();
+  });
+
+  it('stops when the same smoke defect survives two FIX turns', async () => {
+    const files = { 'design/progress.md': PROGRESS };
+    const { service, chat } = build({
+      files,
+      smoke: async () => ({ status: 'failed', reason: 'same crash', reportPath: null }),
+    });
+    service.armFromUser();
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    await settleTurn(chat);
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    expect(chat.sent[1]).toContain('Fix this defect');
+    await settleTurn(chat);
+    expect(appState.ui.flowAutopilot.phase).toBe('countdown');
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    expect(chat.sent[2]).toContain('Fix this defect');
+    await settleTurn(chat);
+
+    expect(appState.ui.flowAutopilot.phase).toBe('paused');
+    expect(appState.ui.flowAutopilot.stopReason).toContain('after 2 attempts');
+    expect(files['design/progress.md']).toContain('attempts=2');
+    service.dispose();
+  });
+
+  it('queues a failed final smoke instead of calling the run ready', async () => {
+    const files = { 'design/progress.md': '# Progress\n\n- [x] drone flies\n' };
+    const { service, chat } = build({
+      files,
+      smoke: async () => ({
+        status: 'failed',
+        reason: 'new error',
+        reportPath: 'design/tests/reports/fail.json',
+      }),
+    });
+    service.armFromUser();
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+
+    expect(appState.ui.flowAutopilot.phase).toBe('countdown');
+    expect(files['design/progress.md']).toContain('design/tests/reports/fail.json');
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    expect(chat.sent[0]).toContain('Fix this defect');
     service.dispose();
   });
 
@@ -313,6 +458,47 @@ describe('FlowAutopilotService', () => {
     chat.emit({ status: 'idle' });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(chat.sent).toHaveLength(1);
+  });
+
+  it('does not send a queued turn after the wheel is taken during a file read', async () => {
+    const { service, chat } = build();
+    let release: ((value: string) => void) | undefined;
+    Object.defineProperty(service, 'storage', {
+      configurable: true,
+      value: {
+        readTextFile: () =>
+          new Promise<string>(resolve => {
+            release = resolve;
+          }),
+      },
+    });
+    service.armFromUser();
+    await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+    expect(release).toBeTypeOf('function');
+
+    service.takeWheel();
+    release?.(PROGRESS);
+    await flush();
+
+    expect(chat.sent).toHaveLength(0);
+    expect(appState.ui.flowAutopilot.mode).toBe('off');
+    service.dispose();
+  });
+
+  it('does not carry a countdown into another project', async () => {
+    const previousId = appState.project.id;
+    const { service, chat } = build();
+    service.armFromUser();
+    appState.project.id = 'other-project';
+    try {
+      await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
+      expect(chat.sent).toHaveLength(0);
+      expect(appState.ui.flowAutopilot.phase).toBe('paused');
+      expect(appState.ui.flowAutopilot.stopReason).toContain('project changed');
+    } finally {
+      appState.project.id = previousId;
+      service.dispose();
+    }
   });
 
   describe('an open question in Assisted mode', () => {

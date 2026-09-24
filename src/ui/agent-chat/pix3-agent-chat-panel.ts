@@ -1301,9 +1301,10 @@ export class AgentChatPanel extends ComponentBase {
       const longPrompt = isLongText(row.text);
       const promptExpanded = !longPrompt || this.expandedRows.has(row.key);
       return html`<div class="agent-message is-user">
-        <div class="agent-message-text ${longPrompt && !promptExpanded ? 'is-clamped' : ''}">
-          ${row.text}
-        </div>
+        <div
+          class="agent-message-text ${longPrompt && !promptExpanded ? 'is-clamped' : ''}"
+          .textContent=${row.text}
+        ></div>
         ${longPrompt ? this.renderExpandLink(row.key, promptExpanded, row.text) : null}
       </div>`;
     }
@@ -1315,31 +1316,41 @@ export class AgentChatPanel extends ComponentBase {
     return html`
       <div class="agent-left-row">
         ${this.renderReplyAvatar(row)}
-        <div class="agent-message is-assistant">
-          <div class="agent-message-md ${long && !expanded ? 'is-clamped' : ''}">
-            ${renderMarkdownLite(row.text)}
+        <div class="agent-reply-content">
+          <div class="agent-message is-assistant">
+            <div class="agent-message-md ${long && !expanded ? 'is-clamped' : ''}">
+              ${renderMarkdownLite(row.text)}
+            </div>
+            ${long ? this.renderExpandLink(row.key, expanded, row.text) : null}
+            ${showActions
+              ? html`<div class="agent-msg-actions">
+                  <button
+                    type="button"
+                    class="agent-msg-action agent-icon-btn"
+                    title="Copy this reply"
+                    aria-label="Copy this reply"
+                    @click=${() => void this.copyToClipboard(row.text)}
+                  >
+                    ${this.icons.getIcon('copy', IconSize.SMALL)}
+                  </button>
+                  <button
+                    type="button"
+                    class="agent-msg-action agent-icon-btn"
+                    title="Retry — re-run the last turn"
+                    aria-label="Retry"
+                    @click=${() => void this.chat.resume()}
+                  >
+                    ${this.icons.getIcon('refresh-cw', IconSize.SMALL)}
+                  </button>
+                </div>`
+              : null}
           </div>
-          ${long ? this.renderExpandLink(row.key, expanded, row.text) : null}
-          ${showActions
-            ? html`<div class="agent-msg-actions">
-                <button
-                  type="button"
-                  class="agent-msg-action agent-icon-btn"
-                  title="Copy this reply"
-                  aria-label="Copy this reply"
-                  @click=${() => void this.copyToClipboard(row.text)}
-                >
-                  ${this.icons.getIcon('copy', IconSize.SMALL)}
-                </button>
-                <button
-                  type="button"
-                  class="agent-msg-action agent-icon-btn"
-                  title="Retry — re-run the last turn"
-                  aria-label="Retry"
-                  @click=${() => void this.chat.resume()}
-                >
-                  ${this.icons.getIcon('refresh-cw', IconSize.SMALL)}
-                </button>
+          ${row.origin?.modelId
+            ? html`<div
+                class="agent-reply-model"
+                title=${`${row.origin.providerLabel || row.origin.providerId} · ${row.origin.modelId}`}
+              >
+                ${row.origin.modelId}
               </div>`
             : null}
         </div>
@@ -2349,6 +2360,26 @@ export class AgentChatPanel extends ComponentBase {
             @click=${() => this.autopilot.takeWheel()}
           >
             Turn off
+          </button>
+        </div>
+      `;
+    }
+
+    if (autopilot.phase === 'testing') {
+      return html`
+        <div class="agent-autopilot is-running">
+          <span class="agent-autopilot-icon"
+            >${this.icons.getIcon('activity', IconSize.SMALL)}</span
+          >
+          <span class="agent-autopilot-text">Checking the game before marking it ready.</span>
+          <button
+            type="button"
+            class="agent-autopilot-action"
+            title="Stop playtesting and take over"
+            @click=${() => this.autopilot.takeWheel()}
+          >
+            <span class="agent-btn-icon">${this.icons.getIcon('stop', IconSize.SMALL)}</span>
+            Take the wheel
           </button>
         </div>
       `;

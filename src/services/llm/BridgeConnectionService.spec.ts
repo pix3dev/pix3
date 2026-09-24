@@ -125,6 +125,27 @@ describe('bridge discovery parsing', () => {
     expect(provider.models[0].capabilities.supportsTools).toBe(false);
   });
 
+  it('uses declared model ids for a custom provider without querying its missing /models endpoint', async () => {
+    const [entry] = parseEntries({
+      providers: [
+        {
+          id: 'my-provider',
+          label: 'DeepSick',
+          kind: 'openai',
+          models: ['deepseek/deepseek-flash', 'deepseek-v4-pro'],
+        },
+      ],
+    });
+    const provider = createBridgeProvider(entry, 'http://127.0.0.1:8484');
+    expect(provider.models.map(model => model.id)).toEqual([
+      'deepseek/deepseek-flash',
+      'deepseek-v4-pro',
+    ]);
+    await expect(provider.listModels?.({ apiKey: 'pairing-token' })).resolves.toEqual(
+      provider.models
+    );
+  });
+
   it('still reads a bridge that predates the explicit provider kind', () => {
     const entries = parseEntries({ providers: [{ id: 'custom', label: 'Custom' }] });
     expect(entries).toEqual([{ id: 'custom', label: 'Custom', kind: 'openai' }]);

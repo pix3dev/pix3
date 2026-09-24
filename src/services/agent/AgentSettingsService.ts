@@ -102,6 +102,8 @@ export interface AgentPreferences {
   autopilotMaxIncrements: number;
   /** Tool calls one autonomous run may spend in total (§5) — autonomy multiplies a lane's waste. */
   autopilotMaxToolIterations: number;
+  /** LLM/tool round trips one autopilot-driven turn may spend before it must report and pause. */
+  autopilotMaxToolIterationsPerTurn: number;
   /** Wall-clock minutes one autonomous run may take (§5). */
   autopilotMaxMinutes: number;
   /** Prompt tokens one autonomous run may read in total (§5), summed over its turns. */
@@ -168,6 +170,7 @@ export const AUTOPILOT_DEFAULTS = {
   autopilotQuestionSeconds: 45,
   autopilotMaxIncrements: 6,
   autopilotMaxToolIterations: 240,
+  autopilotMaxToolIterationsPerTurn: 40,
   autopilotMaxMinutes: 20,
   autopilotMaxInputTokens: 600_000,
   autopilotAssetGenerations: 0,
@@ -602,6 +605,11 @@ export class AgentSettingsService {
           parsed.autopilotMaxToolIterations,
           defaults.autopilotMaxToolIterations,
           5_000
+        ),
+        autopilotMaxToolIterationsPerTurn: clampAutopilotNumber(
+          parsed.autopilotMaxToolIterationsPerTurn,
+          defaults.autopilotMaxToolIterationsPerTurn,
+          500
         ),
         autopilotMaxMinutes: clampAutopilotNumber(
           parsed.autopilotMaxMinutes,

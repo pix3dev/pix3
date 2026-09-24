@@ -39,6 +39,8 @@ export interface ProviderConfig {
   baseUrl: string;
   /** Provider API key. Empty string = not yet configured (provider stays effectively unusable). */
   apiKey: string;
+  /** Explicit model ids for upstreams without GET /models. */
+  models?: string[];
   /** When false the provider is hidden from discovery and its proxy route 404s. */
   enabled: boolean;
   /** True for the shipped presets (openai/anthropic/opencode-zen/cerebras); false for user-added. */
@@ -172,6 +174,13 @@ const parseProviders = (raw: unknown): Record<string, ProviderConfig> => {
       label: typeof value.label === 'string' && value.label ? value.label : id,
       baseUrl: value.baseUrl.replace(/\/$/, ''),
       apiKey: typeof value.apiKey === 'string' ? value.apiKey : '',
+      ...(Array.isArray(value.models)
+        ? {
+            models: value.models.filter(
+              (model): model is string => typeof model === 'string' && model.trim().length > 0
+            ),
+          }
+        : {}),
       enabled: value.enabled !== false,
       builtin: value.builtin === true,
     };

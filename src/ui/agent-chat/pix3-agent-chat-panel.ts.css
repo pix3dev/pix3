@@ -346,6 +346,22 @@ pix3-agent-chat-panel .agent-left-row {
   gap: 8px;
 }
 
+pix3-agent-chat-panel .agent-reply-content {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+pix3-agent-chat-panel .agent-reply-model {
+  overflow: hidden;
+  margin: 3px 2px 0;
+  color: var(--fg-3);
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 pix3-agent-chat-panel .agent-avatar {
   display: inline-flex;
   align-items: center;
@@ -415,7 +431,7 @@ pix3-agent-chat-panel .agent-message {
 pix3-agent-chat-panel .agent-message.is-user {
   align-self: flex-end;
   max-width: 90%;
-  padding: 10px 14px;
+  padding: 7px 14px;
   border-radius: 13px 13px 5px 13px;
   background: var(--accent-soft);
   border: 1px solid var(--accent-line);

@@ -602,6 +602,10 @@ export class AgentToolRegistry {
   private readonly uiKitWriter!: LazyService<UiKitProjectWriter>;
 
   private tools: AgentToolDefinition[] | null = null;
+  /** Execution guard state for the current unattended run, keyed by run and project identity. */
+  private guardedRunKey: string | null = null;
+  private readonly autopilotCreatedFiles = new Set<string>();
+  private autopilotAssetReservations = 0;
 
   constructor() {
     // Cheap ring-buffer error capture, installed in production too so `read_errors` has data.
@@ -637,7 +641,69 @@ export class AgentToolRegistry {
     if (!tool) {
       throw new Error(`Unknown tool: ${name}`);
     }
-    return tool.handler(args);
+    if (!isAutopilotDrivenTurn()) {
+      return tool.handler(args);
+    }
+    const run = appState.ui.flowAutopilot;
+    const runKey = `${run.runId ?? ''}:${appState.project.id ?? ''}`;
+    if (this.guardedRunKey !== runKey) {
+      this.guardedRunKey = runKey;
+      this.autopilotCreatedFiles.clear();
+      this.autopilotAssetReservations = 0;
+    }
+    if (name === 'fs_delete') {
+      return { ok: false, error: 'Autopilot cannot delete project files.' };
+    }
+    const path =
+      name === 'fs_write' || name === 'str_replace' ? this.safePath(asString(args.path)) : null;
+    const guardedPath =
+      path
+        ?.split('/')
+        .filter(part => part && part !== '.')
+        .join('/') ?? null;
+    if (guardedPath?.toLowerCase() === 'design/brief.md') {
+      return { ok: false, error: 'Autopilot cannot edit design/brief.md.' };
+    }
+    if (
+      name === 'fs_write' &&
+      args.overwrite === true &&
+      guardedPath &&
+      !this.autopilotCreatedFiles.has(guardedPath)
+    ) {
+      return {
+        ok: false,
+        error: `Autopilot cannot use overwrite:true on ${path}: this run did not create it.`,
+      };
+    }
+    if (name === 'generate_asset') {
+      const limit = this.settings.getPreferences().autopilotAssetGenerations;
+      if (this.autopilotAssetReservations >= limit) {
+        return { ok: false, error: `Autopilot asset generation limit reached (${limit}).` };
+      }
+      // Reserve before the handler starts: a failed or aborted paid request may still incur cost.
+      this.autopilotAssetReservations += 1;
+    }
+    if (
+      !isAutopilotDrivenTurn() ||
+      `${appState.ui.flowAutopilot.runId ?? ''}:${appState.project.id ?? ''}` !== runKey
+    ) {
+      return { ok: false, error: 'Autopilot run changed before the tool could start.' };
+    }
+    const result = await tool.handler(args);
+    if (
+      this.guardedRunKey === runKey &&
+      name === 'fs_write' &&
+      path &&
+      result !== null &&
+      typeof result === 'object' &&
+      'ok' in result &&
+      result.ok === true &&
+      'created' in result &&
+      result.created === true
+    ) {
+      this.autopilotCreatedFiles.add(guardedPath ?? path);
+    }
+    return result;
   }
 
   // -- tool table ------------------------------------------------------------
@@ -3588,6 +3654,7 @@ export class AgentToolRegistry {
         ok: true;
         path: string;
         reloadedScene?: string;
+        created?: true;
         forcedOverwrite?: true;
         reason?: string;
         createdDirectories?: string[];
@@ -3662,6 +3729,7 @@ export class AgentToolRegistry {
     return {
       ok: true,
       path: safe,
+      ...(existing === null ? { created: true as const } : {}),
       ...(reloadedScene ? { reloadedScene } : {}),
       ...(isLargeRewrite ? { forcedOverwrite: true as const, reason: options.reason } : {}),
       ...(createdDirectories.length ? { createdDirectories } : {}),

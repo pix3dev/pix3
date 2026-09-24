@@ -109,6 +109,72 @@ describe('AgentToolRegistry', () => {
     clearErrors();
   });
 
+  describe('autopilot execution guards', () => {
+    beforeEach(() => {
+      appState.ui.workspaceMode = 'flow';
+      appState.ui.flowAutopilot.mode = 'armed';
+      appState.ui.flowAutopilot.phase = 'running';
+      appState.ui.flowAutopilot.runId = 'guard-test';
+    });
+
+    afterEach(() => {
+      appState.ui.workspaceMode = 'studio';
+      appState.ui.flowAutopilot.mode = 'off';
+      appState.ui.flowAutopilot.phase = 'idle';
+      appState.ui.flowAutopilot.runId = null;
+    });
+
+    it('refuses brief edits and deletion at dispatch even if a call reaches the registry', async () => {
+      const handler = vi.fn(async () => ({ ok: true }));
+      const registry = buildRegistry();
+      Object.defineProperty(registry, 'tools', {
+        value: ['fs_write', 'str_replace', 'fs_delete'].map(name => ({ name, handler })),
+      });
+
+      expect(await registry.execute('fs_write', { path: 'res://design/./brief.md' })).toMatchObject(
+        {
+          ok: false,
+        }
+      );
+      expect(await registry.execute('str_replace', { path: 'design/brief.md' })).toMatchObject({
+        ok: false,
+      });
+      expect(await registry.execute('fs_delete', { path: 'scripts/game.ts' })).toMatchObject({
+        ok: false,
+      });
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('allows wholesale overwrite only for a file created during this run', async () => {
+      const handler = vi.fn(async () => ({ ok: true, created: true }));
+      const registry = buildRegistry();
+      Object.defineProperty(registry, 'tools', { value: [{ name: 'fs_write', handler }] });
+
+      expect(
+        await registry.execute('fs_write', { path: 'scripts/old.ts', overwrite: true })
+      ).toMatchObject({ ok: false });
+      expect(await registry.execute('fs_write', { path: 'scripts/new.ts' })).toMatchObject({
+        ok: true,
+      });
+      expect(
+        await registry.execute('fs_write', { path: 'scripts/new.ts', overwrite: true })
+      ).toMatchObject({ ok: true });
+      expect(handler).toHaveBeenCalledTimes(2);
+    });
+
+    it('reserves a paid asset slot before dispatch and rejects the next call', async () => {
+      const handler = vi.fn(async () => ({ ok: true }));
+      const registry = buildRegistry({
+        settings: { getPreferences: () => ({ autopilotAssetGenerations: 1 }) },
+      });
+      Object.defineProperty(registry, 'tools', { value: [{ name: 'generate_asset', handler }] });
+
+      expect(await registry.execute('generate_asset')).toMatchObject({ ok: true });
+      expect(await registry.execute('generate_asset')).toMatchObject({ ok: false });
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('lists the expected tools', () => {
     const names = buildRegistry()
       .list()
@@ -1556,7 +1622,7 @@ describe('AgentToolRegistry', () => {
       });
 
       expect(storage.writeTextFile).toHaveBeenCalledWith('scripts/spin.ts', 'code');
-      expect(result).toEqual({ ok: true, path: 'scripts/spin.ts' });
+      expect(result).toEqual({ ok: true, path: 'scripts/spin.ts', created: true });
       expect(appState.project.fileRefreshSignal || 0).toBeGreaterThan(before);
     });
 
@@ -1606,6 +1672,7 @@ describe('AgentToolRegistry', () => {
       })) as Record<string, unknown>;
 
       expect(result.ok).toBe(true);
+      expect(result.created).toBe(true);
       expect(result.forcedOverwrite).toBeUndefined();
       expect(storage.files.get('scripts/Brand.ts')).toHaveLength(9000);
     });
@@ -1749,12 +1816,14 @@ describe('AgentToolRegistry', () => {
 
     it('fs_write overwrites a small existing file without ceremony', async () => {
       const storage = makeStorage();
+      storage.files.set('scripts/a.ts', 'export const x = 1;');
       const registry = buildRegistry({ storage });
       const result = (await registry.execute('fs_write', {
         path: 'scripts/a.ts',
         content: 'export const x = 2;',
       })) as Record<string, unknown>;
       expect(result.ok).toBe(true);
+      expect(result.created).toBeUndefined();
       expect(storage.files.get('scripts/a.ts')).toBe('export const x = 2;');
     });
 

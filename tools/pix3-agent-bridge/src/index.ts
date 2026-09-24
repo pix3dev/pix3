@@ -346,7 +346,7 @@ const startServer = (config: BridgeConfig): void => {
     if (req.method === 'GET' && pathname === '/v1/providers') {
       const providers = Object.entries(config.providers)
         .filter(([, p]) => p.enabled && p.apiKey)
-        .map(([id, p]) => ({ id, label: p.label, kind: p.kind, enabled: true }));
+        .map(([id, p]) => ({ id, label: p.label, kind: p.kind, enabled: true, models: p.models }));
       // Local CLI agents live in their OWN array, never in `providers`: an older editor maps an
       // unknown `kind` to 'openai' and would build a broken provider pointed at /providers/agy.
       const agents = await Promise.all([agy.discoveryEntry(), codex.discoveryEntry()]);

@@ -14,11 +14,13 @@ import {
   FLOW_PROGRESS_PATH,
 } from '@/services/flow/FlowPlanService';
 import { FlowStageService } from '@/services/flow/FlowStageService';
+import { FlowPlaytestService } from '@/services/flow/FlowPlaytestService';
 import { DECISIONS_PATH, extractDecisionEntries } from '@/services/flow/decision-log';
 import { routeQuestion } from '@/services/flow/autopilot-router';
 import {
   renderAutopilotTurnMessage,
   selectNextStepFromProgress,
+  upsertSmokeFix,
 } from '@/services/flow/autopilot-queue';
 
 /** Recipe contract, read alongside the brief as the project's own words (mirrors AgentChatService). */
@@ -72,6 +74,9 @@ export class FlowAutopilotService {
   @inject(FlowStageService)
   private readonly flowStage!: FlowStageService;
 
+  @inject(FlowPlaytestService)
+  private readonly playtest!: FlowPlaytestService;
+
   private unsubscribeChat: (() => void) | null = null;
   private countdownTimer: ReturnType<typeof setTimeout> | null = null;
   private activityTimer: ReturnType<typeof setTimeout> | null = null;
@@ -80,11 +85,18 @@ export class FlowAutopilotService {
   /** Which threshold the paused countdown was running on, so resuming restores the right one. */
   private countdownReason: 'increment' | 'question' = 'increment';
   private lastStatus: AgentChatStatus = 'idle';
-  private lastActiveTool: string | null = null;
+  private lastSeenTurnToolCalls = 0;
   /** The conversation's cumulative UNCACHED prompt tokens as last seen — see {@link accumulateTokens}. */
   private lastSeenInputTokens = 0;
   /** True between our own `send` and the turn settling: "this turn is the supervisor's". */
   private drivingTurn = false;
+  /** A checklist increment needs its own smoke after the agent turn settles. */
+  private drivingIncrement = false;
+  private consecutiveVerifyFailures = 0;
+  private activeProjectId: string | null = null;
+  /** Invalidates asynchronous queue/answer reads when the user or project takes control. */
+  private generation = 0;
+  private playtestController: AbortController | null = null;
 
   /**
    * Arm the autopilot from the user's own click ("Continue autonomously").
@@ -97,11 +109,12 @@ export class FlowAutopilotService {
     if (!this.canArm()) {
       return;
     }
+    this.generation += 1;
     this.patch({
       mode,
       phase: 'idle',
       countdownEndsAt: null,
-      runId: `run-${Date.now().toString(36)}`,
+      runId: `run-${Date.now().toString(36)}-${this.generation}`,
       startedAt: Date.now(),
       increments: 0,
       toolIterations: 0,
@@ -109,6 +122,9 @@ export class FlowAutopilotService {
       stopReason: null,
     });
     this.lastSeenInputTokens = uncachedPromptTokens(this.chat.getState());
+    this.lastSeenTurnToolCalls = this.chat.getState().turnExecution.toolCalls;
+    this.consecutiveVerifyFailures = 0;
+    this.activeProjectId = appState.project.id;
     this.lastStatus = this.chat.getState().status;
     this.subscribeToChat();
     if (!this.chat.isRunning()) {
@@ -123,8 +139,11 @@ export class FlowAutopilotService {
    * back by the chat's own `finally`, which is the reason interrupting a turn is safe at all.
    */
   takeWheel(): void {
+    this.generation += 1;
+    this.cancelPlaytest();
     this.clearTimers();
     this.drivingTurn = false;
+    this.drivingIncrement = false;
     // Switched off and unsubscribed BEFORE the stop: aborting publishes a `running → idle` edge,
     // and an automaton still listening would read it as "the turn settled" and arm a countdown for
     // the run the user just ended.
@@ -172,8 +191,11 @@ export class FlowAutopilotService {
     if (appState.ui.flowAutopilot.mode === 'off') {
       return;
     }
+    this.generation += 1;
+    this.cancelPlaytest();
     this.clearTimers();
     this.drivingTurn = false;
+    this.drivingIncrement = false;
     this.patch({ phase: 'idle', countdownEndsAt: null, stopReason: null });
   }
 
@@ -182,14 +204,19 @@ export class FlowAutopilotService {
     if (appState.ui.flowAutopilot.mode === 'off') {
       return;
     }
+    this.generation += 1;
     this.patch({
       phase: 'idle',
       stopReason: null,
+      runId: `run-${Date.now().toString(36)}-${this.generation}`,
       startedAt: Date.now(),
       increments: 0,
       toolIterations: 0,
       inputTokens: 0,
     });
+    this.lastSeenTurnToolCalls = this.chat.getState().turnExecution.toolCalls;
+    this.consecutiveVerifyFailures = 0;
+    this.activeProjectId = appState.project.id;
     this.subscribeToChat();
     if (!this.chat.isRunning()) {
       this.startCountdown('increment');
@@ -208,6 +235,8 @@ export class FlowAutopilotService {
   }
 
   dispose(): void {
+    this.generation += 1;
+    this.cancelPlaytest();
     this.clearTimers();
     this.unsubscribeChat?.();
     this.unsubscribeChat = null;
@@ -232,13 +261,43 @@ export class FlowAutopilotService {
       this.lastStatus = state.status;
       return;
     }
-    // Hop accounting. The chat publishes each tool as it starts, so counting the transitions is
-    // counting the round trips — which is what the budget in §5 is really about (autonomy
-    // multiplies a lane's inefficiencies; a run of repeated `find_nodes` costs the same as work).
-    if (state.activeTool && state.activeTool !== this.lastActiveTool) {
-      this.patch({ toolIterations: autopilot.toolIterations + 1 });
+    if (autopilot.phase === 'paused' || autopilot.phase === 'done') {
+      this.lastStatus = state.status;
+      return;
     }
-    this.lastActiveTool = state.activeTool;
+    if (this.activeProjectId !== appState.project.id) {
+      this.cancelPlaytest();
+      this.pause('The project changed during this run. Start a new run in the open project.');
+      if (this.chat.isRunning()) this.chat.stop();
+      return;
+    }
+    // Count completed tool handlers, including individual batch steps. `activeTool` is display
+    // state and can repeat the same name without a null transition between calls.
+    const observed = state.turnExecution.toolCalls;
+    const delta =
+      observed >= this.lastSeenTurnToolCalls ? observed - this.lastSeenTurnToolCalls : observed;
+    this.lastSeenTurnToolCalls = observed;
+    if (delta > 0) this.patch({ toolIterations: autopilot.toolIterations + delta });
+    this.accumulateTokens(state);
+
+    if (state.status === 'running' && this.drivingTurn) {
+      const stop =
+        this.exceededLiveBudget() ??
+        (state.turnExecution.consecutivePlayStartFailures >= 3
+          ? 'The game failed to start three times in this turn.'
+          : null) ??
+        (state.turnExecution.loopEscalations >= 2
+          ? 'The agent got stuck twice in this turn.'
+          : null) ??
+        (state.turnExecution.forcedOverwrites > 0
+          ? 'The agent force-overwrote a project file in this turn.'
+          : null);
+      if (stop) {
+        this.pause(stop);
+        this.chat.stop();
+        return;
+      }
+    }
 
     if (state.status === 'running') {
       this.clearTimers();
@@ -254,8 +313,18 @@ export class FlowAutopilotService {
     if (!settled) {
       return;
     }
+    const wasDrivingTurn = this.drivingTurn;
+    const wasDrivingIncrement = this.drivingIncrement;
     this.drivingTurn = false;
-    this.accumulateTokens(state);
+    this.drivingIncrement = false;
+    if (wasDrivingTurn) {
+      this.consecutiveVerifyFailures =
+        state.turnExecution.verifyOutcome === 'failed' ? this.consecutiveVerifyFailures + 1 : 0;
+      if (this.consecutiveVerifyFailures >= 2) {
+        this.pause('Two autonomous turns ended without proving their game changes.');
+        return;
+      }
+    }
 
     if (state.status === 'error') {
       // A provider error is not a reason to keep spending the budget: whatever failed will fail
@@ -264,6 +333,15 @@ export class FlowAutopilotService {
       return;
     }
 
+    if (wasDrivingTurn && state.notice?.startsWith('Stopped after ')) {
+      this.pause(`This turn reached its tool-iteration limit. ${state.notice}`);
+      return;
+    }
+
+    if (wasDrivingIncrement && !state.pendingQuestion) {
+      void this.smokeAfterIncrement();
+      return;
+    }
     const exceeded = this.exceededBudget();
     if (exceeded) {
       this.pause(exceeded);
@@ -316,6 +394,21 @@ export class FlowAutopilotService {
     return null;
   }
 
+  private exceededLiveBudget(): string | null {
+    const state = appState.ui.flowAutopilot;
+    const prefs = this.settings.getPreferences();
+    if (state.toolIterations >= prefs.autopilotMaxToolIterations) {
+      return `Budget reached: ${state.toolIterations} tool calls this run.`;
+    }
+    if (state.inputTokens >= prefs.autopilotMaxInputTokens) {
+      return `Budget reached: ${Math.round(state.inputTokens / 1000)}K uncached prompt tokens this run.`;
+    }
+    if (state.startedAt > 0 && Date.now() - state.startedAt >= prefs.autopilotMaxMinutes * 60_000) {
+      return `Budget reached: ${prefs.autopilotMaxMinutes} minutes of autonomous work.`;
+    }
+    return null;
+  }
+
   // ── Countdown ───────────────────────────────────────────────────────────────
 
   private startCountdown(reason: 'increment' | 'question', overrideMs?: number): void {
@@ -352,6 +445,11 @@ export class FlowAutopilotService {
     if (appState.ui.flowAutopilot.mode === 'off' || this.chat.isRunning()) {
       return;
     }
+    if (this.activeProjectId !== appState.project.id) {
+      this.cancelPlaytest();
+      this.pause('The project changed during this run. Start a new run in the open project.');
+      return;
+    }
     this.patch({ countdownEndsAt: null });
     if (this.countdownReason === 'question' && this.chat.getState().pendingQuestion) {
       await this.answerOpenQuestion();
@@ -368,17 +466,22 @@ export class FlowAutopilotService {
    * stops and says which question it could not answer rather than picking an option.
    */
   private async answerOpenQuestion(): Promise<void> {
+    const generation = this.generation;
+    const runId = appState.ui.flowAutopilot.runId;
+    const projectId = appState.project.id;
     const pending = this.chat.getState().pendingQuestion;
     if (!pending) {
       await this.takeNextStep();
       return;
     }
     const routed = await this.routeAnswer(pending.question, pending.options);
+    if (!this.isCurrentRun(generation, runId, projectId)) return;
     if (!routed) {
       this.pause(`I could not answer "${pending.question}" from the brief — that one is yours.`);
       return;
     }
     this.drivingTurn = true;
+    this.drivingIncrement = false;
     this.patch({ phase: 'running', increments: appState.ui.flowAutopilot.increments + 1 });
     // A replay of a fork the log already holds files nothing: rewriting the line would drop the
     // reason recorded with the original (see AgentChatService.answerPending).
@@ -408,14 +511,60 @@ export class FlowAutopilotService {
    * "Done" is decided here, by the queue and the file — never by the agent saying so (plan §5).
    */
   private async takeNextStep(): Promise<void> {
+    const generation = this.generation;
+    const runId = appState.ui.flowAutopilot.runId;
+    const projectId = appState.project.id;
     const progress = await this.readOptional(FLOW_PROGRESS_PATH);
+    if (!this.isCurrentRun(generation, runId, projectId)) return;
     if (!progress.trim()) {
       this.pause('There is no `design/progress.md` to work from — tell me what to build next.');
       return;
     }
-    const { step, done } = selectNextStepFromProgress(progress);
-    if (done || !step) {
-      this.finish('Every item in `design/progress.md` is ticked. Tell me what to add next.');
+    const { step, ready } = selectNextStepFromProgress(progress);
+    if (ready) {
+      const controller = new AbortController();
+      this.playtestController = controller;
+      this.patch({ phase: 'testing', countdownEndsAt: null });
+      const smoke = await this.playtest.smoke(controller.signal);
+      if (this.playtestController === controller) this.playtestController = null;
+      if (!this.isCurrentRun(generation, runId, projectId)) return;
+      if (smoke.status === 'passed') {
+        this.finish(
+          'The main plan is complete and the final smoke run passed. Optional polish can wait.'
+        );
+      } else {
+        if (smoke.status === 'failed') {
+          const attempts = await this.recordSmokeFailure(
+            smoke.reason,
+            smoke.reportPath,
+            generation,
+            runId,
+            projectId
+          );
+          if (!this.isCurrentRun(generation, runId, projectId)) return;
+          if (attempts === null) return;
+          if (attempts >= 2) {
+            this.pause(
+              `The same smoke defect returned after ${attempts} attempts. ${smoke.reason}`
+            );
+            return;
+          }
+          const exceeded = this.exceededBudget();
+          if (exceeded) {
+            this.pause(exceeded);
+            return;
+          }
+          this.startCountdown('increment');
+          return;
+        }
+        this.pause(
+          `Final smoke ${smoke.status}: ${smoke.reason}${smoke.reportPath ? ` Report: ${smoke.reportPath}` : ''}`
+        );
+      }
+      return;
+    }
+    if (!step) {
+      this.pause('The plan has no next step, but it is not ready. Check design/progress.md.');
       return;
     }
     const plan = await this.planService.load().catch(() => ({
@@ -423,9 +572,97 @@ export class FlowAutopilotService {
       pitch: null,
       steps: [],
     }));
+    if (!this.isCurrentRun(generation, runId, projectId)) return;
     this.drivingTurn = true;
+    this.drivingIncrement = true;
     this.patch({ phase: 'running', increments: appState.ui.flowAutopilot.increments + 1 });
     await this.chat.send(renderAutopilotTurnMessage(step, plan));
+  }
+
+  private isCurrentRun(
+    generation: number,
+    runId: string | null,
+    projectId: string | null
+  ): boolean {
+    return (
+      this.generation === generation &&
+      appState.ui.flowAutopilot.mode !== 'off' &&
+      appState.ui.flowAutopilot.runId === runId &&
+      appState.project.id === projectId &&
+      this.activeProjectId === projectId
+    );
+  }
+
+  private async smokeAfterIncrement(): Promise<void> {
+    const generation = this.generation;
+    const runId = appState.ui.flowAutopilot.runId;
+    const projectId = appState.project.id;
+    const controller = new AbortController();
+    this.playtestController = controller;
+    this.patch({ phase: 'testing', countdownEndsAt: null });
+    const smoke = await this.playtest.smoke(controller.signal);
+    if (this.playtestController === controller) this.playtestController = null;
+    if (!this.isCurrentRun(generation, runId, projectId)) return;
+    if (smoke.status !== 'passed') {
+      if (smoke.status === 'failed') {
+        const attempts = await this.recordSmokeFailure(
+          smoke.reason,
+          smoke.reportPath,
+          generation,
+          runId,
+          projectId
+        );
+        if (!this.isCurrentRun(generation, runId, projectId)) return;
+        if (attempts === null) return;
+        if (attempts >= 2) {
+          this.pause(`The same smoke defect returned after ${attempts} attempts. ${smoke.reason}`);
+          return;
+        }
+        const exceeded = this.exceededBudget();
+        if (exceeded) {
+          this.pause(exceeded);
+          return;
+        }
+        this.startCountdown('increment');
+        return;
+      }
+      this.pause(
+        `Increment smoke ${smoke.status}: ${smoke.reason}${smoke.reportPath ? ` Report: ${smoke.reportPath}` : ''}`
+      );
+      return;
+    }
+    const exceeded = this.exceededBudget();
+    if (exceeded) {
+      this.pause(exceeded);
+      return;
+    }
+    this.startCountdown('increment');
+  }
+
+  private async recordSmokeFailure(
+    reason: string,
+    reportPath: string | null,
+    generation: number,
+    runId: string | null,
+    projectId: string | null
+  ): Promise<number | null> {
+    try {
+      const progress = await this.storage.readTextFile(FLOW_PROGRESS_PATH);
+      if (!this.isCurrentRun(generation, runId, projectId)) return null;
+      const fix = upsertSmokeFix(progress, reason, reportPath);
+      await this.storage.writeTextFile(FLOW_PROGRESS_PATH, fix.markdown);
+      return fix.attempts;
+    } catch {
+      if (this.isCurrentRun(generation, runId, projectId)) {
+        this.pause('The smoke failed, but I could not record the FIX in design/progress.md.');
+      }
+      return null;
+    }
+  }
+
+  private cancelPlaytest(): void {
+    this.playtestController?.abort();
+    this.playtestController = null;
   }
 
   private async readOptional(path: string): Promise<string> {
@@ -441,12 +678,14 @@ export class FlowAutopilotService {
   private pause(reason: string): void {
     this.clearTimers();
     this.drivingTurn = false;
+    this.drivingIncrement = false;
     this.patch({ phase: 'paused', countdownEndsAt: null, stopReason: reason });
   }
 
   private finish(reason: string): void {
     this.clearTimers();
     this.drivingTurn = false;
+    this.drivingIncrement = false;
     this.patch({ phase: 'done', countdownEndsAt: null, stopReason: reason });
   }
 

@@ -152,12 +152,17 @@ npx @pix3/agent-bridge provider list
 npx @pix3/agent-bridge provider disable openai
 npx @pix3/agent-bridge provider enable  openai
 npx @pix3/agent-bridge provider set-key openai sk-...
+npx @pix3/agent-bridge provider set-models my-router deepseek/deepseek-flash deepseek-v4-pro
 npx @pix3/agent-bridge provider remove  my-router
 ```
 
 `--kind openai` forwards `Authorization: Bearer <key>` (OpenAI Chat Completions, gateways, local
 Ollama/LM Studio). `--kind anthropic` forwards `x-api-key` + `anthropic-version` (native Anthropic
 Messages API). Presets set the right kind for you.
+
+If a custom endpoint does not implement `GET /models`, set its model ids with `provider set-models`.
+The editor then shows those ids instead of the OpenAI fallback list. Restart the bridge and recheck
+the connection in Agent settings after changing the list.
 
 Changes take effect on the editor's next availability probe — no server restart needed for key/enable
 changes (a base-URL/kind change to a provider you're actively using is picked up on reconnect).

@@ -548,6 +548,8 @@ export interface BotRunHooks {
 /** Everything the loop needs from the world, injected so the loop is testable. */
 export interface GameRunLoopDeps {
   runner: TestableRunner;
+  /** Optional caller cancellation; the loop still releases input and restores time mode. */
+  signal?: AbortSignal;
   /** Read the registered `GameDebugProvider`, or null when there is none. */
   sampleGameState: () => GameStateSample | null;
   /** Total runtime errors captured so far (a counter, not a copy — called per frame). */
@@ -696,7 +698,7 @@ export class GameTestService {
    * the run could not start; a failed or timed-out run is a successful call with
    * a negative verdict.
    */
-  async run(spec: GameRunSpec & { input?: unknown }): Promise<GameRunResult> {
+  async run(spec: GameRunSpec & { input?: unknown }, signal?: AbortSignal): Promise<GameRunResult> {
     if (!appState.ui.isPlaying) {
       return {
         ok: false,
@@ -767,6 +769,7 @@ export class GameTestService {
         runGameTestLoop(
           {
             ...deps,
+            signal,
             protocol: recorders[0],
             onBaseline: baseline => {
               mainBaseline = baseline;
@@ -3017,6 +3020,11 @@ async function drive(
   let frame = 0;
 
   while (frame < spec.maxFrames) {
+    if (deps.signal?.aborted) {
+      const error = new Error('Game run cancelled by its caller.');
+      error.name = 'AbortError';
+      throw error;
+    }
     // Attach to anything that has spawned, and stamp what the coming frame emits
     // with that frame's number.
     signalWatcher?.sweep(frame + 1);
@@ -3026,6 +3034,11 @@ async function drive(
     // ticks in between. Awaited because the inventory comes from the live control
     // listing — safe here, since `manual` time schedules no frame of its own.
     if (monkey) await monkey.before(frame + 1);
+    if (deps.signal?.aborted) {
+      const error = new Error('Game run cancelled by its caller.');
+      error.name = 'AbortError';
+      throw error;
+    }
     // The inter-tick gap: input for the coming frame is dispatched here, and the
     // determinism probe is armed here, so everything counted between the two
     // hooks belongs to the tick and nothing of the harness can slip in (the loop

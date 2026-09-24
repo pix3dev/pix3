@@ -5,6 +5,7 @@ import {
   renderAutopilotTurnMessage,
   selectNextStep,
   selectNextStepFromProgress,
+  upsertSmokeFix,
   type AutopilotStep,
 } from './autopilot-queue';
 import type { FlowPlan } from './FlowPlanService';
@@ -14,6 +15,26 @@ const progress = (body: string): string =>
   ['# Progress — Sky Defender', '', 'One increment per turn.', '', body, ''].join('\n');
 
 const titles = (steps: readonly AutopilotStep[]): string[] => steps.map(step => step.title);
+
+describe('upsertSmokeFix', () => {
+  it('records a P0, deduplicates it, and reopens a prematurely ticked defect', () => {
+    const first = upsertSmokeFix(
+      progress('- [x] drone flies'),
+      'Runtime error on wave two',
+      'design/tests/r1.json'
+    );
+    expect(first.markdown).toContain('## Found by playtest');
+    expect(selectNextStepFromProgress(first.markdown).step?.kind).toBe('fix-p0');
+    const ticked = first.markdown.replace('- [ ] FIX', '- [x] FIX');
+    const second = upsertSmokeFix(ticked, 'Runtime error on wave two', 'design/tests/r2.json');
+    expect(second.attempts).toBe(1);
+    expect(second.signature).toBe(first.signature);
+    expect(second.markdown.match(/FIX \(P0\)/g)).toHaveLength(1);
+    expect(second.markdown).toContain('design/tests/r2.json');
+    expect(selectNextStepFromProgress(second.markdown).step?.kind).toBe('fix-p0');
+    expect(upsertSmokeFix(second.markdown, 'Runtime error on wave two', null).attempts).toBe(2);
+  });
+});
 
 describe('parseAutopilotSteps', () => {
   it('drops finished items and keeps the rest in file order', () => {
@@ -115,7 +136,14 @@ describe('selectNextStep', () => {
   });
 
   it('reports an empty queue as done rather than as an error', () => {
-    expect(selectNextStep([])).toEqual({ step: null, done: true });
+    expect(selectNextStep([])).toEqual({ step: null, done: true, ready: true });
+  });
+
+  it('reports ready when only optional spectacle or P1 work remains', () => {
+    const selection = selectNextStep([step('wow', 'screen shake'), step('fix-p1', 'dim coin')]);
+    expect(selection.ready).toBe(true);
+    expect(selection.done).toBe(false);
+    expect(selection.step?.kind).toBe('fix-p1');
   });
 
   it('reports done for a checklist whose every item is ticked', () => {

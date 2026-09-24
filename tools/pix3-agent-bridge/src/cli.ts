@@ -54,7 +54,9 @@ const maskKey = (key: string): string =>
 const printList = (providers: Record<string, ProviderConfig>): void => {
   const ids = Object.keys(providers);
   if (ids.length === 0) {
-    console.log('No providers configured. Add one, e.g.:  pix3-agent-bridge provider add openai --key sk-...');
+    console.log(
+      'No providers configured. Add one, e.g.:  pix3-agent-bridge provider add openai --key sk-...'
+    );
     console.log(`\nBuilt-in presets: ${Object.keys(PROVIDER_PRESETS).join(', ')}`);
     return;
   }
@@ -69,6 +71,7 @@ const printList = (providers: Record<string, ProviderConfig>): void => {
     console.log(`    baseUrl: ${p.baseUrl}`);
     console.log(`    key:     ${key}`);
     console.log(`    status:  ${state}`);
+    if (p.models?.length) console.log(`    models:  ${p.models.join(', ')}`);
     console.log('');
   }
 };
@@ -82,6 +85,7 @@ const usage = (): void => {
       '  pix3-agent-bridge provider list',
       '  pix3-agent-bridge provider add <id> [--key <k>] [--base-url <url>] [--kind openai|anthropic] [--label <l>]',
       '  pix3-agent-bridge provider set-key <id> <key>',
+      '  pix3-agent-bridge provider set-models <id> <model-id> [<model-id> ...]',
       '  pix3-agent-bridge provider enable <id>',
       '  pix3-agent-bridge provider disable <id>',
       '  pix3-agent-bridge provider remove <id>',
@@ -117,7 +121,8 @@ const addProvider = (
     process.exitCode = 1;
     return;
   }
-  const kindFlag = flags.kind === 'anthropic' ? 'anthropic' : flags.kind === 'openai' ? 'openai' : undefined;
+  const kindFlag =
+    flags.kind === 'anthropic' ? 'anthropic' : flags.kind === 'openai' ? 'openai' : undefined;
   const existing = config.providers[id];
   config.providers[id] = {
     kind: kindFlag ?? preset?.kind ?? existing?.kind ?? 'openai',
@@ -147,7 +152,9 @@ export const runProviderCommand = (args: string[]): void => {
       return;
     case 'add':
       if (!id) {
-        console.error('Usage: provider add <id> [--key <k>] [--base-url <url>] [--kind openai|anthropic]');
+        console.error(
+          'Usage: provider add <id> [--key <k>] [--base-url <url>] [--kind openai|anthropic]'
+        );
         process.exitCode = 1;
         return;
       }
@@ -169,6 +176,22 @@ export const runProviderCommand = (args: string[]): void => {
       provider.apiKey = key;
       saveConfig(config);
       console.log(`Key updated for "${id}".`);
+      return;
+    }
+    case 'set-models': {
+      const provider = id ? config.providers[id] : undefined;
+      const models = positional
+        .slice(2)
+        .map(model => model.trim())
+        .filter(Boolean);
+      if (!provider || models.length === 0) {
+        console.error('Usage: provider set-models <existing-id> <model-id> [<model-id> ...]');
+        process.exitCode = 1;
+        return;
+      }
+      provider.models = [...new Set(models)];
+      saveConfig(config);
+      console.log(`Models updated for "${id}". Restart the bridge to apply them.`);
       return;
     }
     case 'enable':
@@ -217,7 +240,7 @@ const agyUsage = (): void => {
       '',
       '--allow-tools additionally sets `agy.skipPermissions` in the bridge config. It is a separate',
       'decision because agy AUTO-DENIES every MCP call in print mode without',
-      '--dangerously-skip-permissions, and that same flag also un-gates agy\'s own shell, file and',
+      "--dangerously-skip-permissions, and that same flag also un-gates agy's own shell, file and",
       'browser tools on this machine. Without it the lane still works — as a text-only provider.',
     ].join('\n')
   );

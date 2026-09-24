@@ -70,6 +70,8 @@ export interface BridgeProviderEntry {
   readonly id: string;
   readonly label: string;
   readonly kind: BridgeProviderKind;
+  /** Explicit ids supplied by a custom endpoint that has no GET /models. */
+  readonly models?: readonly string[];
   /** Present only for `agent-cli` entries. */
   readonly status?: BridgeAgentStatus;
 }
@@ -83,14 +85,32 @@ class BridgeOpenAIProvider extends OpenAICompatLlmProvider {
   override readonly apiKeySecretId = BRIDGE_TOKEN_SECRET_ID;
   override readonly requiresBaseUrl = false;
   override readonly defaultBaseUrl: string;
+  private readonly hasConfiguredModels: boolean;
   protected override readonly missingKeyMessage =
     'Pix3AgentBridge pairing token is not set — paste it in Settings → AI Agent.';
 
-  constructor(id: string, label: string, baseUrl: string) {
+  constructor(id: string, label: string, baseUrl: string, modelIds?: readonly string[]) {
     super();
     this.id = id;
     this.label = label;
     this.defaultBaseUrl = baseUrl;
+    this.hasConfiguredModels = Boolean(modelIds?.length);
+    if (modelIds?.length) {
+      this.models = modelIds.map(modelId => ({
+        id: modelId,
+        label: modelId,
+        capabilities: {
+          supportsTools: true,
+          supportsImages: false,
+          supportsSystemPrompt: true,
+          maxOutputTokens: 4096,
+        },
+      }));
+    }
+  }
+
+  override async listModels(ctx: LlmListModelsContext): Promise<LlmModel[]> {
+    return this.hasConfiguredModels ? [...this.models] : super.listModels(ctx);
   }
 
   // The upstream key lives in the bridge; the "key" the editor sends is the pairing token, which the
@@ -287,5 +307,5 @@ export const createBridgeProvider = (
   if (entry.id === 'cerebras') {
     return new BridgeCerebrasProvider(providerBase);
   }
-  return new BridgeOpenAIProvider(entry.id, entry.label, providerBase);
+  return new BridgeOpenAIProvider(entry.id, entry.label, providerBase, entry.models);
 };

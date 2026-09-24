@@ -32,6 +32,7 @@ interface Fakes {
   execute: ReturnType<typeof vi.fn>;
   put: ReturnType<typeof vi.fn>;
   maxToolIterations?: number;
+  autopilotMaxToolIterationsPerTurn?: number;
   debugMode?: boolean;
   /** Optional project file reader (AGENTS.md lookup). Defaults to "no such file". */
   readTextFile?: (path: string) => Promise<string>;
@@ -91,6 +92,9 @@ const buildService = (fakes: Fakes): AgentChatService => {
         modelByProvider: {},
         customBaseUrl: '',
         ...AUTOPILOT_DEFAULTS,
+        autopilotMaxToolIterationsPerTurn:
+          fakes.autopilotMaxToolIterationsPerTurn ??
+          AUTOPILOT_DEFAULTS.autopilotMaxToolIterationsPerTurn,
         maxToolIterations: fakes.maxToolIterations ?? 5,
         debugMode: fakes.debugMode ?? false,
         soulId: fakes.soulId ?? 'brobot',
@@ -1362,6 +1366,47 @@ describe('AgentChatService', () => {
       appState.ui.workspaceMode = 'studio';
       appState.ui.flowAutopilot.mode = 'off';
       appState.ui.flowAutopilot.phase = 'idle';
+    });
+
+    it('uses the per-turn cap instead of the ordinary Flow floor', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(toolCallResult('read_errors', 'c1'))
+        .mockResolvedValueOnce(toolCallResult('read_errors', 'c2'))
+        .mockResolvedValueOnce(textResult('The turn reached its limit.'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({ ok: true })),
+        put: vi.fn(async () => undefined),
+        autopilotMaxToolIterationsPerTurn: 2,
+      });
+
+      await service.send('go');
+
+      expect(chat).toHaveBeenCalledTimes(3); // Two tool hops, then the forced words-only summary.
+      expect(service.getState().notice).toContain('Stopped after 2 tool iterations');
+    });
+
+    it('publishes structured failed-start counts for the supervisor', async () => {
+      const chat = vi
+        .fn()
+        .mockResolvedValueOnce(toolCallResult('play_start', 'p1'))
+        .mockResolvedValueOnce(toolCallResult('play_start', 'p2'))
+        .mockResolvedValueOnce(textResult('Could not start the game.'));
+      const service = buildService({
+        chat,
+        execute: vi.fn(async () => ({ ok: false, error: 'No active scene' })),
+        put: vi.fn(async () => undefined),
+        autopilotMaxToolIterationsPerTurn: 5,
+      });
+
+      await service.send('go');
+
+      expect(service.getState().turnExecution).toMatchObject({
+        iterations: 3,
+        toolCalls: 2,
+        consecutivePlayStartFailures: 2,
+      });
     });
 
     const askThenReport = () =>

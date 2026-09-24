@@ -164,6 +164,8 @@ export interface AgentChatState {
   readonly notice: string | null;
   /** Name of the tool currently executing (running turns only). */
   readonly activeTool: string | null;
+  /** Structured outcome of the current or most recently settled turn; reset when a turn starts. */
+  readonly turnExecution: AgentTurnExecution;
   /** Token usage accumulated across this conversation (when providers report it). */
   readonly totalUsage: LlmUsage;
   /**
@@ -183,6 +185,24 @@ export interface AgentChatState {
    */
   readonly compactedAtIndices: readonly number[];
 }
+
+export interface AgentTurnExecution {
+  readonly iterations: number;
+  readonly toolCalls: number;
+  readonly consecutivePlayStartFailures: number;
+  readonly verifyOutcome: 'unchanged' | 'pending' | 'proven' | 'failed';
+  readonly loopEscalations: number;
+  readonly forcedOverwrites: number;
+}
+
+const EMPTY_TURN_EXECUTION: AgentTurnExecution = {
+  iterations: 0,
+  toolCalls: 0,
+  consecutivePlayStartFailures: 0,
+  verifyOutcome: 'unchanged',
+  loopEscalations: 0,
+  forcedOverwrites: 0,
+};
 
 /** Project-root files scanned (in order) for user-authored agent instructions. */
 const AGENTS_FILES = ['AGENTS.md', 'agents.md', '.agents.md'] as const;
@@ -503,6 +523,7 @@ const IDLE_STATE: AgentChatState = {
   errorKind: null,
   notice: null,
   activeTool: null,
+  turnExecution: EMPTY_TURN_EXECUTION,
   totalUsage: {},
   turnMetrics: {},
   conversations: [],
@@ -857,6 +878,7 @@ export class AgentChatService {
       errorKind: null,
       notice: null,
       pendingQuestion: null,
+      turnExecution: EMPTY_TURN_EXECUTION,
     });
     try {
       await this.runLoop(this.abortController.signal);
@@ -1180,9 +1202,11 @@ export class AgentChatService {
     const preferences = this.settings.getPreferences();
     const maxIterations = Math.max(
       1,
-      appState.ui.workspaceMode === 'flow'
-        ? Math.max(preferences.maxToolIterations, FLOW_MIN_TOOL_ITERATIONS)
-        : preferences.maxToolIterations
+      isAutopilotDrivenTurn()
+        ? preferences.autopilotMaxToolIterationsPerTurn
+        : appState.ui.workspaceMode === 'flow'
+          ? Math.max(preferences.maxToolIterations, FLOW_MIN_TOOL_ITERATIONS)
+          : preferences.maxToolIterations
     );
     // Model capabilities come from the (possibly live-fetched) catalog: strip tools for models
     // that can't call them, and pass the model's output budget instead of provider flat defaults.
@@ -1326,6 +1350,12 @@ export class AgentChatService {
       });
 
       this.accumulateUsage(result.usage);
+      this.setState({
+        turnExecution: {
+          ...this.state.turnExecution,
+          iterations: this.state.turnExecution.iterations + 1,
+        },
+      });
       const assistantIndex = this.state.messages.length;
       this.appendMessage({ role: 'assistant', content: result.content });
       this.lastRequestInputTokens = result.usage?.inputTokens ?? this.lastRequestInputTokens;
@@ -1401,6 +1431,11 @@ export class AgentChatService {
             ],
           });
           continue;
+        }
+        if (unverifiedGameMutation) {
+          this.setState({
+            turnExecution: { ...this.state.turnExecution, verifyOutcome: 'failed' },
+          });
         }
         return;
       }
@@ -1501,6 +1536,9 @@ export class AgentChatService {
       }
       if (stuckReason && escalations < MAX_STUCK_ESCALATIONS) {
         escalations += 1;
+        this.setState({
+          turnExecution: { ...this.state.turnExecution, loopEscalations: escalations },
+        });
         resultContent.push({
           type: 'text',
           text: advisorAvailable
@@ -1539,6 +1577,9 @@ export class AgentChatService {
     // The cap was hit. Never leave the user with a silent stop: one final round-trip with tools
     // DISABLED, so the model has no choice but to answer in words. Measured: a capped turn ended
     // with 60 tool calls and not one sentence for the user, even though the work was mostly done.
+    if (unverifiedGameMutation) {
+      this.setState({ turnExecution: { ...this.state.turnExecution, verifyOutcome: 'failed' } });
+    }
     await this.forceClosingSummary(provider, { apiKey, modelId, baseUrl }, model, origin, signal);
 
     this.setState({
@@ -1846,6 +1887,21 @@ export class AgentChatService {
     }
     this.setState({ activeTool: call.name });
     const executed = await this.executeToolCall(call);
+    const outcome = executed.value;
+    const failedPlayStart =
+      call.name === 'play_start' &&
+      (executed.result.isError === true || (isRecord(outcome) && outcome.ok === false));
+    this.setState({
+      turnExecution: {
+        ...this.state.turnExecution,
+        toolCalls: this.state.turnExecution.toolCalls + 1,
+        consecutivePlayStartFailures: failedPlayStart
+          ? this.state.turnExecution.consecutivePlayStartFailures + 1
+          : call.name === 'play_start'
+            ? 0
+            : this.state.turnExecution.consecutivePlayStartFailures,
+      },
+    });
     pass.images.push(...executed.images);
     const signature = `${call.name}:${JSON.stringify(call.input ?? {})}`;
     const resultText =
@@ -1901,14 +1957,21 @@ export class AgentChatService {
     // rewrite of an existing file is a stuck signal, not a normal edit (see AgentToolRegistry).
     if (/"forcedOverwrite"\s*:\s*true/.test(resultText)) {
       pass.forcedOverwrites += 1;
+      this.setState({
+        turnExecution: { ...this.state.turnExecution, forcedOverwrites: pass.forcedOverwrites },
+      });
     }
     // A game-logic change is a script/scene write or a component edit; a design/progress .md
     // write or an asset op is not. A successful game_run/game_input/game_observe clears the
     // debt (see GAME_PROOF_TOOLS for why game_controls/game_time do not).
     if (isGameLogicMutation(call.name, call.input)) {
       pass.unverifiedGameMutation = true;
+      this.setState({ turnExecution: { ...this.state.turnExecution, verifyOutcome: 'pending' } });
     } else if (clearsGameVerifyDebt(call.name, resultText)) {
       pass.unverifiedGameMutation = false;
+      if (this.state.turnExecution.verifyOutcome === 'pending') {
+        this.setState({ turnExecution: { ...this.state.turnExecution, verifyOutcome: 'proven' } });
+      }
     } else if (call.name === 'ask_user') {
       const asked = parseAskUser(call.input);
       if (isAutopilotDrivenTurn()) {
@@ -2117,7 +2180,7 @@ export class AgentChatService {
 
   private async executeToolCall(
     call: LlmToolUseBlock
-  ): Promise<{ result: LlmToolResultBlock; images: LlmImageBlock[] }> {
+  ): Promise<{ result: LlmToolResultBlock; images: LlmImageBlock[]; value: unknown }> {
     const base = { type: 'tool-result' as const, toolUseId: call.id, toolName: call.name };
     const startedAt = performance.now();
     try {
@@ -2154,6 +2217,7 @@ export class AgentChatService {
           ...(call.name === 'generate_asset' ? { durationMs: performance.now() - startedAt } : {}),
         },
         images,
+        value,
       };
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -2165,6 +2229,7 @@ export class AgentChatService {
           ...(call.name === 'generate_asset' ? { durationMs: performance.now() - startedAt } : {}),
         },
         images: [],
+        value: null,
       };
     }
   }

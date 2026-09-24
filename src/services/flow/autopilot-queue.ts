@@ -29,6 +29,8 @@ export interface AutopilotSelection {
   readonly step: AutopilotStep | null;
   /** True when the checklist is clear — "the prototype is as done as the queue can say" (§5). */
   readonly done: boolean;
+  /** Main increments and P0 fixes are clear; optional P1/wow work may still be queued. */
+  readonly ready: boolean;
 }
 
 /** Section of `design/progress.md` an item was found in. */
@@ -108,18 +110,57 @@ const PRIORITY: readonly AutopilotStepKind[] = ['fix-p0', 'active', 'todo', 'fix
  * half-built mechanics and no proof for either.
  */
 export const selectNextStep = (steps: readonly AutopilotStep[]): AutopilotSelection => {
+  const ready = !steps.some(
+    step => step.kind === 'fix-p0' || step.kind === 'active' || step.kind === 'todo'
+  );
   for (const kind of PRIORITY) {
     const step = steps.find(candidate => candidate.kind === kind);
     if (step) {
-      return { step, done: false };
+      return { step, done: false, ready };
     }
   }
-  return { step: null, done: true };
+  return { step: null, done: true, ready: true };
 };
 
 /** Convenience for callers holding the raw file: {@link parseAutopilotSteps} + {@link selectNextStep}. */
 export const selectNextStepFromProgress = (progressMarkdown: string): AutopilotSelection =>
   selectNextStep(parseAutopilotSteps(progressMarkdown));
+
+/** Keep a failed smoke in the same checklist, even if an earlier turn ticked its FIX prematurely. */
+export const upsertSmokeFix = (
+  progressMarkdown: string,
+  reason: string,
+  reportPath: string | null
+): { markdown: string; attempts: number; signature: string } => {
+  const summary = reason.replace(/\s+/g, ' ').trim().slice(0, 240) || 'Smoke run failed';
+  const signature = smokeSignature(summary);
+  const marker = `[smoke:${signature}; attempts=`;
+  const lines = progressMarkdown.split('\n');
+  const previous = lines.findIndex(line => line.includes(marker));
+  const attempts = previous < 0 ? 0 : Number(/attempts=(\d+)/.exec(lines[previous])?.[1] ?? 0) + 1;
+  const report = reportPath ? ` — ${reportPath}` : '';
+  const item = `- [ ] FIX (P0): ${summary} [smoke:${signature}; attempts=${attempts}]${report}`;
+  if (previous >= 0) {
+    lines[previous] = item;
+    return { markdown: lines.join('\n'), attempts, signature };
+  }
+  const heading = lines.findIndex(line => /^##+\s+Found by playtest\s*$/i.test(line));
+  if (heading >= 0) {
+    lines.splice(heading + 1, 0, item);
+  } else {
+    while (lines.at(-1) === '') lines.pop();
+    lines.push('', '## Found by playtest', '', item, '');
+  }
+  return { markdown: lines.join('\n'), attempts, signature };
+};
+
+const smokeSignature = (reason: string): string => {
+  let hash = 2166136261;
+  for (const character of reason.toLowerCase()) {
+    hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
+  }
+  return (hash >>> 0).toString(36);
+};
 
 /**
  * The turn message the supervisor sends to take one increment.
