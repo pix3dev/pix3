@@ -173,6 +173,135 @@ describe('AgentToolRegistry', () => {
       expect(await registry.execute('generate_asset')).toMatchObject({ ok: false });
       expect(handler).toHaveBeenCalledTimes(1);
     });
+
+    it('handles canonical path variations when tracking created files', async () => {
+      const handler = vi.fn(async () => ({ ok: true, created: true }));
+      const registry = buildRegistry();
+      Object.defineProperty(registry, 'tools', { value: [{ name: 'fs_write', handler }] });
+
+      expect(await registry.execute('fs_write', { path: 'res://scripts/player.ts' })).toMatchObject({
+        ok: true,
+      });
+      // Should recognise player.ts even with Windows backslashes or leading slashes
+      expect(
+        await registry.execute('fs_write', { path: 'scripts\\player.ts', overwrite: true })
+      ).toMatchObject({ ok: true });
+      expect(
+        await registry.execute('fs_write', { path: '/scripts/./player.ts', overwrite: true })
+      ).toMatchObject({ ok: true });
+      expect(handler).toHaveBeenCalledTimes(3);
+    });
+
+    it('rejects process_asset overwriting an existing file that this run did not create', async () => {
+      const handler = vi.fn(async () => ({ ok: true }));
+      const readBlob = vi.fn(async () => new Blob());
+      const registry = buildRegistry({
+        storage: { readBlob },
+      });
+      Object.defineProperty(registry, 'tools', { value: [{ name: 'process_asset', handler }] });
+
+      const result = await registry.execute('process_asset', { name: 'assets/player.png' });
+      expect(result).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('this run did not create it'),
+      });
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('blocks paid generation tools when autopilotAssetGenerations <= 0', async () => {
+      const handler = vi.fn(async () => ({ ok: true }));
+      const registry = buildRegistry({
+        settings: { getPreferences: () => ({ autopilotAssetGenerations: 0 }) },
+      });
+      Object.defineProperty(registry, 'tools', {
+        value: ['generate_asset', 'generate_sfx', 'generate_model_3d', 'generate_scene_3d'].map(
+          name => ({ name, handler })
+        ),
+      });
+
+      for (const tool of [
+        'generate_asset',
+        'generate_sfx',
+        'generate_model_3d',
+        'generate_scene_3d',
+      ]) {
+        expect(await registry.execute(tool)).toMatchObject({
+          ok: false,
+          error: expect.stringContaining('Autopilot paid generation is disabled'),
+        });
+      }
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('reserves and limits all paid generation tools when autopilotAssetGenerations > 0', async () => {
+      const handler = vi.fn(async () => ({ ok: true }));
+      const registry = buildRegistry({
+        settings: { getPreferences: () => ({ autopilotAssetGenerations: 1 }) },
+      });
+      Object.defineProperty(registry, 'tools', {
+        value: ['generate_asset', 'generate_sfx', 'generate_model_3d', 'generate_scene_3d'].map(
+          name => ({ name, handler })
+        ),
+      });
+
+      // First call (generate_sfx) consumes the 1 reservation
+      expect(await registry.execute('generate_sfx')).toMatchObject({ ok: true });
+      expect(handler).toHaveBeenCalledTimes(1);
+
+      // Second call (generate_model_3d) exceeds the limit and is blocked
+      expect(await registry.execute('generate_model_3d')).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('Autopilot asset generation limit reached (1)'),
+      });
+      expect(handler).toHaveBeenCalledTimes(1);
+    });
+
+    it('aborts tool dispatch and does not call handler when project changes before execution', async () => {
+      const handler = vi.fn(async () => ({ ok: true }));
+      const registry = buildRegistry({
+        storage: {
+          readBlob: vi.fn(async () => {
+            // Simulate project switch while async checks are underway
+            appState.project.id = 'switched-project-mid-flight';
+            throw new Error('File not found');
+          }),
+        },
+      });
+      Object.defineProperty(registry, 'tools', { value: [{ name: 'process_asset', handler }] });
+
+      const result = await registry.execute('process_asset', {
+        name: 'new.png',
+        sourcePath: 'sprites/existing.png',
+        crop: { x: 0, y: 0, width: 10, height: 10 },
+      });
+
+      expect(result).toMatchObject({
+        ok: false,
+        error: 'Autopilot run changed before the tool could start.',
+      });
+      expect(handler).not.toHaveBeenCalled();
+    });
+
+    it('suppresses post-execution side-effects when project changes during tool handler', async () => {
+      const registry = buildRegistry();
+      const handler = vi.fn(async () => {
+        // Project changes while handler is executing
+        appState.project.id = 'switched-during-handler';
+        return { ok: true, created: true, path: 'scripts/mutated.ts' };
+      });
+      Object.defineProperty(registry, 'tools', { value: [{ name: 'fs_write', handler }] });
+
+      const result = await registry.execute('fs_write', {
+        path: 'scripts/mutated.ts',
+        content: 'console.log(1);',
+      });
+
+      expect(result).toMatchObject({ ok: true, created: true });
+      // The side-effect Set should NOT have retained the file for the old run
+      const createdFiles = (registry as unknown as { autopilotCreatedFiles: Set<string> })
+        .autopilotCreatedFiles;
+      expect(createdFiles.has('scripts/mutated.ts')).toBe(false);
+    });
   });
 
   it('lists the expected tools', () => {

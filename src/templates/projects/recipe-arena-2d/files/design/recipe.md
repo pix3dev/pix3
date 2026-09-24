@@ -107,6 +107,11 @@ and `enabled: false`, i.e. a button that can never be pressed (`game_observe` re
   `main.pix3scene`.
 - Do not import rapier: there is no rigidbody solver here and none is needed.
 
+## Playtest contract
+
+terminalVisual: static
+terminalRestartRoutine: terminal-retry
+
 ## Verify
 
 1. `play_start` on `scenes/main.pix3scene`.

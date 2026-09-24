@@ -24,18 +24,20 @@ const build = (
     ok: true,
     routine: { name: 'terminal-retry', description: 'Tap RETRY', macro: false },
     expectations: [{ index: 0, assertion: 'phase playing', met: true, detail: 'playing' }],
-  }
+  },
+  storageMock: unknown = { listDirectory: vi.fn(async () => []) }
 ) => {
   const service = new FlowPlaytestService();
-  const execute = vi.fn(async (name: string) =>
-    name === 'fs_read'
-      ? { content: recipe }
-      : name === 'game_run'
-        ? routineOutcome
-        : name === 'play_stop'
-          ? { ok: true }
-          : start
-  );
+  const execute = vi.fn(async (name: string, args?: unknown) => {
+    if (typeof start === 'function') {
+      const res = (start as (n: string, a?: unknown) => unknown)(name, args);
+      if (res !== undefined) return res;
+    }
+    if (name === 'fs_read') return { content: recipe };
+    if (name === 'game_run') return routineOutcome;
+    if (name === 'play_stop') return { ok: true };
+    return start;
+  });
   const results = Array.isArray(run) ? [...run] : [run];
   const gameRun = vi.fn(
     async (_spec: unknown, _signal?: AbortSignal) => results.shift() ?? runResult('error')
@@ -56,6 +58,7 @@ const build = (
     },
     configurable: true,
   });
+  Object.defineProperty(service, 'storage', { value: storageMock, configurable: true });
   return { service, execute, gameRun, prepareRunProtocolStore };
 };
 
@@ -85,7 +88,12 @@ describe('FlowPlaytestService', () => {
       reportPath: 'design/tests/reports/smoke.json',
       terminal: { status: 'inconclusive' },
     });
-    expect(execute.mock.calls.map(call => call[0])).toEqual(['play_start', 'play_stop']);
+    expect(execute.mock.calls.map(call => call[0])).toEqual([
+      'play_start',
+      'game_controls',
+      'fs_read',
+      'play_stop',
+    ]);
     expect(gameRun).toHaveBeenCalledWith(
       expect.objectContaining({
         maxFrames: 600,
@@ -160,6 +168,7 @@ describe('FlowPlaytestService', () => {
     });
     expect(execute.mock.calls.map(call => call[0])).toEqual([
       'play_start',
+      'game_controls',
       'fs_read',
       'play_restart',
       'play_stop',
@@ -241,6 +250,7 @@ describe('FlowPlaytestService', () => {
     expect(execute).toHaveBeenCalledWith('game_run', { routine: 'terminal-retry' });
     expect(execute.mock.calls.map(call => call[0])).toEqual([
       'play_start',
+      'game_controls',
       'fs_read',
       'game_run',
       'play_stop',
@@ -282,7 +292,12 @@ describe('FlowPlaytestService', () => {
 
     expect(result.status).toBe('failed');
     expect(result.terminal?.status).toBe('failed');
-    expect(execute.mock.calls.map(call => call[0])).toEqual(['play_start', 'play_stop']);
+    expect(execute.mock.calls.map(call => call[0])).toEqual([
+      'play_start',
+      'game_controls',
+      'fs_read',
+      'play_stop',
+    ]);
   });
 
   it('does not call a terminal probe green without a terminal snapshot', async () => {
@@ -350,5 +365,247 @@ describe('FlowPlaytestService', () => {
     };
     const { service } = build(detached);
     expect((await service.smoke()).status).toBe('inconclusive');
+  });
+
+  it('fails smoke when an active control is reported with unknown reach', async () => {
+    const { service } = build(runResult('until'), (name: string) => {
+      if (name === 'game_controls') {
+        return {
+          ok: true,
+          controls: [{ name: 'jump-btn', visible: true, enabled: true, reach: 'unknown' }],
+        };
+      }
+      return { ok: true };
+    });
+    const result = await service.smoke();
+    expect(result).toMatchObject({
+      status: 'failed',
+      findingKey: 'control-unreachable:jump-btn',
+      reason: 'Control "jump-btn" is visible but has unknown reach.',
+    });
+  });
+
+  it('executes non-terminal routine files and reports failures', async () => {
+    const storageMock = {
+      listDirectory: vi.fn(async () => [
+        { name: 'score-routine.json', path: 'design/tests/routines/score-routine.json', kind: 'file' },
+        { name: 'terminal-retry.json', path: 'design/tests/routines/terminal-retry.json', kind: 'file' },
+      ]),
+    };
+    const { service, execute } = build(
+      runResult('until'),
+      (name: string, args: unknown) => {
+        if (name === 'game_run' && (args as { routine?: string })?.routine === 'score-routine') {
+          return {
+            ok: false,
+            verdict: 'FAIL score',
+            routine: { name: 'score-routine', description: 'Score check', macro: false },
+            expectations: [{ index: 0, assertion: 'score > 0', met: false, detail: '0' }],
+            artifact: { written: true, path: 'design/tests/reports/score-fail.json' },
+          };
+        }
+        return { ok: true };
+      },
+      '## Playtest contract\nterminalRestartRoutine: terminal-retry\n## Verify',
+      undefined,
+      storageMock
+    );
+
+    const result = await service.smoke();
+    expect(result).toMatchObject({
+      status: 'failed',
+      findingKey: 'routine:score-routine',
+      reason: 'FAIL score',
+      reportPath: 'design/tests/reports/score-fail.json',
+    });
+    expect(execute).toHaveBeenCalledWith('game_run', { routine: 'score-routine' });
+    // terminal-retry should be skipped during routine probe because it matches terminalRestartRoutine
+    expect(execute).not.toHaveBeenCalledWith('game_run', { routine: 'terminal-retry' });
+  });
+
+  it('classifies a failed negative control as control:negative-failed', async () => {
+    const runWithFailedControl: GameRunResult = {
+      ...runResult('until'),
+      control: {
+        verdict: 'failed',
+        outcome: { kind: 'fail', frame: 10, gameTimeMs: 160, detail: 'jump occurred without tap' },
+        note: 'jump occurred without tap',
+        isolation: { method: 'reset', ok: true, detail: 'reset ok' },
+        gesture: 'tap away from button',
+        frames: { main: 60, control: 60 },
+      },
+      verdict: 'Negative control failed: jumped without tap',
+    };
+    const { service } = build(runWithFailedControl);
+    const result = await service.smoke();
+    expect(result).toMatchObject({
+      status: 'failed',
+      findingKey: 'control:negative-failed:fail',
+      reason: 'Negative control failed: jumped without tap',
+    });
+  });
+
+  describe('recipe template controls scan and routines', () => {
+    it('verifies recipe-bouncer-2d controls and terminal-retry routine pass', async () => {
+      const storageMock = {
+        listDirectory: vi.fn(async () => [
+          { name: 'terminal-retry.json', path: 'design/tests/routines/terminal-retry.json', kind: 'file' },
+        ]),
+      };
+      const { service, execute } = build(
+        runResult('until'),
+        (name: string) => {
+          if (name === 'game_controls') {
+            return {
+              ok: true,
+              controls: [
+                { name: 'paddle-drag', visible: true, enabled: true, reach: 'reachable' },
+                { name: 'retry-button', visible: true, enabled: true, reach: 'hidden-by-ancestor' },
+              ],
+            };
+          }
+          return { ok: true };
+        },
+        '## Playtest contract\nterminalRestartRoutine: terminal-retry\n## Verify',
+        undefined,
+        storageMock
+      );
+      const result = await service.smoke();
+      expect(result.status).toBe('passed');
+      expect(execute).toHaveBeenCalledWith('game_controls');
+    });
+
+    it('verifies recipe-arena-2d controls and terminal-retry routine pass', async () => {
+      const storageMock = {
+        listDirectory: vi.fn(async () => [
+          { name: 'terminal-retry.json', path: 'design/tests/routines/terminal-retry.json', kind: 'file' },
+        ]),
+      };
+      const { service, execute } = build(
+        runResult('until'),
+        (name: string) => {
+          if (name === 'game_controls') {
+            return {
+              ok: true,
+              controls: [
+                { name: 'virtual-joystick', visible: true, enabled: true, reach: 'reachable' },
+                { name: 'fire-button', visible: true, enabled: true, reach: 'reachable' },
+                { name: 'retry-button', visible: true, enabled: true, reach: 'hidden-by-ancestor' },
+              ],
+            };
+          }
+          return { ok: true };
+        },
+        '## Playtest contract\nterminalRestartRoutine: terminal-retry\n## Verify',
+        undefined,
+        storageMock
+      );
+      const result = await service.smoke();
+      expect(result.status).toBe('passed');
+      expect(execute).toHaveBeenCalledWith('game_controls');
+    });
+
+    it('verifies recipe-blank-2d controls and runs its extra restart routine', async () => {
+      const storageMock = {
+        listDirectory: vi.fn(async () => [
+          { name: 'restart.json', path: 'design/tests/routines/restart.json', kind: 'file' },
+          { name: 'terminal-retry.json', path: 'design/tests/routines/terminal-retry.json', kind: 'file' },
+        ]),
+      };
+      const { service, execute } = build(
+        runResult('until'),
+        (name: string, args: unknown) => {
+          if (name === 'game_controls') {
+            return {
+              ok: true,
+              controls: [
+                { name: 'retry-button', visible: true, enabled: true, reach: 'hidden-by-ancestor' },
+              ],
+            };
+          }
+          if (name === 'game_run' && (args as { routine?: string })?.routine === 'restart') {
+            return {
+              ok: true,
+              routine: { name: 'restart', description: 'Restart check', macro: false },
+              expectations: [{ index: 0, assertion: 'phase playing', met: true, detail: 'playing' }],
+            };
+          }
+          return { ok: true };
+        },
+        '## Playtest contract\nterminalRestartRoutine: terminal-retry\n## Verify',
+        undefined,
+        storageMock
+      );
+      const result = await service.smoke();
+      expect(result.status).toBe('passed');
+      expect(execute).toHaveBeenCalledWith('game_controls');
+      expect(execute).toHaveBeenCalledWith('game_run', { routine: 'restart' });
+    });
+
+    it('fails smoke when an enabled visible control is off-screen', async () => {
+      const { service } = build(
+        runResult('until'),
+        (name: string) => {
+          if (name === 'game_controls') {
+            return {
+              ok: true,
+              controls: [
+                { name: 'escape-btn', visible: true, enabled: true, reach: 'off-screen' },
+              ],
+            };
+          }
+          return { ok: true };
+        }
+      );
+      const result = await service.smoke();
+      expect(result).toMatchObject({
+        status: 'failed',
+        findingKey: 'control-off-screen:escape-btn',
+        reason: 'Control "escape-btn" is visible but off-screen.',
+      });
+    });
+
+    it('fails smoke when an enabled visible control is in-frame-unproven', async () => {
+      const { service } = build(
+        runResult('until'),
+        (name: string) => {
+          if (name === 'game_controls') {
+            return {
+              ok: true,
+              controls: [
+                { name: 'unproven-btn', visible: true, enabled: true, reach: 'in-frame-unproven' },
+              ],
+            };
+          }
+          return { ok: true };
+        }
+      );
+      const result = await service.smoke();
+      expect(result).toMatchObject({
+        status: 'failed',
+        findingKey: 'control-unproven:unproven-btn',
+        reason: 'Control "unproven-btn" is visible but in-frame-unproven (no physical proof in reachability.json or session).',
+      });
+    });
+
+    it('returns inconclusive if reading routines directory fails with storage error', async () => {
+      const storageMock = {
+        listDirectory: vi.fn(async () => {
+          throw new Error('EACCES: permission denied');
+        }),
+      };
+      const { service } = build(
+        runResult('until'),
+        { ok: true },
+        '',
+        undefined,
+        storageMock
+      );
+      const result = await service.smoke();
+      expect(result).toMatchObject({
+        status: 'inconclusive',
+        reason: expect.stringContaining('Failed to read routines directory: EACCES'),
+      });
+    });
   });
 });

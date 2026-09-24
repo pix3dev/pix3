@@ -126,6 +126,11 @@ Replacing a script named above is expected — `fs_write` with `overwrite: true`
 - No `core:Hitbox2D` on the ball or walls (axis-aligned overlap would disagree with the
   swept solver), and no rapier.
 
+## Playtest contract
+
+terminalVisual: static
+terminalRestartRoutine: terminal-retry
+
 ## Verify
 
 1. `play_start` on `scenes/main.pix3scene`.

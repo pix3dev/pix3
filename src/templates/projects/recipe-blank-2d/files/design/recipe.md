@@ -10,9 +10,7 @@ Pick this recipe when the idea's core loop is not what another recipe ships:
 grid or turn-based movement (snake, sokoban, match-3), word / card / board games,
 builders, idle games without a ball. **Your first increment is the core
 mechanic itself, controls included** — that is the trade being made here, and it
-beats spending the first increment deleting somebody else's mechanic. (A ball
-that falls and bounces off things — pinball, plinko, peggle, idle-pinball — is
-the bouncer recipe's job, even when the paddle goes.)
+beats spending the first increment deleting somebody else's mechanic.
 
 Everything *around* the mechanic is done: you never hand-roll a score counter, a
 lives bar, a timer, an end screen or a retry. The look is done too: `post-fx`
@@ -129,7 +127,12 @@ yourself. A hand-rolled ending leaves RETRY on screen with its handler bound and
 - `GameRules`' ownership of `result-overlay` and `retry-button`.
 - `post-fx`: keep the id and `affect2D: true` — without it a 2D scene gets no
   bloom. Tune the values, don't delete the node.
-- Do not import rapier, and do not add a menu scene as part of an early increment.
+- Do not import rapier, and do not add a menu scene early.
+
+## Playtest contract
+
+terminalVisual: static
+terminalRestartRoutine: terminal-retry
 
 ## Verify
 

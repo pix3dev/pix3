@@ -1,0 +1,23 @@
+{
+  "name": "terminal-retry",
+  "description": "From the result screen, physically tap RETRY and check that play resumes.",
+  "scope": "scenes/main.pix3scene",
+  "params": {},
+  "uses": ["result-overlay", "retry-button"],
+  "steps": [
+    {
+      "type": "tap",
+      "target": "retry-button",
+      "holdMs": 200,
+      "why": "A real pointer press proves the button is visible, enabled and reachable."
+    },
+    {
+      "type": "wait",
+      "frames": 30,
+      "why": "Let the scene transition finish before reading the new game's phase."
+    }
+  ],
+  "expect": [
+    { "kind": "gameState", "path": "phase", "op": "eq", "value": "playing" }
+  ]
+}

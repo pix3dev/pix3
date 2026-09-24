@@ -2138,7 +2138,8 @@ export class AgentChatService {
       );
       const text =
         typeof result.content === 'string' ? result.content : JSON.stringify(result.content);
-      const ok = result.isError !== true;
+      const parsed = safeParseJson(text);
+      const ok = result.isError !== true && (!isRecord(parsed) || parsed.ok !== false);
       reports.push({
         step: index,
         tool: step.tool,
@@ -2146,7 +2147,7 @@ export class AgentChatService {
         ok,
         result: text,
       });
-      resolvedResults.push(ok ? safeParseJson(text) : undefined);
+      resolvedResults.push(ok ? parsed : undefined);
       if (!ok && plan.onError === 'stop') {
         stoppedAt = index;
         stopReason = `step ${index} (${step.tool}) failed`;

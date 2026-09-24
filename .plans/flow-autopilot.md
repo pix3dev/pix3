@@ -468,3 +468,33 @@ Vision-рубрика (`CHECK:`), советник в маршрутизатор
   плейтестер независимо сверяет фазу через один кадр. Живая проверка: штатный Tapper — `passed`,
   временно отключённая кнопка — `failed` с ключом `terminal-restart-control` и протоколом
   `routine-terminal-retry-fail`. Проект и recent удалены; `samples/` не тронут.
+
+- **2026-09-24 — A1, закрытие укрепления и гардов.** В `AgentToolRegistry` нормализована каноника путей
+  (`res://` префиксы, обратные слэши Windows приводятся к единому POSIX виду); `process_asset` и
+  `fs_write(overwrite:true)` теперь строго блокируются для файлов, которые агент не создавал в текущем
+  забеге автопилота; закрыто платное резервирование ассетов и моделей (`generate_sfx`, `generate_model_3d`,
+  `generate_scene_3d`); `runBatch` в `AgentChatService` теперь останавливает пакет при ответе шага
+  `{ ok: false, error: ... }` без бросания исключения; при смене проекта или ручном перехвате старый
+  ход и очередь немедленно абортируются через `AbortController` и не производят мутаций. Покрыто юнит-тестами
+  в `AgentToolRegistry.spec.ts` (214 тестов) и `AgentChatService.spec.ts` (96 тестов).
+
+- **2026-09-24 — B, скан контролов и рутины на всех рецептах.** В `FlowPlaytestService` расширена верификация:
+  сканируются `game_controls` на видимость и достижимость (`off-screen` -> `control-off-screen:<name>`, `in-frame-unproven` -> `control-unproven:<name>`, `unknown` -> `control-unreachable:<name>`),
+  запускаются все routine-файлы из `design/tests/routines/` за исключением терминального рестарта (`routine:<name>`),
+  ошибки чтения директории routines не проглатываются молча (возвращают `status: 'inconclusive'`),
+  классифицируются негативные контроли (`control:negative-failed:<kind>`). Добавлены недостающие `reachability.json`
+  и приведены к лимиту символы `recipe.md` в рецептах `recipe-arena-2d`, `recipe-bouncer-2d`, `recipe-blank-2d`.
+  Проверены через `recipes.spec.ts` (101 тест) и `FlowPlaytestService.spec.ts` (25 тестов).
+
+- **2026-09-25 — Приёмка Фазы A на реальном провайдере и артефакт верификации.**
+  Выполнен повторный проверочный прогон на реальном провайдере `agy` (Antigravity CLI) в проекте `Acceptance Tapper 2` (`265ea32f-4f38-4a6d-821d-277614ffbfd1`).
+  Проверены:
+  1. Запуск из вкладки Flow (`d.flow.arm('autonomous')`).
+  2. Автономное выполнение ходов:
+     - Ход 1: обход сцены, подтверждение иерархии, апдейт `design/progress.md`.
+     - Ход 2: отработка дефекта off-screen через `batch` с `set_property`, физический клик в запущенной игре, отметка `- [x]` в `progress.md`.
+     - Ход 3: обнаружение дефекта reachability (`in-frame-unproven`), автономный запуск агента, срабатывание детектора петель и безопасная пауза автопилота (`The agent got stuck twice in this turn.`).
+  3. Контроль бюджета и ограничений: 3 хода, 74 вызова инструментов, учёт токенов (66K uncached).
+  4. Формирование отчёта `design/autopilot-run-mug0ifsm-1.json` со списком дефектов smoke-тестов и отметками в `design/progress.md`.
+  5. Перехват управления человеком (`d.flow.takeWheel()`) и возобновление (`d.flow.arm('autonomous')`).
+  Полный отчёт и транскрипт сохранены в артефакте сессии `acceptance-a-report.md`. Все 1324 теста в 41 тест-файле зелены, `npm run type-check` чист. Проект сохранён в браузере для верификации.

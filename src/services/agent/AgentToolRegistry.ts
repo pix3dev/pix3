@@ -225,6 +225,17 @@ export const IDEA_STAGE_TOOLS: ReadonlySet<string> = new Set([
   'process_asset',
 ]);
 
+const canonicalAutopilotPath = (raw: string): string =>
+  raw
+    .replace(/^res:\/\//i, '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .split('/')
+    .filter(part => part && part !== '.')
+    .join('/')
+    .toLowerCase();
+
 // Script collection mirrors PreviewHostService.collectScriptFiles.
 const SCRIPT_DIRECTORIES = ['scripts', 'src/scripts'] as const;
 const EXCLUDED_SCRIPT_SUFFIXES = ['.spec.ts', '.test.ts', '.d.ts'] as const;
@@ -640,6 +651,8 @@ export class AgentToolRegistry {
     this.ensureProtocolStore();
   }
 
+  // ---------------------------------------------------------------------------
+
   /** Execute a tool by name. Throws for an unknown tool; handlers own their own error semantics. */
   async execute(name: string, args: Record<string, unknown> = {}): Promise<unknown> {
     const tool = this.ensureTools().find(t => t.name === name);
@@ -659,29 +672,49 @@ export class AgentToolRegistry {
     if (name === 'fs_delete') {
       return { ok: false, error: 'Autopilot cannot delete project files.' };
     }
-    const path =
-      name === 'fs_write' || name === 'str_replace' ? this.safePath(asString(args.path)) : null;
-    const guardedPath =
-      path
-        ?.split('/')
-        .filter(part => part && part !== '.')
-        .join('/') ?? null;
-    if (guardedPath?.toLowerCase() === 'design/brief.md') {
+    const targetPath =
+      name === 'fs_write' || name === 'str_replace'
+        ? canonicalAutopilotPath(asString(args.path))
+        : name === 'process_asset'
+          ? canonicalAutopilotPath(asString(args.name || args.path))
+          : null;
+    if (targetPath === 'design/brief.md') {
       return { ok: false, error: 'Autopilot cannot edit design/brief.md.' };
     }
     if (
       name === 'fs_write' &&
       args.overwrite === true &&
-      guardedPath &&
-      !this.autopilotCreatedFiles.has(guardedPath)
+      targetPath &&
+      !this.autopilotCreatedFiles.has(targetPath)
     ) {
       return {
         ok: false,
-        error: `Autopilot cannot use overwrite:true on ${path}: this run did not create it.`,
+        error: `Autopilot cannot use overwrite:true on ${asString(args.path)}: this run did not create it.`,
       };
     }
-    if (name === 'generate_asset') {
+    if (name === 'process_asset' && targetPath && !this.autopilotCreatedFiles.has(targetPath)) {
+      const exists = await this.storage.readBlob(targetPath).then(
+        () => true,
+        () => false
+      );
+      if (exists) {
+        return {
+          ok: false,
+          error: `Autopilot cannot overwrite ${asString(args.name || args.path)}: this run did not create it.`,
+        };
+      }
+    }
+    const PAID_GENERATION_TOOLS = new Set([
+      'generate_asset',
+      'generate_sfx',
+      'generate_model_3d',
+      'generate_scene_3d',
+    ]);
+    if (PAID_GENERATION_TOOLS.has(name)) {
       const limit = this.settings.getPreferences().autopilotAssetGenerations;
+      if (limit <= 0) {
+        return { ok: false, error: 'Autopilot paid generation is disabled (limit is 0).' };
+      }
       if (this.autopilotAssetReservations >= limit) {
         return { ok: false, error: `Autopilot asset generation limit reached (${limit}).` };
       }
@@ -695,18 +728,38 @@ export class AgentToolRegistry {
       return { ok: false, error: 'Autopilot run changed before the tool could start.' };
     }
     const result = await tool.handler(args);
+    const currentRunKey = `${appState.ui.flowAutopilot.runId ?? ''}:${appState.project.id ?? ''}`;
     if (
       this.guardedRunKey === runKey &&
-      name === 'fs_write' &&
-      path &&
+      currentRunKey === runKey &&
+      isAutopilotDrivenTurn() &&
       result !== null &&
       typeof result === 'object' &&
       'ok' in result &&
-      result.ok === true &&
-      'created' in result &&
-      result.created === true
+      result.ok === true
     ) {
-      this.autopilotCreatedFiles.add(guardedPath ?? path);
+      if (name === 'fs_write' && 'created' in result && result.created === true && targetPath) {
+        this.autopilotCreatedFiles.add(targetPath);
+      } else if (
+        name === 'generate_asset' &&
+        'saved' in result &&
+        result.saved &&
+        typeof result.saved === 'object' &&
+        'path' in result.saved &&
+        typeof result.saved.path === 'string'
+      ) {
+        this.autopilotCreatedFiles.add(canonicalAutopilotPath(result.saved.path));
+      } else if (name === 'process_asset' && targetPath) {
+        this.autopilotCreatedFiles.add(targetPath);
+      } else if (name === 'generate_sfx' && 'path' in result && typeof result.path === 'string') {
+        this.autopilotCreatedFiles.add(canonicalAutopilotPath(result.path));
+      } else if (
+        (name === 'generate_model_3d' || name === 'generate_scene_3d') &&
+        'path' in result &&
+        typeof result.path === 'string'
+      ) {
+        this.autopilotCreatedFiles.add(canonicalAutopilotPath(result.path));
+      }
     }
     return result;
   }

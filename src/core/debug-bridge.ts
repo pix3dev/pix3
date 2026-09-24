@@ -28,6 +28,10 @@ import { StartSceneGameCommand } from '@/features/scripts/StartSceneGameCommand'
 import { AssetGenService } from '@/services/image-gen/AssetGenService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { ProjectService } from '@/services/project/ProjectService';
+import { BrowserProjectStorageService } from '@/services/project/BrowserProjectStorageService';
+import { WorkspaceModeService } from '@/services/editor/WorkspaceModeService';
+import { FlowAutopilotService } from '@/services/flow/FlowAutopilotService';
+import { createDefaultProjectManifest } from '@/core/ProjectManifest';
 import { blobToBase64 } from '@/services/image-gen/image-ops';
 import { Model3DGenService } from '@/services/model-gen/Model3DGenService';
 import { Model3DGenHistoryService } from '@/services/model-gen/Model3DGenHistoryService';
@@ -42,7 +46,7 @@ import type {
 import type { SculptSpec } from '@/services/model-gen/SculptSpec';
 import { AgentToolRegistry } from '@/services/agent/AgentToolRegistry';
 import { AgentChatService, type AgentChatState } from '@/services/agent/AgentChatService';
-import { AgentSettingsService } from '@/services/agent/AgentSettingsService';
+import { AgentSettingsService, type AgentPreferences } from '@/services/agent/AgentSettingsService';
 import { AgentVisionService, type VisionHelperInfo } from '@/services/agent/AgentVisionService';
 import { AgentAdvisorService, type AdvisorInfo } from '@/services/agent/AgentAdvisorService';
 import { toBlocks, type LlmMessage } from '@/services/llm/LlmTypes';
@@ -486,6 +490,11 @@ export interface Pix3DebugBridge {
      * substring). Rejects with the available names when nothing matches.
      */
     open(nameOrPath: string): Promise<{ name: string; localAbsolutePath?: string }>;
+    createBrowserProject(
+      templateId: string,
+      name?: string
+    ): Promise<{ id: string; name: string; workspaceMode: string }>;
+    deleteBrowserProject(id: string): Promise<boolean>;
   };
 
   // --- mutate (through the gateway) ---
@@ -647,6 +656,10 @@ export interface Pix3DebugBridge {
     setAdvisor(providerId: string, modelId?: string): void;
     /** Describe the currently-configured advisor (or null when off / no key). */
     advisor(): Promise<AdvisorInfo | null>;
+    /** Update agent preferences. */
+    updatePreferences(prefs: Partial<AgentPreferences>): AgentPreferences;
+    /** Read all current agent preferences. */
+    getPreferences(): AgentPreferences;
   };
 
   /**
@@ -683,6 +696,14 @@ export interface Pix3DebugBridge {
     inspect(query: string, args?: unknown): Json | null;
     /** Run a named game action, e.g. action('wakeAll'). Null if unsupported. */
     action(name: string, args?: unknown): Json | null;
+  };
+
+  readonly flow: {
+    state(): Record<string, unknown>;
+    canArm(): boolean;
+    arm(mode?: 'armed' | 'autonomous'): Record<string, unknown>;
+    takeWheel(): Record<string, unknown>;
+    resume(): Record<string, unknown>;
   };
 }
 
@@ -897,6 +918,31 @@ function createBridge(): Pix3DebugBridge {
         }
         await projects.openRecentProject(match);
         return { name: match.name, localAbsolutePath: match.localAbsolutePath };
+      },
+      async createBrowserProject(templateId: string, name = 'Autopilot Test') {
+        const projectService = service<ProjectService>(ProjectService);
+        const workspaceMode = service<WorkspaceModeService>(WorkspaceModeService);
+        await projectService.createNewProjectWithOptions({
+          name,
+          manifest: createDefaultProjectManifest(),
+          templateId,
+          backend: 'browser',
+        });
+        await projectService.openStartupScene();
+        workspaceMode.set('flow');
+        const id = appState.project.id ?? '';
+        return {
+          id,
+          name,
+          workspaceMode: appState.ui.workspaceMode,
+        };
+      },
+      async deleteBrowserProject(id: string) {
+        const browserStore = service<BrowserProjectStorageService>(BrowserProjectStorageService);
+        const projectService = service<ProjectService>(ProjectService);
+        await browserStore.deleteProject(id);
+        projectService.removeRecentProject({ id });
+        return true;
       },
     },
 
@@ -1142,6 +1188,13 @@ function createBridge(): Pix3DebugBridge {
       advisor() {
         return service<AgentAdvisorService>(AgentAdvisorService).describeAdvisor();
       },
+      updatePreferences(prefs) {
+        service<AgentSettingsService>(AgentSettingsService).updatePreferences(prefs);
+        return service<AgentSettingsService>(AgentSettingsService).getPreferences();
+      },
+      getPreferences() {
+        return service<AgentSettingsService>(AgentSettingsService).getPreferences();
+      },
     },
 
     eval: {
@@ -1187,6 +1240,33 @@ function createBridge(): Pix3DebugBridge {
       action(name, args) {
         const provider = getGameDebug();
         return provider?.action ? safeSerialize(provider.action(name, args), 3) : null;
+      },
+    },
+
+    flow: {
+      state() {
+        const auto = service<FlowAutopilotService>(FlowAutopilotService);
+        return {
+          ...appState.ui.flowAutopilot,
+          workspaceMode: appState.ui.workspaceMode,
+          projectId: appState.project.id,
+          canArm: auto.canArm(),
+        };
+      },
+      canArm() {
+        return service<FlowAutopilotService>(FlowAutopilotService).canArm();
+      },
+      arm(mode: 'armed' | 'autonomous' = 'autonomous') {
+        service<FlowAutopilotService>(FlowAutopilotService).armFromUser(mode);
+        return { ...appState.ui.flowAutopilot };
+      },
+      takeWheel() {
+        service<FlowAutopilotService>(FlowAutopilotService).takeWheel();
+        return { ...appState.ui.flowAutopilot };
+      },
+      resume() {
+        service<FlowAutopilotService>(FlowAutopilotService).resumeRun();
+        return { ...appState.ui.flowAutopilot };
       },
     },
   };

@@ -3,6 +3,7 @@ import { appState } from '@/state';
 import { AgentToolRegistry } from '@/services/agent/AgentToolRegistry';
 import { GameTestService, type GameRunResult } from '@/services/agent/GameTestService';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { decodeTerminalFrame, terminalVisualChange } from './terminal-visual';
 
 export type FlowSmokeStatus = 'passed' | 'failed' | 'inconclusive' | 'skipped';
@@ -57,6 +58,9 @@ export class FlowPlaytestService {
 
   @inject(GamePlaySessionService)
   private readonly playSession!: GamePlaySessionService;
+
+  @inject(ProjectStorageService)
+  private readonly storage!: ProjectStorageService;
 
   private busy = false;
 
@@ -113,7 +117,13 @@ export class FlowPlaytestService {
       }
       const core = this.classify(run);
       if (core.status !== 'passed') return core;
-      return await this.probeTerminal(run, core, projectId, signal);
+      const controls = await this.probeControls(projectId);
+      if (controls && controls.status !== 'passed') return controls;
+      const contract = await this.readPlaytestContract();
+      const restartRoutine = contract.match(/^terminalRestartRoutine:\s*([a-z0-9-]+)\s*$/m)?.[1];
+      const routines = await this.probeRoutines(projectId, restartRoutine, signal);
+      if (routines && routines.status !== 'passed') return routines;
+      return await this.probeTerminal(run, core, projectId, contract, restartRoutine, signal);
     } catch (error) {
       if (signal?.aborted) {
         return this.result('skipped', 'The playtest was cancelled by the user.');
@@ -134,6 +144,8 @@ export class FlowPlaytestService {
     run: GameRunResult,
     core: FlowSmokeResult,
     projectId: string,
+    contractText?: string,
+    routineName?: string,
     signal?: AbortSignal
   ): Promise<FlowSmokeResult> {
     let phase = snapshotPhase(run);
@@ -218,12 +230,13 @@ export class FlowPlaytestService {
         },
       };
     }
-    const contract = await this.readPlaytestContract();
+    const contract = contractText ?? (await this.readPlaytestContract());
     const visual = await this.probeVisual(phase, projectId, contract, signal);
     if (signal?.aborted || appState.project.id !== projectId) {
       return this.result('skipped', 'The visual probe was cancelled.');
     }
-    const restartRoutine = contract.match(/^terminalRestartRoutine:\s*([a-z0-9-]+)\s*$/m)?.[1];
+    const restartRoutine =
+      routineName ?? contract.match(/^terminalRestartRoutine:\s*([a-z0-9-]+)\s*$/m)?.[1];
     const routineResult = restartRoutine
       ? await this.tools.execute('game_run', { routine: restartRoutine })
       : null;
@@ -428,6 +441,14 @@ export class FlowPlaytestService {
         reportPath
       );
     }
+    if (run.control?.verdict === 'failed') {
+      return this.result(
+        'failed',
+        run.verdict ?? 'Negative control failed: effect occurred without control.',
+        reportPath,
+        `control:negative-failed:${run.control.outcome?.kind ?? 'effect'}`
+      );
+    }
     switch (run.outcome.kind) {
       case 'until':
         return this.result(
@@ -452,6 +473,149 @@ export class FlowPlaytestService {
       default:
         return this.result('inconclusive', run.verdict ?? run.outcome.detail, reportPath);
     }
+  }
+
+  private async probeControls(projectId: string): Promise<FlowSmokeResult | null> {
+    const controlsResult = (await this.tools.execute('game_controls').catch(() => null)) as
+      | {
+          ok?: boolean;
+          error?: string;
+          controls?: Array<{
+            name: string;
+            visible?: boolean;
+            enabled?: boolean;
+            reach?: string;
+            reachNote?: string;
+          }>;
+        }
+      | null;
+    if (appState.project.id !== projectId) {
+      return this.result('skipped', 'The controls probe was cancelled.');
+    }
+    if (!controlsResult || controlsResult.ok !== true) {
+      return this.result(
+        'failed',
+        controlsResult?.error ?? 'game_controls failed to scan the scene.',
+        null,
+        'controls:scan-failed'
+      );
+    }
+    const controls = controlsResult.controls ?? [];
+    for (const control of controls) {
+      if (control.visible && control.enabled !== false) {
+        if (control.reach === 'unknown') {
+          return this.result(
+            'failed',
+            `Control "${control.name}" is visible but has unknown reach.`,
+            null,
+            `control-unreachable:${control.name}`
+          );
+        }
+        if (control.reach === 'off-screen') {
+          return this.result(
+            'failed',
+            `Control "${control.name}" is visible but off-screen.`,
+            null,
+            `control-off-screen:${control.name}`
+          );
+        }
+        if (control.reach === 'in-frame-unproven') {
+          return this.result(
+            'failed',
+            `Control "${control.name}" is visible but in-frame-unproven (no physical proof in reachability.json or session).`,
+            null,
+            `control-unproven:${control.name}`
+          );
+        }
+        if (
+          control.reach !== 'reachable' &&
+          control.reach !== 'hidden' &&
+          control.reach !== 'hidden-by-ancestor'
+        ) {
+          return this.result(
+            'failed',
+            `Control "${control.name}" is visible but has reach "${control.reach}".`,
+            null,
+            `control-unreachable:${control.name}`
+          );
+        }
+      }
+    }
+    return null;
+  }
+
+  private async probeRoutines(
+    projectId: string,
+    skipRoutineName?: string,
+    signal?: AbortSignal
+  ): Promise<FlowSmokeResult | null> {
+    if (!this.storage?.listDirectory) {
+      return this.result('inconclusive', 'Storage service is not available to inspect routines.');
+    }
+    let entries: Array<{ name: string; path: string; kind: 'file' | 'directory' }> = [];
+    try {
+      entries = await this.storage.listDirectory('design/tests/routines');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      const isNotFound =
+        (error as { code?: string })?.code === 'ENOENT' ||
+        (error as { name?: string })?.name === 'NotFoundError' ||
+        /not found|enoent/i.test(message);
+      if (isNotFound) {
+        entries = [];
+      } else {
+        return this.result(
+          'inconclusive',
+          `Failed to read routines directory: ${message}`
+        );
+      }
+    }
+    const routineFiles = entries
+      .filter(e => e.kind === 'file' && e.name.endsWith('.json'))
+      .map(e => e.name.replace(/\.json$/i, ''))
+      .filter(name => name !== skipRoutineName);
+
+    for (const routineName of routineFiles) {
+      if (signal?.aborted || appState.project.id !== projectId) {
+        return this.result('skipped', 'The routine probe was cancelled.');
+      }
+      const routineResult = (await this.tools.execute('game_run', { routine: routineName }).catch(
+        error => ({ ok: false, error: error instanceof Error ? error.message : String(error) })
+      )) as
+        | Awaited<ReturnType<GameTestService['runRoutine']>>
+        | { ok: boolean; error?: string };
+      if (signal?.aborted || appState.project.id !== projectId) {
+        return this.result('skipped', 'The routine probe was cancelled.');
+      }
+      const ok =
+        routineResult &&
+        typeof routineResult === 'object' &&
+        'ok' in routineResult &&
+        routineResult.ok === true &&
+        !('routine' in routineResult && routineResult.routine?.macro) &&
+        !('expectations' in routineResult &&
+          routineResult.expectations?.some(expectation => !expectation.met)) &&
+        !('newErrors' in routineResult && (routineResult.newErrors?.length ?? 0) > 0);
+
+      if (!ok) {
+        const error =
+          'verdict' in routineResult && typeof routineResult.verdict === 'string'
+            ? routineResult.verdict
+            : 'error' in routineResult && typeof routineResult.error === 'string'
+              ? routineResult.error
+              : `Routine ${routineName} failed.`;
+        const reportPath =
+          'artifact' in routineResult &&
+          routineResult.artifact &&
+          typeof routineResult.artifact === 'object' &&
+          'path' in routineResult.artifact &&
+          typeof routineResult.artifact.path === 'string'
+            ? routineResult.artifact.path
+            : null;
+        return this.result('failed', error, reportPath, `routine:${routineName}`);
+      }
+    }
+    return null;
   }
 
   private async waitForRunner(projectId: string, signal?: AbortSignal): Promise<boolean> {

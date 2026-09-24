@@ -1054,6 +1054,43 @@ describe('AgentChatService', () => {
     expect(body.steps[1].result).toMatch(/no such node/);
   });
 
+  it('stops a batch when a step returns ok: false without throwing and lists what it skipped', async () => {
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce(
+        toolCallResult('batch', 'b1', {
+          steps: [
+            { tool: 'fs_write', args: { path: 'scripts/new.ts', content: 'x' } },
+            { tool: 'fs_delete', args: { path: 'scripts/old.ts' } },
+            { tool: 'play_restart', args: {} },
+          ],
+        })
+      )
+      .mockResolvedValueOnce(textResult('fixing deletion failure'));
+    const execute = vi.fn(async (name: string) => {
+      if (name === 'fs_delete') {
+        return { ok: false, error: 'Autopilot cannot delete project files.' };
+      }
+      return { ok: true, created: true };
+    });
+    const service = buildService({ chat, execute, put: vi.fn(async () => undefined) });
+
+    await service.send('clean up');
+
+    expect(execute.mock.calls.map(call => call[0])).toEqual(['fs_write', 'fs_delete']);
+    const results = service.getState().messages[2].content as unknown as Array<{
+      toolUseId: string;
+      content: string;
+    }>;
+    const body = JSON.parse(results[0].content);
+    expect(body.ok).toBe(false);
+    expect(body.completed).toBe(1);
+    expect(body.stoppedAt).toBe(1);
+    expect(body.skipped.map((entry: { tool: string }) => entry.tool)).toEqual(['play_restart']);
+    expect(body.steps[1].ok).toBe(false);
+    expect(body.steps[1].result).toMatch(/Autopilot cannot delete project files/);
+  });
+
   it('passes an id from one step to the next through a $ref', async () => {
     const chat = vi
       .fn()
