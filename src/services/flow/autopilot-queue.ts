@@ -130,16 +130,19 @@ export const selectNextStepFromProgress = (progressMarkdown: string): AutopilotS
 export const upsertSmokeFix = (
   progressMarkdown: string,
   reason: string,
-  reportPath: string | null
+  reportPath: string | null,
+  findingKey = reason,
+  sourceRevision: string | null = null
 ): { markdown: string; attempts: number; signature: string } => {
   const summary = reason.replace(/\s+/g, ' ').trim().slice(0, 240) || 'Smoke run failed';
-  const signature = smokeSignature(summary);
+  const signature = smokeSignature(findingKey);
   const marker = `[smoke:${signature}; attempts=`;
   const lines = progressMarkdown.split('\n');
   const previous = lines.findIndex(line => line.includes(marker));
   const attempts = previous < 0 ? 0 : Number(/attempts=(\d+)/.exec(lines[previous])?.[1] ?? 0) + 1;
   const report = reportPath ? ` — ${reportPath}` : '';
-  const item = `- [ ] FIX (P0): ${summary} [smoke:${signature}; attempts=${attempts}]${report}`;
+  const revision = sourceRevision ? ` [source:${sourceRevision}]` : '';
+  const item = `- [ ] FIX (P0): ${summary} [smoke:${signature}; attempts=${attempts}]${revision}${report}`;
   if (previous >= 0) {
     lines[previous] = item;
     return { markdown: lines.join('\n'), attempts, signature };

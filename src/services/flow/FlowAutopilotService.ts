@@ -14,7 +14,7 @@ import {
   FLOW_PROGRESS_PATH,
 } from '@/services/flow/FlowPlanService';
 import { FlowStageService } from '@/services/flow/FlowStageService';
-import { FlowPlaytestService } from '@/services/flow/FlowPlaytestService';
+import { FlowPlaytestService, type FlowSmokeResult } from '@/services/flow/FlowPlaytestService';
 import { DECISIONS_PATH, extractDecisionEntries } from '@/services/flow/decision-log';
 import { routeQuestion } from '@/services/flow/autopilot-router';
 import {
@@ -97,6 +97,9 @@ export class FlowAutopilotService {
   /** Invalidates asynchronous queue/answer reads when the user or project takes control. */
   private generation = 0;
   private playtestController: AbortController | null = null;
+  private smokeChecks: Array<
+    Pick<FlowSmokeResult, 'status' | 'reason' | 'reportPath' | 'findingKey' | 'terminal' | 'visual'>
+  > = [];
 
   /**
    * Arm the autopilot from the user's own click ("Continue autonomously").
@@ -124,6 +127,7 @@ export class FlowAutopilotService {
     this.lastSeenInputTokens = uncachedPromptTokens(this.chat.getState());
     this.lastSeenTurnToolCalls = this.chat.getState().turnExecution.toolCalls;
     this.consecutiveVerifyFailures = 0;
+    this.smokeChecks = [];
     this.activeProjectId = appState.project.id;
     this.lastStatus = this.chat.getState().status;
     this.subscribeToChat();
@@ -216,6 +220,7 @@ export class FlowAutopilotService {
     });
     this.lastSeenTurnToolCalls = this.chat.getState().turnExecution.toolCalls;
     this.consecutiveVerifyFailures = 0;
+    this.smokeChecks = [];
     this.activeProjectId = appState.project.id;
     this.subscribeToChat();
     if (!this.chat.isRunning()) {
@@ -528,6 +533,7 @@ export class FlowAutopilotService {
       const smoke = await this.playtest.smoke(controller.signal);
       if (this.playtestController === controller) this.playtestController = null;
       if (!this.isCurrentRun(generation, runId, projectId)) return;
+      this.smokeChecks.push(smoke);
       if (smoke.status === 'passed') {
         this.finish(
           'The main plan is complete and the final smoke run passed. Optional polish can wait.'
@@ -537,6 +543,7 @@ export class FlowAutopilotService {
           const attempts = await this.recordSmokeFailure(
             smoke.reason,
             smoke.reportPath,
+            smoke.findingKey,
             generation,
             runId,
             projectId
@@ -603,11 +610,13 @@ export class FlowAutopilotService {
     const smoke = await this.playtest.smoke(controller.signal);
     if (this.playtestController === controller) this.playtestController = null;
     if (!this.isCurrentRun(generation, runId, projectId)) return;
+    this.smokeChecks.push(smoke);
     if (smoke.status !== 'passed') {
       if (smoke.status === 'failed') {
         const attempts = await this.recordSmokeFailure(
           smoke.reason,
           smoke.reportPath,
+          smoke.findingKey,
           generation,
           runId,
           projectId
@@ -642,6 +651,7 @@ export class FlowAutopilotService {
   private async recordSmokeFailure(
     reason: string,
     reportPath: string | null,
+    findingKey: string | undefined,
     generation: number,
     runId: string | null,
     projectId: string | null
@@ -649,13 +659,45 @@ export class FlowAutopilotService {
     try {
       const progress = await this.storage.readTextFile(FLOW_PROGRESS_PATH);
       if (!this.isCurrentRun(generation, runId, projectId)) return null;
-      const fix = upsertSmokeFix(progress, reason, reportPath);
+      const revision = await this.sourceRevision();
+      if (!this.isCurrentRun(generation, runId, projectId)) return null;
+      const fix = upsertSmokeFix(progress, reason, reportPath, findingKey, revision);
       await this.storage.writeTextFile(FLOW_PROGRESS_PATH, fix.markdown);
       return fix.attempts;
     } catch {
       if (this.isCurrentRun(generation, runId, projectId)) {
         this.pause('The smoke failed, but I could not record the FIX in design/progress.md.');
       }
+      return null;
+    }
+  }
+
+  /** Fingerprint source files, including scripts behind a scene, before recording a reproducible FIX. */
+  private async sourceRevision(): Promise<string | null> {
+    try {
+      const pending = ['scenes', 'scripts'];
+      const files: string[] = [];
+      while (pending.length > 0) {
+        const directory = pending.pop()!;
+        for (const entry of await this.storage.listDirectory(directory)) {
+          if (entry.kind === 'directory') pending.push(entry.path);
+          else if (/\.(?:pix3scene|ts)$/.test(entry.path)) files.push(entry.path);
+        }
+        if (files.length + pending.length > 200) return null;
+      }
+      if (files.length === 0) return null;
+      let hash = 2166136261;
+      for (const path of files.sort()) {
+        const source = await this.storage.readTextFile(path);
+        for (const part of [path, source]) {
+          for (let index = 0; index < part.length; index += 1) {
+            hash = Math.imul(hash ^ part.charCodeAt(index), 16777619);
+          }
+          hash = Math.imul(hash ^ 0, 16777619);
+        }
+      }
+      return (hash >>> 0).toString(36);
+    } catch {
       return null;
     }
   }
@@ -680,6 +722,7 @@ export class FlowAutopilotService {
     this.drivingTurn = false;
     this.drivingIncrement = false;
     this.patch({ phase: 'paused', countdownEndsAt: null, stopReason: reason });
+    void this.writeRunReport('paused', reason);
   }
 
   private finish(reason: string): void {
@@ -687,6 +730,31 @@ export class FlowAutopilotService {
     this.drivingTurn = false;
     this.drivingIncrement = false;
     this.patch({ phase: 'done', countdownEndsAt: null, stopReason: reason });
+    void this.writeRunReport('done', reason);
+  }
+
+  private async writeRunReport(phase: 'paused' | 'done', reason: string): Promise<void> {
+    const state = appState.ui.flowAutopilot;
+    const runId = state.runId;
+    if (!runId || appState.project.id !== this.activeProjectId) return;
+    const path = `design/autopilot-${runId}.json`;
+    const report = {
+      runId,
+      projectId: this.activeProjectId,
+      phase,
+      reason,
+      startedAt: new Date(state.startedAt).toISOString(),
+      endedAt: new Date().toISOString(),
+      turns: state.increments,
+      toolCalls: state.toolIterations,
+      uncachedPromptTokens: state.inputTokens,
+      smokeChecks: this.smokeChecks,
+    };
+    try {
+      await this.storage.writeTextFile(path, `${JSON.stringify(report, null, 2)}\n`);
+    } catch {
+      // A failed report write must not hide the reason the run stopped.
+    }
   }
 
   private patch(next: Partial<FlowAutopilotState>): void {

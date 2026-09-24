@@ -174,6 +174,7 @@ describe('the routines shipped in the templates load through this loader', () =>
     'minigame-2d/files/design/tests/routines/mute-music.json',
     'playable-2d/files/design/tests/routines/intro-to-cta.json',
     'playable-3d/files/design/tests/routines/intro-to-cta.json',
+    'recipe-tapper-2d/files/design/tests/routines/terminal-retry.json',
   ];
 
   for (const example of examples) {

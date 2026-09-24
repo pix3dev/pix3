@@ -635,6 +635,11 @@ export class AgentToolRegistry {
       }));
   }
 
+  /** Give model-free playtest callers the same project report store as the game_run tool. */
+  prepareRunProtocolStore(): void {
+    this.ensureProtocolStore();
+  }
+
   /** Execute a tool by name. Throws for an unknown tool; handlers own their own error semantics. */
   async execute(name: string, args: Record<string, unknown> = {}): Promise<unknown> {
     const tool = this.ensureTools().find(t => t.name === name);

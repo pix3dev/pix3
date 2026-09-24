@@ -106,6 +106,17 @@ const build = (options: Options = {}): { service: FlowAutopilotService; chat: Fa
         options.smoke ?? (async () => ({ status: 'passed', reason: 'clean', reportPath: null })),
     },
     storage: {
+      listDirectory: async (directory: string) =>
+        Object.keys(files)
+          .filter(path => path.startsWith(`${directory}/`))
+          .map(path => path.slice(directory.length + 1).split('/')[0])
+          .filter((name, index, names) => names.indexOf(name) === index)
+          .map(name => ({
+            path: `${directory}/${name}`,
+            kind: Object.keys(files).some(path => path.startsWith(`${directory}/${name}/`))
+              ? 'directory'
+              : 'file',
+          })),
       readTextFile: async (path: string) => {
         const text = files[path];
         if (text === undefined) throw new Error(`missing ${path}`);
@@ -124,8 +135,7 @@ const build = (options: Options = {}): { service: FlowAutopilotService; chat: Fa
 
 /** Let the service's own async work settle without advancing any timer. */
 const flush = async (): Promise<void> => {
-  await Promise.resolve();
-  await Promise.resolve();
+  for (let index = 0; index < 10; index += 1) await Promise.resolve();
 };
 
 /** End the turn on screen, exactly as the chat's own `runToSettled` would publish it. */
@@ -353,14 +363,22 @@ describe('FlowAutopilotService', () => {
   });
 
   it('calls the run done only after a final smoke passes', async () => {
+    const files: Record<string, string> = {
+      'design/progress.md': '# Progress\n\n- [x] drone flies\n',
+    };
     const { service } = build({
-      files: { 'design/progress.md': '# Progress\n\n- [x] drone flies\n' },
+      files,
     });
     service.armFromUser();
     await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
 
     expect(appState.ui.flowAutopilot.phase).toBe('done');
     expect(appState.ui.flowAutopilot.stopReason).toContain('smoke run passed');
+    const reportPath = `design/autopilot-${appState.ui.flowAutopilot.runId}.json`;
+    expect(JSON.parse(files[reportPath])).toMatchObject({
+      phase: 'done',
+      smokeChecks: [{ status: 'passed', reason: 'clean' }],
+    });
     service.dispose();
   });
 
@@ -381,7 +399,11 @@ describe('FlowAutopilotService', () => {
   });
 
   it('queues a failed increment smoke as the next FIX turn', async () => {
-    const files = { 'design/progress.md': PROGRESS };
+    const files: Record<string, string> = {
+      'design/progress.md': PROGRESS,
+      'scenes/main.pix3scene': 'scene: original',
+      'scripts/GameRules.ts': 'export const lives = 3;',
+    };
     const { service, chat } = build({
       files,
       smoke: async () => ({
@@ -396,8 +418,30 @@ describe('FlowAutopilotService', () => {
     await vi.advanceTimersByTimeAsync(AUTOPILOT_DEFAULTS.autopilotIdleSeconds * 1000);
 
     expect(files['design/progress.md']).toContain('FIX (P0): new runtime error');
+    expect(files['design/progress.md']).toMatch(/\[source:[a-z0-9]+\]/);
     expect(chat.sent).toHaveLength(2);
     expect(chat.sent[1]).toContain('Fix this defect');
+    service.dispose();
+  });
+
+  it('changes the source revision when a script changes behind an unchanged scene', async () => {
+    const files: Record<string, string> = {
+      'design/progress.md': PROGRESS,
+      'scenes/main.pix3scene': 'scene: original',
+      'scripts/GameRules.ts': 'export const lives = 3;',
+    };
+    const { service } = build({ files });
+    const revision = () =>
+      (
+        service as unknown as {
+          sourceRevision(): Promise<string | null>;
+        }
+      ).sourceRevision();
+    const first = await revision();
+    files['scripts/GameRules.ts'] = 'export const lives = 2;';
+    expect(await revision()).not.toBe(first);
+    files['scripts/GameRules.ts'] = 'export const lives = 3;';
+    expect(await revision()).toBe(first);
     service.dispose();
   });
 

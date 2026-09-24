@@ -101,6 +101,16 @@ and `enabled: false`, i.e. a button that can never be pressed (`game_observe` re
 - The prefab hitbox groups must stay in sync with `touchRules`; the group is the
   only thing that separates "good" from "bad".
 
+## Playtest contract
+
+terminalVisual: static
+terminalRestartRoutine: terminal-retry
+
+After the result overlay appears, the screen should remain still until RETRY. The
+playtest samples five rendered frames at 15-frame intervals after the terminal
+phase has held for 120 frames. The `terminal-retry` routine physically taps RETRY
+and checks that the game returns to its playing phase.
+
 ## Verify
 
 1. `play_start` on `scenes/main.pix3scene`.

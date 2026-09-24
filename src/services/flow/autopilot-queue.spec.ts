@@ -20,19 +20,32 @@ describe('upsertSmokeFix', () => {
   it('records a P0, deduplicates it, and reopens a prematurely ticked defect', () => {
     const first = upsertSmokeFix(
       progress('- [x] drone flies'),
-      'Runtime error on wave two',
-      'design/tests/r1.json'
+      'Runtime error at frame 12',
+      'design/tests/r1.json',
+      'runtime:game:wave crash',
+      'scene-a1'
     );
     expect(first.markdown).toContain('## Found by playtest');
+    expect(first.markdown).toContain('[source:scene-a1]');
     expect(selectNextStepFromProgress(first.markdown).step?.kind).toBe('fix-p0');
     const ticked = first.markdown.replace('- [ ] FIX', '- [x] FIX');
-    const second = upsertSmokeFix(ticked, 'Runtime error on wave two', 'design/tests/r2.json');
+    const second = upsertSmokeFix(
+      ticked,
+      'Runtime error at frame 25',
+      'design/tests/r2.json',
+      'runtime:game:wave crash',
+      'scene-b2'
+    );
     expect(second.attempts).toBe(1);
     expect(second.signature).toBe(first.signature);
     expect(second.markdown.match(/FIX \(P0\)/g)).toHaveLength(1);
     expect(second.markdown).toContain('design/tests/r2.json');
+    expect(second.markdown).toContain('[source:scene-b2]');
     expect(selectNextStepFromProgress(second.markdown).step?.kind).toBe('fix-p0');
-    expect(upsertSmokeFix(second.markdown, 'Runtime error on wave two', null).attempts).toBe(2);
+    expect(
+      upsertSmokeFix(second.markdown, 'Runtime error at frame 31', null, 'runtime:game:wave crash')
+        .attempts
+    ).toBe(2);
   });
 });
 
