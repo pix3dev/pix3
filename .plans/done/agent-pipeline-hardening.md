@@ -1,5 +1,7 @@
 # Agent pipeline hardening — acting on the Carrom findings
 
+Status: **all five phases completed and verified live** (2026-09-15). The §6 follow-ups below remain backlog items.
+
 Follow-up to [carrom-agent-pipeline-review.md](carrom-agent-pipeline-review.md). That document is
 the measurement; this one is the work. Both pipelines are in scope and they fail in different
 places:

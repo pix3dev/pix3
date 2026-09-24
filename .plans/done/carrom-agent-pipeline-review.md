@@ -1,5 +1,7 @@
 # What building Carrom taught us about the agent pipeline
 
+Status: **review completed** (2026-09-15); implementation of its A–E findings is recorded in [agent-pipeline-hardening.md](agent-pipeline-hardening.md).
+
 Written after building `samples/Carrom` end to end on 2026-09-15: a Fable design pass, an Opus
 implementation pass against that spec, and live verification in the running editor. The point of
 the exercise was never the game — it was to walk the pipeline an agent walks and write down where

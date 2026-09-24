@@ -1,6 +1,6 @@
 # Carrom prototype — implementation-ready build spec
 
-Status: **design, not started**. Target: one evening of implementation on the Pix3 engine as a
+Status: **M0–M5 implemented and verified** (2026-09-15); optional M6 remains a separate follow-up. Target: one evening of implementation on the Pix3 engine as a
 standalone sample project (`samples/Carrom/`). Bar to beat: the Gemini single-file canvas
 prototype (`carrom_board_game_prototype.html`, 1000 px virtual board, per-disc `v *= 0.981`,
 hand-rolled impulses, slider-positioned striker, flat score, no rules / turns / opponent).

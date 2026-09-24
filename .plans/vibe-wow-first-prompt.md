@@ -8,7 +8,7 @@
 (`C:\Projects\MyLabs\archive\jam-august\ideas\07-kaskad-idle.md`).
 
 Связано: [flow-autopilot.md](flow-autopilot.md) (супервизор), [done/flow-wow-t0.md](done/flow-wow-t0.md)
-(вау-пол T0), [vibe-uikit-first-frame.md](vibe-uikit-first-frame.md) (UI-кит на T0).
+(вау-пол T0), [vibe-uikit-first-frame.md](done/vibe-uikit-first-frame.md) (UI-кит на T0).
 
 ## Итерация 1 — базовый замер (2026-09-21, Opus 4.8 через мост)
 

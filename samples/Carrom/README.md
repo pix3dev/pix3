@@ -4,7 +4,7 @@ A carrom prototype on the Pix3 engine: a 1000 px board, a heavy striker, the
 real turn structure (continuation on your own pot, Queen-and-cover, striker
 fouls with a penalty man) and an AI opponent.
 
-Build spec: `.plans/carrom-prototype.md`. This README covers what is here now and
+Build spec: `.plans/done/carrom-prototype.md`. This README covers what is here now and
 how to drive it.
 
 ## Status

@@ -227,7 +227,7 @@
 (`agent-car-direction-regression`); тетрис ронял фигуры вверх при зелёной верификации состоянием
 (TODO, находка 2026-08-29); страйкер каррома на чужой базовой линии прошёл `tsc`, prettier,
 YAML-валидацию, headless `parseScene` и геометрические проверки
-([carrom-agent-pipeline-review.md](carrom-agent-pipeline-review.md) §3). Все три поймал прогон
+([carrom-agent-pipeline-review.md](done/carrom-agent-pipeline-review.md) §3). Все три поймал прогон
 поведения или человек глазами. Отсюда: судья — код; две попытки на дефект, потом пауза.
 
 ### 7.3 Потолок режима
@@ -255,7 +255,7 @@ Autonomous.
 
 ### 7.7 Что осознанно не делаем сейчас
 
-Headless-раннер сцен ([carrom-agent-pipeline-review.md](carrom-agent-pipeline-review.md)) сделал
+Headless-раннер сцен ([carrom-agent-pipeline-review.md](done/carrom-agent-pipeline-review.md)) сделал
 бы плейтест кратно дешевле, но это отдельный L. Автопилот работоспособен на in-editor `game_run`.
 
 ---

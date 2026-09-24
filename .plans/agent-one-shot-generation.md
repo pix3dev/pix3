@@ -73,7 +73,7 @@ T2 с T3 повторяли одну и ту же работу. Это тот ж
 
 ### 2.2 Открытый цикл не ловит то, что ловит запуск
 
-[carrom-agent-pipeline-review.md](carrom-agent-pipeline-review.md) §3: инвертированный знак в
+[carrom-agent-pipeline-review.md](done/carrom-agent-pipeline-review.md) §3: инвертированный знак в
 `strikerLineY()` сделал игру 100 % неиграбельной и прошёл `tsc`, prettier, YAML-валидацию,
 реальный headless `parseScene` и статические геометрические проверки. Поймал только прогон —
 contact rate 0.000 → 1.000 после фикса. Даже связка «Fable пишет спеку с путями к файлам →
@@ -333,7 +333,7 @@ headless-харнесс остаётся тем, чем он и является
 | **P2** | Прогресс по шагам, rAF-yield, `firstMutationAtMs` | ощущение темпа при том же времени | S |
 | **P3** | SSE-текст для Anthropic и моста — **условно**, только если после P0–P2 пользователь всё ещё ждёт | только TTFT | M |
 
-P1c несёт правило из [agent-pipeline-hardening.md](agent-pipeline-hardening.md): «verify the
+P1c несёт правило из [agent-pipeline-hardening.md](done/agent-pipeline-hardening.md): «verify the
 guard fails on the bug it was written for, or it is decoration». Routine, которая закрывает
 verify-долг, обязана быть проверена на том, что она падает на реальном баге — иначе rider
 становится машиной для производства ложных PASS, то есть ровно эвал-сценарием S2 в
