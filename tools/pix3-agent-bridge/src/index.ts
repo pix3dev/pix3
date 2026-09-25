@@ -113,8 +113,9 @@ function modelEntry(
 
 /** Static catalog served to the Agent-SDK lane's `GET /v1/models` — subscription models, $0 marginal cost. */
 const AGENT_SDK_MODELS = [
-  modelEntry('claude-fable-5', 'Claude Fable 5 (MAX)', 'Most capable — via Claude Code subscription.', 32000, 1_000_000),
-  modelEntry('claude-opus-4-8', 'Claude Opus 4.8 (MAX)', 'Highly capable — via Claude Code subscription.', 32000, 1_000_000),
+  modelEntry('claude-fable-5-1', 'Claude Fable 5.1 (MAX)', 'Most capable — via Claude Code subscription.', 32000, 1_000_000),
+  modelEntry('claude-opus-5-5', 'Claude Opus 5.5 (MAX)', 'Highly capable — via Claude Code subscription.', 32000, 1_000_000),
+  modelEntry('claude-opus-5', 'Claude Opus 5 (MAX)', 'Previous Opus — via Claude Code subscription.', 32000, 1_000_000),
   modelEntry('claude-sonnet-5', 'Claude Sonnet 5 (MAX)', 'Balanced speed and quality — via Claude Code subscription.', 32000, 1_000_000),
   modelEntry('claude-haiku-4-5', 'Claude Haiku 4.5 (MAX)', 'Fastest — via Claude Code subscription.', 16000, 200_000),
 ];

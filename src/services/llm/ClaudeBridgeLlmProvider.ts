@@ -38,19 +38,19 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
   /**
    * Every model in this lane costs the same ($0 — it draws on the subscription's limits), so the
    * only thing left to weigh is capability. Opus runs the agent loop and answers vision questions;
-   * Fable, the most capable of the four, is held back for the advisor, whose entire job is to be a
+   * Fable, the most capable of the lane, is held back for the advisor, whose entire job is to be a
    * second and stronger opinion than whatever is driving the turn.
    */
   readonly defaultModelIds = {
-    main: 'claude-opus-4-8',
-    advisor: 'claude-fable-5',
-    vision: 'claude-opus-4-8',
+    main: 'claude-opus-5-5',
+    advisor: 'claude-fable-5-1',
+    vision: 'claude-opus-5-5',
   } as const;
 
   override readonly models: readonly LlmModel[] = [
     {
-      id: 'claude-fable-5',
-      label: 'Claude Fable 5 (MAX)',
+      id: 'claude-fable-5-1',
+      label: 'Claude Fable 5.1 (MAX)',
       description: 'Most capable — via Claude Code subscription.',
       capabilities: {
         supportsTools: true,
@@ -63,9 +63,23 @@ export class ClaudeBridgeLlmProvider extends AnthropicLlmProvider {
       pricing: { inputPer1M: 0, outputPer1M: 0 },
     },
     {
-      id: 'claude-opus-4-8',
-      label: 'Claude Opus 4.8 (MAX)',
+      id: 'claude-opus-5-5',
+      label: 'Claude Opus 5.5 (MAX)',
       description: 'Highly capable — via Claude Code subscription.',
+      capabilities: {
+        supportsTools: true,
+        supportsImages: true,
+        supportsSystemPrompt: true,
+        maxOutputTokens: 32000,
+        contextWindow: 1_000_000,
+        reasoningEfforts: CLAUDE_REASONING_EFFORTS,
+      },
+      pricing: { inputPer1M: 0, outputPer1M: 0 },
+    },
+    {
+      id: 'claude-opus-5',
+      label: 'Claude Opus 5 (MAX)',
+      description: 'Previous Opus — via Claude Code subscription.',
       capabilities: {
         supportsTools: true,
         supportsImages: true,
