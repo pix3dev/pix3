@@ -62,6 +62,7 @@ import {
   type RuntimeTimeConfig,
 } from './runtime-time';
 import { playable } from './PlayableSdk';
+import { disconnectSignalTargetEverywhere } from './signal-target-links';
 
 /**
  * Below this slow-mo base scale the audio mixer blends to the `'muffled'`
@@ -2331,6 +2332,9 @@ export class SceneRunner {
           });
         }
       }
+      // Same safety net as NodeBase.removeComponent: an override that skipped
+      // super.onDetach() must not leave handlers on other nodes behind.
+      disconnectSignalTargetEverywhere(component);
 
       if (component.resetStartedState) {
         component.resetStartedState();

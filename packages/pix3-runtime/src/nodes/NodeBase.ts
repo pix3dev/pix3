@@ -10,6 +10,12 @@ import {
   type ScriptErrorPhase,
 } from '../core/game-debug';
 import { SHARED_UNIT_QUAD_GEOMETRY } from '../core/shared-quad-geometry';
+import {
+  disconnectSignalTargetEverywhere,
+  registerSignalTargetLink,
+  unregisterSignalTargetLink,
+  type SignalTargetLink,
+} from '../core/signal-target-links';
 
 export interface NodeMetadata {
   [key: string]: unknown;
@@ -29,6 +35,13 @@ export interface SignalConnection {
   target: unknown;
   method: (...args: unknown[]) => void;
 }
+
+/**
+ * What a node actually stores per connection: the public pair plus the emitter and
+ * signal name, so the same object doubles as the target's reverse-index entry
+ * (see `core/signal-target-links`) — one allocation per `connect`, none per `emit`.
+ */
+interface StoredSignalConnection extends SignalConnection, SignalTargetLink {}
 
 export class NodeBase extends Object3D {
   readonly nodeId: string;
@@ -81,7 +94,7 @@ export class NodeBase extends Object3D {
    * `src/services/viewport/peek-gating.ts`.
    */
   hiddenByEditor = false;
-  private readonly _signals: Map<string, Set<SignalConnection>> = new Map();
+  private readonly _signals: Map<string, Set<StoredSignalConnection>> = new Map();
   private _disposed = false;
 
   /**
@@ -385,6 +398,9 @@ export class NodeBase extends Object3D {
     if (component.onDetach) {
       component.onDetach();
     }
+    // Safety net for an override that skipped `super.onDetach()`: whatever the
+    // component connected on any node goes with it.
+    disconnectSignalTargetEverywhere(component);
 
     // Reset started state
     if (component.resetStartedState) {
@@ -516,15 +532,19 @@ export class NodeBase extends Object3D {
       return;
     }
 
-    const connections = this._signals.get(signalName) ?? new Set<SignalConnection>();
+    const connections = this._signals.get(signalName) ?? new Set<StoredSignalConnection>();
     for (const connection of connections) {
       if (connection.target === target && connection.method === method) {
         return;
       }
     }
 
-    connections.add({ target, method });
+    const connection: StoredSignalConnection = { target, method, host: this, signal: signalName };
+    connections.add(connection);
     this._signals.set(signalName, connections);
+    // Reverse index so a script detaching drops the handlers it connected on OTHER
+    // nodes, not just its own (Script.onDetach / removeComponent / dispose).
+    registerSignalTargetLink(target, connection);
   }
 
   disconnect(signalName: string, target: unknown, method: (...args: unknown[]) => void): void {
@@ -536,6 +556,7 @@ export class NodeBase extends Object3D {
     for (const connection of connections) {
       if (connection.target === target && connection.method === method) {
         connections.delete(connection);
+        unregisterSignalTargetLink(target, connection);
       }
     }
 
@@ -546,8 +567,15 @@ export class NodeBase extends Object3D {
 
   disconnectAll(signalName?: string): void {
     if (!signalName) {
+      for (const connections of this._signals.values()) {
+        this.unregisterLinks(connections);
+      }
       this._signals.clear();
       return;
+    }
+    const connections = this._signals.get(signalName);
+    if (connections) {
+      this.unregisterLinks(connections);
     }
     this._signals.delete(signalName);
   }
@@ -557,11 +585,18 @@ export class NodeBase extends Object3D {
       for (const connection of connections) {
         if (connection.target === target) {
           connections.delete(connection);
+          unregisterSignalTargetLink(target, connection);
         }
       }
       if (connections.size === 0) {
         this._signals.delete(signalName);
       }
+    }
+  }
+
+  private unregisterLinks(connections: Iterable<StoredSignalConnection>): void {
+    for (const connection of connections) {
+      unregisterSignalTargetLink(connection.target, connection);
     }
   }
 
@@ -667,6 +702,9 @@ export class NodeBase extends Object3D {
     // references and resources, so it must NOT fire onDetach here (that would
     // double-fire in play mode and run onDetach for non-running editor nodes).
     for (const component of this.components) {
+      // Not a lifecycle call — just drop the handlers it connected on other nodes,
+      // so an emitter that outlives this node stops calling into a freed script.
+      disconnectSignalTargetEverywhere(component);
       component.node = null;
     }
     this.components.length = 0;

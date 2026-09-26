@@ -82,9 +82,7 @@ export class Combo extends Script {
   }
 
   onDetach(): void {
-    // super.onDetach() only disconnects handlers on THIS script's own node; a handler connected
-    // on another node stays until you disconnect it.
-    this.source?.disconnect('touch-scored', this, this.onScoredSignal);
+    // The 'touch-scored' handler on the source node is auto-disconnected (target === this).
     this.source = null;
     super.onDetach();
   }
@@ -150,11 +148,11 @@ before children's.
 ## Signals
 
 - `node.emit('name', ...args)`, `node.connect('name', this, handler)`,
-  `node.disconnect('name', this, handler)`. `super.onDetach()` auto-disconnects only the
-  handlers this script connected **on its own node** (`this.node.connect(…, this, …)`). A
-  handler connected on another node, window listeners, store subscriptions and timers are
-  yours to remove in `onDetach` — keep the handler in a field so the same function is passed
-  to `disconnect` (see the shape above and "Hosting an existing game").
+  `node.disconnect('name', this, handler)`. Every handler connected with `this` as the target
+  is **auto-disconnected on detach, like own-node signals** — including ones on another node
+  (`gameRoot.connect('score', this, this.onScore)`). Window listeners, store subscriptions and
+  timers are still yours to clean up in `onDetach` (see "Hosting an existing game"). Keep the
+  handler in a field (no `.bind(this)`) so an early manual `disconnect` gets the same function.
 - UI controls (`Button2D`, `Slider2D`, `Checkbox2D`, `Joystick2D`, …) emit `pressed` (touch
   went down inside), `released`, `click` (down and up inside — a completed tap),
   `pointerdown`, `pointerup`; `Checkbox2D` also `toggled`; `Label2D` emits
@@ -225,8 +223,9 @@ before children's.
   Window `CustomEvent`s, an `EventTarget` bus or a store with `subscribe()` are common; node
   signals are only one option. Import the game's bus/store module with a relative path from
   your script.
-- **`onDetach` cleans up signals on the script's own node only.** Everything else you register
-  must be undone by hand, or each play/stop in the editor leaks one more listener:
+- **`onDetach` cleans up node signals only** (any node, as long as the target is `this`).
+  Everything else you register must be undone by hand, or each play/stop in the editor leaks
+  one more listener:
 
   ```ts
   private readonly onScore = (e: Event): void => { /* (e as CustomEvent).detail */ };

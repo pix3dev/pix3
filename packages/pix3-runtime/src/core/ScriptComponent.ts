@@ -11,6 +11,7 @@ import type { NodeBase } from '../nodes/NodeBase';
 import type { AssetLoader } from './AssetLoader';
 import type { SceneService } from './SceneService';
 import type { TextureRegion } from './texture-region';
+import { disconnectSignalTargetEverywhere } from './signal-target-links';
 
 /**
  * Declarative, editor-only appearance override a script can push each preview
@@ -233,10 +234,16 @@ export abstract class Script implements ScriptComponent {
   onStart?(): void;
   onUpdate?(dt: number): void;
   tickEditorPreview?(dt: number, context: EditorPreviewContext): void;
+  /**
+   * Base detach: disconnects every signal handler this script connected with itself
+   * as the target — on its own node AND on any other node
+   * (`otherNode.connect('signal', this, fn)`). Overrides should call
+   * `super.onDetach()`; `NodeBase.removeComponent` and `dispose` repeat the
+   * disconnect as a safety net. Window listeners, store subscriptions and timers are
+   * still the script's own to clean up.
+   */
   onDetach(): void {
-    if (this.node) {
-      this.node.disconnectAllFromTarget(this);
-    }
+    disconnectSignalTargetEverywhere(this);
   }
 
   /**

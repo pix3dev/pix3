@@ -716,8 +716,9 @@ Pix3 provides a node-local signal system on `NodeBase` for script-to-script comm
 
 ### 6.18.2 Lifecycle Safety
 
-- `Script.onDetach()` base implementation automatically calls `node.disconnectAllFromTarget(this)`.
-- This avoids leaking listeners tied to detached script instances.
+- Every connection whose target is a script is dropped when the script detaches — on its own node **and** on any other node it connected to (`otherNode.connect('signal', this, fn)`). Nodes keep a reverse index per target (`core/signal-target-links.ts`) filled by `connect` and emptied by `disconnect` / `disconnectAll` / `disconnectAllFromTarget` / `dispose`; `emit` never touches it.
+- The cleanup runs in `Script.onDetach()` and again, as a safety net for overrides that skip `super.onDetach()`, in `NodeBase.removeComponent` (so `queueFree`), `NodeBase.dispose` and `SceneRunner` stop. A disposed emitter is a no-op.
+- This avoids leaking listeners (and the closures that keep nodes alive) tied to detached script instances. Window listeners, store subscriptions and timers are not signals and stay the script's responsibility.
 - Preferred connection style: `node.connect('signal_name', this, this.onSomething)`.
 - Avoid using `.bind(this)` when connecting signals; bound functions are harder to match for exact disconnects.
 

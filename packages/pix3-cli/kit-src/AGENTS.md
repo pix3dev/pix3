@@ -146,9 +146,9 @@ second one.
   `grep -rn "CustomEvent\|dispatchEvent\|addEventListener\|subscribe(\|EventTarget\|emit(" src scripts`.
   Window `CustomEvent`s, an `EventTarget` singleton, or a store with `subscribe()` are all
   normal; node signals are only one option. Listen to what the game already emits.
-- **Clean up by hand.** `Script.onDetach` auto-disconnects only **node signals connected on
-  the script's own node**. Window listeners, store subscriptions, timers, and signals connected
-  on other nodes must be removed in `onDetach` (keep the handler in a field; call the
+- **Clean up by hand.** `Script.onDetach` auto-disconnects only **node signals** whose target is
+  the script (on its own node or any other). Window listeners, store subscriptions and timers
+  must be removed in `onDetach` (keep the handler in a field; call the
   unsubscribe the store returned) — otherwise every play/stop in the editor leaves one more
   live listener behind.
 - **Two instruction files.** The project's own `AGENTS.md` wins on **process** (planning first,

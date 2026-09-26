@@ -762,8 +762,12 @@ hidden node (a spawner, a timer, a state machine) keep working.
 
 `node.connect(name, target, method)` / `disconnect` / `emit(name, ...args)`. The
 decoupled event bus between nodes, scripts, animation event tracks, and juice
-`triggerEvent`s. Always `disconnect` in `onDetach` (the `Script` base auto-drops
-connections where the script is the target).
+`triggerEvent`s. Every connection whose target is a script is dropped when that
+script detaches — on its own node **and** on any other node
+(`gameRoot.connect('score', this, this.onScore)` from a HUD script), via
+`removeComponent`, `queueFree`/`dispose` of its node, or scene stop — even if an
+override skips `super.onDetach()`. Window listeners, store subscriptions and
+timers are still the script's own to clean up in `onDetach`.
 
 ### Game commands (`scene.commands`) — named intents
 
