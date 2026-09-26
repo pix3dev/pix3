@@ -43,8 +43,20 @@ import {
 
 export const SYNC_BUDGET_MS = 5_000;
 const SYNC_RETRY_DELAY_MS = 250;
-/** How long one `sync_barrier` call may take (it waits for the editor's stabilisation window). */
-const SYNC_CALL_TIMEOUT_MS = 30_000;
+/**
+ * How long one `sync_barrier` call may take. The editor waits for its stabilisation window (up to
+ * 15 s), then for the script build — a forced rebuild of a large project is bounded only by the
+ * build watchdog (60 s) — so 30 s answered `no_editor { reason: 'no_reply' }` on a real game whose
+ * barrier alone measured ~30 s. Stays under the server's per-call cap (`AGENT_CALL_MAX_MS`, 120 s).
+ */
+export const SYNC_CALL_TIMEOUT_MS = 100_000;
+/**
+ * How long the barrier tool itself (`play_start`, `play_restart`, `game_run`) may take. The editor
+ * answers a start only once the game runs — up to 30 s for a heavy game (`RUNTIME_START_TIMEOUT_MS`
+ * in `WorkspaceAgentToolBridge`) — and `game_run` then plays its run (`maxWallMs`, default 20 s).
+ * This is the server's per-call cap (`AGENT_CALL_MAX_MS`); the HTTP client adds its own slack.
+ */
+export const RUN_CALL_TIMEOUT_MS = 120_000;
 
 export type BarrierErrorCode = (typeof BARRIER_ERROR_CODES)[number];
 
@@ -391,7 +403,7 @@ export class WorkspaceAgentTools {
       }
 
       // 3. Run, then look again.
-      const result = await this.lane.call(name, input);
+      const result = await this.lane.call(name, input, RUN_CALL_TIMEOUT_MS);
       const after = await this.lane.hash(Object.keys(verified));
       const changes = await this.lane.changes(verifiedSeq);
       const { changedDuringRun, editorWroteDuringRun } = splitRunChanges(
@@ -410,8 +422,10 @@ export class WorkspaceAgentTools {
           .map(diff => diff.path);
       }
       const { payload, images } = splitResult(result);
+      const startupMs = startupMsOf(result, payload);
       const envelope = {
         revision: verified,
+        ...(startupMs !== null ? { startupMs } : {}),
         matchesAgent: expect ? true : null,
         ...(expect ? {} : { agentExpectations: 'none' }),
         matchesDisk,
@@ -467,6 +481,14 @@ export const splitRunChanges = (
     changedDuringRun: changedDuringRun.sort(),
     editorWroteDuringRun: editorWroteDuringRun.sort(),
   };
+};
+
+/** How long the editor took to get the game running (success: `_meta.pix3`; failure: the payload). */
+const startupMsOf = (result: ToolCallResult, payload: unknown): number | null => {
+  const meta = isRecord(result._meta) && isRecord(result._meta.pix3) ? result._meta.pix3 : {};
+  if (typeof meta.startupMs === 'number') return meta.startupMs;
+  if (isRecord(payload) && typeof payload.startupMs === 'number') return payload.startupMs;
+  return null;
 };
 
 const pendingMessage = (pending: readonly SyncError[]): string => {

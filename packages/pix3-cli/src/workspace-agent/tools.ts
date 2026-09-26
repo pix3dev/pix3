@@ -83,7 +83,7 @@ export const EXPECT_SCHEMA: JsonSchema = {
 const BARRIER_NOTE =
   ' Runs through the sync barrier first: checks `expect` against the disk, stops play, makes the ' +
   'editor load the current files and verifies its hashes against the disk, then starts; the ' +
-  'answer carries `revision`, `matchesAgent`, `matchesDisk` and `changedDuringRun`.';
+  'answer carries `revision`, `startupMs`, `matchesAgent`, `matchesDisk` and `changedDuringRun`.';
 
 const OBSERVING_NOTE =
   ' Does not stop or resync the game: the answer carries the `revision` the running game started ' +

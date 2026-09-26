@@ -119,7 +119,7 @@ export type WorkspaceCallContent =
 export interface WorkspaceCallResult {
   readonly content: WorkspaceCallContent[];
   readonly isError?: boolean;
-  /** Side data for the `pix3 mcp` process (`_meta.pix3`: playRevision, stale). */
+  /** Side data for the `pix3 mcp` process (`_meta.pix3`: playRevision, stale, startupMs). */
   readonly _meta?: Record<string, unknown>;
 }
 

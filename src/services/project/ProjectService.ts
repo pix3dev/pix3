@@ -15,6 +15,7 @@ import {
   type FileDescriptor,
 } from '@/services/project/FileSystemAPIService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { sha256 } from '@/services/project/external-merge/hash';
 import { BrowserProjectStorageService } from '@/services/project/BrowserProjectStorageService';
 import { parse, stringify } from 'yaml';
 import { ref } from 'valtio/vanilla';
@@ -113,6 +114,13 @@ export class ProjectService {
   private readonly storage = ServiceContainer.getInstance().getService<ProjectStorageService>(
     ServiceContainer.getInstance().getOrCreateToken(ProjectStorageService)
   );
+  /**
+   * sha256 of the `pix3project.yaml` bytes the editor last read or wrote (null: none read). The
+   * agent channel's sync barrier reports it as the manifest version the game runs with, and
+   * re-reads the manifest when the disk holds another one.
+   */
+  private loadedManifestHash: string | null = null;
+
   private readonly browserStore =
     ServiceContainer.getInstance().getService<BrowserProjectStorageService>(
       ServiceContainer.getInstance().getOrCreateToken(BrowserProjectStorageService)
@@ -1070,6 +1078,7 @@ export class ProjectService {
   async loadProjectManifest(): Promise<ProjectManifest> {
     try {
       const yaml = await this.storage.readTextFile(PROJECT_MANIFEST_PATH);
+      this.loadedManifestHash = await this.manifestHashOf(yaml);
       const parsed = parse(yaml);
       const manifest = normalizeProjectManifest(parsed);
       // Push the project-tier AO default so scenes set to `inherit` resolve it.
@@ -1092,6 +1101,7 @@ export class ProjectService {
       });
       return manifest;
     } catch {
+      this.loadedManifestHash = null;
       const fallback = createDefaultProjectManifest();
       setProjectAODefault(fallback.ambientOcclusion);
       setProjectTextureFiltering(fallback.textureFiltering);
@@ -1178,7 +1188,27 @@ export class ProjectService {
     };
     const yaml = stringify(payload, { indent: 2 });
     await this.storage.writeTextFile(PROJECT_MANIFEST_PATH, yaml);
+    this.loadedManifestHash = await this.manifestHashOf(yaml);
     appState.project.manifest = normalized;
+  }
+
+  /** sha256 of the manifest bytes the editor last read or wrote (see `loadedManifestHash`). */
+  getLoadedManifestHash(): string | null {
+    return this.loadedManifestHash;
+  }
+
+  /** Re-read `pix3project.yaml` into `appState.project.manifest` (it changed on disk). */
+  async reloadProjectManifest(): Promise<void> {
+    appState.project.manifest = await this.loadProjectManifest();
+  }
+
+  /** The workspace ETag of the exchange that just happened (the exact bytes), else the text's hash. */
+  private async manifestHashOf(yaml: string): Promise<string | null> {
+    try {
+      return this.storage.getKnownContentHash?.(PROJECT_MANIFEST_PATH) ?? (await sha256(yaml));
+    } catch {
+      return null;
+    }
   }
 
   private async updateProjectReferencesAfterMove(

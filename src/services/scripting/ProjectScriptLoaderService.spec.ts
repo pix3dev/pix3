@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appState, resetAppState } from '@/state';
 import { ApiClientError } from '@/services/cloud/ApiClient';
+import { sha256 } from '@/services/project/external-merge/hash';
 import { FileWatchService } from '@/services/project/FileWatchService';
 import { WorkspaceClient } from '@/services/project/workspace/WorkspaceClient';
 import {
@@ -177,6 +178,69 @@ describe('ProjectScriptLoaderService.ensureReady', () => {
       }
     );
 
+    service.dispose();
+  });
+});
+
+describe('ProjectScriptLoaderService — build input hashes', () => {
+  it('records the hash of every source a build read, bundled modules included', async () => {
+    const service = new ProjectScriptLoaderService();
+    const sources: Record<string, string> = {
+      'src/scripts/Runner.ts':
+        "import { Chunk } from '../world/Chunk';\nexport class Runner extends Script {}",
+      'src/world/Chunk.ts': 'export class Chunk {}',
+      'src/generated/catalog.ts': 'export const catalog = {};',
+    };
+    const compiler = {
+      bundle: vi.fn(async (_files, _entryFiles, fileLoader) => {
+        await fileLoader?.('src/world/Chunk.ts', { namespace: 'virtual-fs' });
+        await fileLoader?.('src/generated/catalog.ts', { namespace: 'virtual-fs' });
+        return { code: '', warnings: [] };
+      }),
+    };
+    const storage = {
+      readTextFile: vi.fn(async (filePath: string) => sources[filePath] ?? ''),
+      getFileHandle: vi.fn().mockResolvedValue(null),
+      // The workspace ETag of the read (here: a marker, so the test sees it is used as is).
+      getKnownContentHash: vi.fn((filePath: string) =>
+        filePath === 'src/world/Chunk.ts' ? 'e'.repeat(64) : null
+      ),
+    };
+    Object.defineProperty(service, 'logger', {
+      value: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+    });
+    Object.defineProperty(service, 'compiler', { value: compiler });
+    Object.defineProperty(service, 'storage', { value: storage });
+    Object.defineProperty(service, 'fileWatchService', {
+      value: { watch: vi.fn(), unwatch: vi.fn(), isPushMode: () => true },
+    });
+    Object.defineProperty(service, 'scriptRegistry', {
+      value: { registerComponent: vi.fn(), unregisterComponent: vi.fn() },
+    });
+    Object.defineProperty(service, 'collectScriptFiles', {
+      value: vi.fn(async () => ({
+        sourceFiles: [
+          {
+            name: 'Runner.ts',
+            kind: 'file' as FileSystemHandleKind,
+            path: 'src/scripts/Runner.ts',
+          },
+        ],
+        checkedDirectories: ['scripts', 'src/scripts'] as const,
+      })),
+    });
+    Object.defineProperty(service, 'loadBundle', { value: vi.fn(async () => {}) });
+
+    await (
+      service as unknown as { performSyncAndBuild: () => Promise<void> }
+    ).performSyncAndBuild();
+
+    const hashes = service.getCollectedFileHashes();
+    expect([...hashes.keys()].sort()).toEqual(Object.keys(sources).sort());
+    expect(hashes.get('src/world/Chunk.ts')).toBe('e'.repeat(64));
+    expect(hashes.get('src/scripts/Runner.ts')).toBe(
+      await sha256(sources['src/scripts/Runner.ts'])
+    );
     service.dispose();
   });
 });

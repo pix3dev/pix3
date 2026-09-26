@@ -20,6 +20,7 @@ import { LoggingService } from '@/services/core/LoggingService';
 import { FileWatchService } from '@/services/project/FileWatchService';
 import { isDocumentActive } from '@/services/core/page-activity';
 import { ensureRapierLoaded } from '@/core/lazy-rapier';
+import { sha256 } from '@/services/project/external-merge/hash';
 
 /**
  * ProjectScriptLoaderService
@@ -82,6 +83,14 @@ export class ProjectScriptLoaderService {
   // Consumed by MonacoIntelliSenseService to mirror sibling files into the
   // code editor so relative imports resolve. Updated on every build.
   private lastCollectedFiles: Map<string, string> = new Map();
+
+  /**
+   * sha256 of the bytes behind each entry of {@link lastCollectedFiles} (path → hash), recorded as
+   * each source was read — the workspace ETag of that very read, else the hash of the text. Lets
+   * the agent channel's sync barrier name the exact revision of every build input without reading
+   * any of them again.
+   */
+  private lastCollectedHashes: Map<string, string> = new Map();
 
   /** Project id the last build ran for — `scriptsStatus` alone cannot tell a stale ready apart. */
   private lastBuiltProjectId: string | null = null;
@@ -295,6 +304,14 @@ export class ProjectScriptLoaderService {
     return this.lastCollectedFiles;
   }
 
+  /**
+   * sha256 of every source the most recent build read (the entry sources AND every module the
+   * bundle pulled in), keyed like {@link getCollectedFiles}.
+   */
+  getCollectedFileHashes(): ReadonlyMap<string, string> {
+    return this.lastCollectedHashes;
+  }
+
   /** The error of the most recent build, or null when it compiled (or has not run). */
   getLastBuildError(): { file: string | null; line?: number; message: string } | null {
     return this.lastBuildError;
@@ -418,6 +435,7 @@ export class ProjectScriptLoaderService {
           `No TypeScript files found in any script directory (${checkedDirectories.join(', ')})`
         );
         this.lastCollectedFiles = new Map();
+        this.lastCollectedHashes = new Map();
         this.clearRegisteredScripts();
         publish('ready', { errorMessage: null });
         return;
@@ -427,6 +445,7 @@ export class ProjectScriptLoaderService {
 
       // Step 2: Read file contents into a Map and register watchers
       const filesMap = new Map<string, string>();
+      const hashes = new Map<string, string>();
       const currentFiles = new Set(sourceFiles.map(f => f.path));
 
       // Remove watchers for files that are no longer present
@@ -456,6 +475,7 @@ export class ProjectScriptLoaderService {
         try {
           const content = await this.storage.readTextFile(file.path);
           filesMap.set(file.path, content);
+          hashes.set(file.path, await this.readHash(file.path, content));
         } catch (error) {
           this.logger.error(`Failed to read ${file.path}`, error);
         }
@@ -467,6 +487,7 @@ export class ProjectScriptLoaderService {
       if (filesMap.size === 0) {
         this.logger.warn('No script files could be read');
         this.lastCollectedFiles = new Map();
+        this.lastCollectedHashes = new Map();
         publish('ready'); // Treat as ready but empty
         return;
       }
@@ -474,6 +495,7 @@ export class ProjectScriptLoaderService {
       // Expose the collected sources (mutated in place with lazily-loaded
       // dependencies during bundling) for the code editor's sibling mirroring.
       this.lastCollectedFiles = filesMap;
+      this.lastCollectedHashes = hashes;
 
       const entryFiles = this.findComponentEntryFiles(filesMap);
 
@@ -490,7 +512,7 @@ export class ProjectScriptLoaderService {
         compilationResult = await this.compiler.bundle(
           filesMap,
           entryFiles,
-          async (filePath, context) => this.loadBundledDependency(filePath, context)
+          async (filePath, context) => this.loadBundledDependency(filePath, context, hashes)
         );
       } catch (error) {
         if (!isCurrent()) {
@@ -734,7 +756,8 @@ export class ProjectScriptLoaderService {
 
   private async loadBundledDependency(
     filePath: string,
-    context?: VirtualFileLoadContext
+    context?: VirtualFileLoadContext,
+    hashes?: Map<string, string>
   ): Promise<string | null> {
     if (!this.isLoadableDependencyPath(filePath)) {
       return null;
@@ -742,6 +765,7 @@ export class ProjectScriptLoaderService {
 
     try {
       const content = await this.storage.readTextFile(filePath);
+      hashes?.set(filePath, await this.readHash(filePath, content));
 
       if (
         (filePath.endsWith('.ts') || filePath.endsWith('.js')) &&
@@ -793,6 +817,14 @@ export class ProjectScriptLoaderService {
     }
 
     this.logger.error(message, errorData);
+  }
+
+  /**
+   * The hash of what `readTextFile(path)` just returned: the workspace ETag of that read (the hash
+   * of the exact bytes, BOM included), else sha256 of the text.
+   */
+  private async readHash(path: string, content: string): Promise<string> {
+    return this.storage.getKnownContentHash?.(path) ?? (await sha256(content));
   }
 
   private async collectFilesRecursively(

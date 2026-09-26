@@ -30,11 +30,16 @@ import type { ProjectScriptLoaderService } from '@/services/scripting/ProjectScr
  *   returned under `__images` become `{type:'image', data, mimeType}` blocks (base64, no `data:`
  *   prefix) — `pix3 mcp` hands them to the agent as real images. `{ok:false}` sets `isError`.
  *   Observing tools carry `_meta.pix3 = {playRevision, stale}`.
- * - **`sync_barrier`** (barrier step 2): holds autosave, stops play, `ProjectSyncService.syncNow()`
- *   (waits for the stabilisation window and the script build), and answers
- *   `{loaded: {path: sha256}, errors: [{file, line?, message, kind}], holdId}` — the open scenes and
- *   built script sources. The hold lasts until `sync_release {holdId}` (the MCP process sends it
- *   after the run) or {@link HOLD_SAFETY_MS}.
+ * - **`sync_barrier`** (barrier step 2): holds autosave, stops play,
+ *   `ProjectSyncService.barrierRevision()` (waits for the stabilisation window and the script
+ *   build), and answers `{loaded: {path: sha256}, errors: [{file, line?, message, kind}], holdId}` —
+ *   every open scene/prefab, every source the last script build read (entry scripts and every
+ *   module the bundle pulled in, wherever it lives) and `pix3project.yaml`. The hold lasts until
+ *   `sync_release {holdId}` (the MCP process sends it after the run) or {@link HOLD_SAFETY_MS}.
+ * - **Start wait.** `play_start`, `play_restart` and `game_run` answer only once the game is
+ *   actually running — up to {@link RUNTIME_START_TIMEOUT_MS} (a heavy game takes seconds to load),
+ *   failing fast when play mode stops instead — and report how long that took as
+ *   `_meta.pix3.startupMs`.
  * - **`generate_*` permission** (plan §1.2 "Граница доверия"): the first generation of a
  *   connection — server session + lease + `pix3 mcp` process — asks the human (non-blocking prompt,
  *   {@link PERMISSION_TIMEOUT_MS} to decide, else `permission_denied`). Allowed → up to
@@ -81,8 +86,16 @@ const OBSERVING_TOOLS: ReadonlySet<string> = new Set([
 export const GENERATE_SESSION_LIMIT = 20;
 export const PERMISSION_TIMEOUT_MS = 60_000;
 export const HOLD_SAFETY_MS = 180_000;
-const RUNTIME_ATTACH_TIMEOUT_MS = 5_000;
+/**
+ * How long a start may take before the game counts as not running. Sized for a heavy consumer game
+ * (DeepCore's voxel world outlasted the previous 5 s and was playing seconds later); the answer
+ * comes as soon as it runs. The MCP
+ * side's call timeouts (`packages/pix3-cli/src/workspace-agent/agent-tools.ts`) are sized above it.
+ */
+export const RUNTIME_START_TIMEOUT_MS = 30_000;
 const RUNTIME_POLL_MS = 50;
+/** Play mode must read "stopped" this long before a start counts as failed (not a state flip). */
+const STOPPED_GRACE_MS = 300;
 const PLAY_STOP_TIMEOUT_MS = 3_000;
 const MERGE_LOG_TAIL = 10;
 /** Answers kept for calls the server re-delivers after a reconnect (same id = same call). */
@@ -131,9 +144,20 @@ export interface WorkspaceAgentHost {
    * during a restart), so "attached" alone is not enough for `game_run` to step frames.
    */
   isRuntimeRunning(): boolean;
+  /**
+   * Why the started game will not come up — play mode is stopped (a failed start stops it), with
+   * the play-mode error when there is one — or null while play mode is on.
+   */
+  startFailure(): string | null;
   holdAutosave(reason: string): () => void;
-  /** `syncNow()` + the built scripts: `{path: sha256}` of what the editor has loaded. */
-  syncLoaded(): Promise<Record<string, string>>;
+  /**
+   * `ProjectSyncService.barrierRevision()`: `{path: sha256}` of every input the editor has loaded,
+   * plus the inputs it cannot vouch for.
+   */
+  syncLoaded(): Promise<{
+    loaded: Record<string, string>;
+    problems: ReadonlyArray<{ file: string | null; message: string }>;
+  }>;
   buildError(): Promise<{ file: string | null; line?: number; message: string } | null>;
   mergeLogTail(limit: number): Promise<unknown[]>;
 }
@@ -154,13 +178,35 @@ const errorResult = (
   extra: Record<string, unknown> = {}
 ): WorkspaceCallResult => text(JSON.stringify({ error: code, message, ...extra }), true);
 
-const runtimeNotRunning = (): WorkspaceCallResult =>
-  errorResult(
-    'load_failed',
-    `Play mode started but the game was not running within ${RUNTIME_ATTACH_TIMEOUT_MS} ms ` +
-      '(the scene did not finish loading).',
-    { errors: [{ file: null, message: 'runtime not running', kind: 'load' }] }
-  );
+type RuntimeWait =
+  | { readonly ok: true; readonly startupMs: number }
+  | { readonly ok: false; readonly startupMs: number; readonly stopped: string | null };
+
+const runtimeNotRunning = (wait: Extract<RuntimeWait, { ok: false }>): WorkspaceCallResult =>
+  wait.stopped !== null
+    ? errorResult('load_failed', `Play mode stopped before the game was running: ${wait.stopped}`, {
+        errors: [{ file: null, message: wait.stopped, kind: 'load' }],
+        startupMs: wait.startupMs,
+      })
+    : errorResult(
+        'load_failed',
+        `Play mode started but the game was not running within ` +
+          `${Math.round(RUNTIME_START_TIMEOUT_MS / 1000)} s (the scene did not finish loading).`,
+        {
+          errors: [{ file: null, message: 'runtime not running', kind: 'load' }],
+          startupMs: wait.startupMs,
+        }
+      );
+
+/** `result` with `_meta.pix3` extended by `fields`. */
+const withPix3Meta = (
+  result: WorkspaceCallResult,
+  fields: Record<string, unknown>
+): WorkspaceCallResult => {
+  const meta = isRecord(result._meta) ? result._meta : {};
+  const pix3 = isRecord(meta.pix3) ? meta.pix3 : {};
+  return { ...result, _meta: { ...meta, pix3: { ...pix3, ...fields } } };
+};
 
 /** A tool handler's value as an MCP result: JSON text + `__images` lifted into image blocks. */
 export function toCallResult(value: unknown): WorkspaceCallResult {
@@ -429,6 +475,8 @@ export class WorkspaceAgentToolBridge {
       tool = 'play_start';
       args = {};
     }
+    const startedAt = Date.now();
+    let startupMs: number | null = null;
     if (name === 'game_run') {
       if (!host.isPlaying()) {
         // Through the channel `game_run` means "run the verified files": start them first.
@@ -436,42 +484,55 @@ export class WorkspaceAgentToolBridge {
         if (started.isError) return started;
       }
       // Also when play was already on: the runtime may be mid-restart (a new runner loading).
-      if (!(await this.waitForRuntime(host))) return runtimeNotRunning();
+      const wait = await this.waitForRuntime(host, startedAt);
+      if (!wait.ok) return runtimeNotRunning(wait);
+      startupMs = wait.startupMs;
     }
-    const result = toCallResult(await host.executeTool(tool, args));
-    if (
-      (name === 'play_start' || name === 'play_restart') &&
-      !result.isError &&
-      !(await this.waitForRuntime(host))
-    ) {
-      return runtimeNotRunning();
+    let result = toCallResult(await host.executeTool(tool, args));
+    if ((name === 'play_start' || name === 'play_restart') && !result.isError) {
+      const wait = await this.waitForRuntime(host, startedAt);
+      if (!wait.ok) return runtimeNotRunning(wait);
+      startupMs = wait.startupMs;
     }
     if (START_TOOLS.has(name) && !result.isError && this.lastBarrierLoaded) {
       appState.project.coauthoring.playRevision = { ...this.lastBarrierLoaded };
     }
+    if (startupMs !== null) {
+      result = withPix3Meta(result, { startupMs });
+    }
     if (OBSERVING_TOOLS.has(name)) {
       const coauthoring = appState.project.coauthoring;
-      return {
-        ...result,
-        _meta: {
-          pix3: {
-            playRevision: host.isPlaying() ? coauthoring.playRevision : null,
-            stale: host.isPlaying() && coauthoring.stale,
-          },
-        },
-      };
+      return withPix3Meta(result, {
+        playRevision: host.isPlaying() ? coauthoring.playRevision : null,
+        stale: host.isPlaying() && coauthoring.stale,
+      });
     }
     return result;
   }
 
-  /** Poll until the game runtime is actually running (see `isRuntimeRunning`), or time out. */
-  private async waitForRuntime(host: WorkspaceAgentHost): Promise<boolean> {
-    const deadline = Date.now() + RUNTIME_ATTACH_TIMEOUT_MS;
-    while (!host.isRuntimeRunning()) {
-      if (Date.now() >= deadline) return false;
+  /**
+   * Poll until the game runtime is actually running (see `isRuntimeRunning`): answers as soon as it
+   * runs, fails fast once play mode has stopped (a failed start), else gives up after
+   * {@link RUNTIME_START_TIMEOUT_MS} from `startedAt`.
+   */
+  private async waitForRuntime(host: WorkspaceAgentHost, startedAt: number): Promise<RuntimeWait> {
+    const deadline = startedAt + RUNTIME_START_TIMEOUT_MS;
+    let stoppedSince: number | null = null;
+    for (;;) {
+      if (host.isRuntimeRunning()) return { ok: true, startupMs: Date.now() - startedAt };
+      const now = Date.now();
+      const failure = host.startFailure();
+      if (failure === null) {
+        stoppedSince = null;
+      } else {
+        stoppedSince ??= now;
+        if (now - stoppedSince >= STOPPED_GRACE_MS) {
+          return { ok: false, startupMs: now - startedAt, stopped: failure };
+        }
+      }
+      if (now >= deadline) return { ok: false, startupMs: now - startedAt, stopped: null };
       await sleep(RUNTIME_POLL_MS);
     }
-    return true;
   }
 
   // --- internal tools ---------------------------------------------------------------------------
@@ -501,10 +562,11 @@ export class WorkspaceAgentToolBridge {
     this.holds.set(holdId, { release, timer });
     try {
       if (host.isPlaying()) await host.stopPlay();
-      const loaded = await host.syncLoaded();
+      const { loaded, problems } = await host.syncLoaded();
       const errors: SyncBarrierError[] = [];
       const buildError = await host.buildError();
       if (buildError) errors.push({ ...buildError, kind: 'compile' });
+      for (const problem of problems) errors.push({ ...problem, kind: 'load' });
       const coauthoring = appState.project.coauthoring;
       for (const merge of Object.values(coauthoring.merges)) {
         if (merge?.status === 'rejected') {
@@ -729,11 +791,11 @@ export class WorkspaceAgentToolBridge {
       );
     },
     holdAutosave: reason => this.autosave.hold(reason),
-    syncLoaded: async () => {
-      const scenes = await this.projectSync.syncNow();
-      const scripts = await this.projectSync.builtScriptHashes();
-      return { ...scripts, ...scenes };
+    startFailure: () => {
+      if (appState.ui.isPlaying && appState.ui.playModeStatus !== 'stopped') return null;
+      return appState.ui.playModeError?.message ?? 'play mode stopped';
     },
+    syncLoaded: () => this.projectSync.barrierRevision(),
     buildError: async () => {
       if (appState.project.scriptsStatus !== 'error') return null;
       return (await this.scriptLoader()).getLastBuildError();

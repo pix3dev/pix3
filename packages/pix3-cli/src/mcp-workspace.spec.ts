@@ -267,6 +267,41 @@ describe('pix3 mcp --workspace', () => {
     });
   }, 20_000);
 
+  it('carries the editor’s startupMs into the barrier answer, also for a failed start', async () => {
+    const server = await startServer();
+    let fail = false;
+    await openWindow(
+      server,
+      barrierWindow(
+        () => ({ 'scenes/main.pix3scene': sha('root: []\n') }),
+        () =>
+          fail
+            ? {
+                ...textResult({
+                  error: 'load_failed',
+                  message: 'not running within 30 s',
+                  errors: [{ file: null, message: 'runtime not running', kind: 'load' }],
+                  startupMs: 30_050,
+                }),
+                isError: true,
+              }
+            : { ...textResult({ ok: true }), _meta: { pix3: { startupMs: 8_012 } } }
+      )
+    );
+    const client = await startMcp();
+    const started = await callTool(client, 'play_start');
+    expect(started.isError).toBe(false);
+    expect(started.body).toMatchObject({ startupMs: 8_012, matchesDisk: true });
+
+    fail = true;
+    const failed = await callTool(client, 'play_restart');
+    expect(failed.isError).toBe(true);
+    expect(failed.body).toMatchObject({
+      startupMs: 30_050,
+      result: { error: 'load_failed' },
+    });
+  }, 20_000);
+
   it('mismatching expect → disk_differs_from_agent, with the recovery copy only when it exists', async () => {
     const server = await startServer();
     const calls = await openWindow(server, () => textResult({}));

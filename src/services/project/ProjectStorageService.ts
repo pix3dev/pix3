@@ -321,6 +321,29 @@ export class ProjectStorageService {
     return manifest.some(entry => entry.path === normalizedPath && entry.kind === 'file');
   }
 
+  /**
+   * `pix3 serve` workspace only: sha256 of the bytes this editor last read or wrote at `path` (the
+   * server's ETag of that exchange). Null on other backends, or when the path was never exchanged.
+   * Lets a reader know the hash of exactly what it read without hashing or reading again.
+   */
+  getKnownContentHash(path: string): string | null {
+    if (this.getBackend() !== 'workspace') return null;
+    return this.workspace.getKnownHash(this.normalizePath(path));
+  }
+
+  /**
+   * `pix3 serve` workspace only: `sha256` of `path` in the cached manifest (as of the last
+   * `rescan` plus pushed change events) — the disk's current hash without a request. `undefined`
+   * on other backends or when the manifest carries no hash for it; `null` when the manifest has no
+   * such file.
+   */
+  getManifestContentHash(path: string): string | null | undefined {
+    if (this.getBackend() !== 'workspace' || !this.workspace.getCachedManifest()) return undefined;
+    const entry = this.workspace.getManifestEntry(this.normalizePath(path));
+    if (!entry || entry.kind !== 'file') return null;
+    return entry.sha256 ?? undefined;
+  }
+
   normalizeResourcePath(path: string): string {
     if (this.getBackend() === 'local') {
       return this.fileSystem.normalizeResourcePath(path);

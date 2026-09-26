@@ -3,6 +3,7 @@ import { appState, resetAppState } from '@/state';
 import {
   GENERATE_SESSION_LIMIT,
   PERMISSION_TIMEOUT_MS,
+  RUNTIME_START_TIMEOUT_MS,
   WORKSPACE_AGENT_TOOLS,
   WorkspaceAgentToolBridge,
   type WorkspaceAgentHost,
@@ -25,6 +26,9 @@ interface FakeHost extends WorkspaceAgentHost {
   readonly releases: number[];
   results: Record<string, unknown>;
   loaded: Record<string, string>;
+  problems: Array<{ file: string | null; message: string }>;
+  /** Play-mode failure the host reports while waiting (null = none). */
+  failure: string | null;
   build: { file: string | null; line?: number; message: string } | null;
 }
 
@@ -37,6 +41,8 @@ const makeHost = (): FakeHost => {
     releases: [],
     results: {},
     loaded: { 'scenes/main.pix3scene': 'a'.repeat(64) },
+    problems: [],
+    failure: null,
     build: null,
     executeTool: vi.fn(async (name: string, args: Record<string, unknown>) => {
       host.executed.push({ name, args });
@@ -61,7 +67,8 @@ const makeHost = (): FakeHost => {
         host.releases[index] += 1;
       };
     }),
-    syncLoaded: vi.fn(async () => host.loaded),
+    startFailure: vi.fn(() => host.failure),
+    syncLoaded: vi.fn(async () => ({ loaded: host.loaded, problems: host.problems })),
     buildError: vi.fn(async () => host.build),
     mergeLogTail: vi.fn(async () => []),
   };
@@ -244,7 +251,7 @@ describe('WorkspaceAgentToolBridge', () => {
     try {
       host.runningAt = Number.MAX_SAFE_INTEGER;
       const pending = bridge.handleCall(frame('game_run', { until: [] }), context);
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(RUNTIME_START_TIMEOUT_MS + 1_000);
       const run = await pending;
       expect(run.isError).toBe(true);
       expect(body(run).error).toBe('load_failed');
@@ -252,6 +259,100 @@ describe('WorkspaceAgentToolBridge', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('reports every input of a consumer game (paths outside scenes/ and scripts/) in loaded', async () => {
+    host.loaded = {
+      'src/assets/scenes/x.pix3scene': '1'.repeat(64),
+      'src/scripts/Runner.ts': '2'.repeat(64),
+      'src/world/Chunk.ts': '3'.repeat(64),
+      'src/generated/resource-catalog.ts': '4'.repeat(64),
+      'pix3project.yaml': '5'.repeat(64),
+    };
+    const barrier = body(await bridge.handleCall(frame('sync_barrier'), context));
+    expect(barrier.loaded).toEqual(host.loaded);
+    expect(barrier.errors).toEqual([]);
+  });
+
+  it('reports an open scene the editor cannot vouch for as a load error', async () => {
+    host.problems = [{ file: 'src/assets/scenes/x.pix3scene', message: 'no verified version' }];
+    const barrier = body(await bridge.handleCall(frame('sync_barrier'), context));
+    expect(barrier.errors).toEqual([
+      { file: 'src/assets/scenes/x.pix3scene', message: 'no verified version', kind: 'load' },
+    ]);
+  });
+
+  it('a heavy start: play_start answers once the game runs (8 s), with startupMs', async () => {
+    vi.useFakeTimers();
+    host.executeTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      host.executed.push({ name, args });
+      if (name === 'play_start') {
+        host.playing = true;
+        host.runningAt = Date.now() + 8_000;
+      }
+      return { ok: true };
+    });
+    const pending = bridge.handleCall(frame('play_start'), context);
+    await vi.advanceTimersByTimeAsync(7_000);
+    let settled = false;
+    void pending.then(() => (settled = true));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_500);
+    const start = await pending;
+    expect(start.isError).toBeUndefined();
+    const startupMs = (start._meta?.pix3 as { startupMs?: number } | undefined)?.startupMs ?? -1;
+    expect(startupMs).toBeGreaterThanOrEqual(8_000);
+    expect(startupMs).toBeLessThan(8_200);
+  });
+
+  it('a start that never runs: load_failed after 30 s, not before', async () => {
+    vi.useFakeTimers();
+    host.executeTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      host.executed.push({ name, args });
+      if (name === 'play_start') {
+        host.playing = true;
+        host.runningAt = Number.MAX_SAFE_INTEGER;
+      }
+      return { ok: true };
+    });
+    let settled = false;
+    const pending = bridge.handleCall(frame('play_start'), context).finally(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(RUNTIME_START_TIMEOUT_MS - 1_000);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1_100);
+    const start = await pending;
+    expect(start.isError).toBe(true);
+    const failed = body(start);
+    expect(failed.error).toBe('load_failed');
+    expect(failed.errors).toEqual([{ file: null, message: 'runtime not running', kind: 'load' }]);
+    expect(failed.startupMs).toBeGreaterThanOrEqual(RUNTIME_START_TIMEOUT_MS);
+  });
+
+  it('fails fast when play mode stops during the start, with the play-mode error', async () => {
+    vi.useFakeTimers();
+    host.executeTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      host.executed.push({ name, args });
+      if (name === 'play_start') {
+        host.playing = true;
+        host.runningAt = Number.MAX_SAFE_INTEGER;
+        setTimeout(() => {
+          host.playing = false;
+          host.failure = 'Failed to start the scene: chunk mesher threw';
+        }, 2_000);
+      }
+      return { ok: true };
+    });
+    const pending = bridge.handleCall(frame('play_restart'), context);
+    await vi.advanceTimersByTimeAsync(3_000);
+    const start = await pending;
+    expect(start.isError).toBe(true);
+    const failed = body(start);
+    expect(failed.error).toBe('load_failed');
+    expect(String(failed.message)).toContain('chunk mesher threw');
+    expect(failed.startupMs).toBeLessThan(3_000);
   });
 
   it('observing tools report the started revision and the stale flag', async () => {

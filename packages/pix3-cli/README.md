@@ -449,13 +449,20 @@ raw bytes of every file the agent wrote.
    starts. Without `expect` the answer says `agentExpectations: "none"`.
 2. **Editor = disk.** The window's internal `sync_barrier` holds autosave (edits accumulate and are
    saved after the run), stops play, runs `syncNow()` (waits for the stabilisation window and the
-   script build) and returns `{loaded: {path: sha256}, errors}` — the open scenes and the built
-   script sources. These hashes (plus `expect`) are compared with `/ws/agent/hash` at that moment;
+   script build; re-reads `pix3project.yaml` when the disk holds another version) and returns
+   `{loaded: {path: sha256}, errors}` — every open scene/prefab (any path), every source the last
+   script build read (the entry scripts **and every module the bundle pulled in**, e.g. `src/**`;
+   the hash recorded when the build read it, so nothing is re-read) and `pix3project.yaml`. An open
+   scene the editor holds no disk version of is a `load_failed` error, never silently left out. The
+   MCP process gives this call 100 s. These hashes (plus `expect`) are compared with `/ws/agent/hash` at that moment;
    a mismatch retries the editor's sync for up to ~5 s. Then: loader/compiler errors →
    `load_failed` (`{file, line, message, kind}`); a file that stays unreadable →
    `pending_external`; hashes that never agree → `sync_timeout` with the differing paths. The
    window then starts the game (`game_run` starts play itself; `play_restart` of a stopped game is
-   a start) and the hold is released (`sync_release`) after the run.
+   a start) and answers only once the game is actually running: up to 30 s, as soon as it runs,
+   failing fast (`load_failed` with the play-mode error) when play mode stops instead; `startupMs`
+   says how long the start took. The MCP process gives the tool call 120 s (the server's cap). The
+   hold is released (`sync_release`) after the run.
 3. **After the run** (for `game_run` when it finished; for `play_start` / `play_restart` right
    after the start was acknowledged) the verified files are hashed again and
    `/ws/agent/changes?since=<seq of the verification>` is read: `changedDuringRun` and
@@ -466,6 +473,7 @@ The answer of a barrier tool:
 ```json
 {
   "revision": { "<path>": "<sha256 of the verified version>" },
+  "startupMs": 8123,
   "matchesAgent": true,
   "matchesDisk": true,
   "changedDuringRun": [],
@@ -503,7 +511,7 @@ with the editor's result as is. `project_status` without a window answers
 | --- | --- |
 | `disk_differs_from_agent` | Step 1: the disk does not hold the `expect` versions (`differing[]` with `recovery`, `mergeLog`, `hint`). |
 | `sync_timeout` | Step 2: the editor's loaded hashes did not match the disk within ~5 s (`differing[]` with `loadedHash` / `agentHash` / `diskHash`). |
-| `load_failed` | Step 2: the loader or the script compiler failed on the current files (`errors[]`). |
+| `load_failed` | Step 2: the loader or the script compiler failed on the current files, or an open scene has no verified version (`errors[]`). At the start: the game was not running within 30 s, or play mode stopped (`result` carries it, with `startupMs`). |
 | `pending_external` | Step 2: a file stays unreadable (partial / invalid write); the editor keeps its last good version. |
 | `no_editor` | No window holds the lease, it did not answer (`reason: "no_reply"`), or it lost the lease mid-call (`reason: "lease_lost"`). |
 | `permission_denied` | `generate_*`: the human denied, or did not answer within 60 s. |

@@ -13,6 +13,10 @@ export class MemoryStorage {
   /** Paths (prefixes) whose writes throw, e.g. a read-only `.pix3/`. */
   readonly failWrites = new Set<string>();
   readonly writes: Array<{ path: string; contents: string }> = [];
+  /** Workspace manifest hashes (`backend = 'workspace'` only); set by the test. */
+  readonly manifestHashes = new Map<string, string>();
+  /** Reads made through {@link readTextFile} / {@link readBlob}, for "nothing was read" checks. */
+  readonly reads: string[] = [];
 
   private key(path: string): string {
     return path.replace(/^res:\/\//, '').replace(/^\/+/, '');
@@ -23,6 +27,7 @@ export class MemoryStorage {
   }
 
   async readTextFile(path: string): Promise<string> {
+    this.reads.push(this.key(path));
     const raw = this.bytes.get(this.key(path));
     if (raw) return new TextDecoder('utf-8').decode(raw);
     const value = this.files.get(this.key(path));
@@ -32,6 +37,7 @@ export class MemoryStorage {
 
   async readBlob(path: string): Promise<Blob> {
     const key = this.key(path);
+    this.reads.push(key);
     const raw = this.bytes.get(key);
     if (raw) return new Blob([new Uint8Array(raw)]);
     const value = this.files.get(key);
@@ -58,6 +64,17 @@ export class MemoryStorage {
 
   async fileExists(path: string): Promise<boolean> {
     return this.files.has(this.key(path));
+  }
+
+  getKnownContentHash(_path: string): string | null {
+    return null;
+  }
+
+  getManifestContentHash(path: string): string | null | undefined {
+    if (this.backend !== 'workspace') return undefined;
+    const key = this.key(path);
+    if (!this.files.has(key)) return null;
+    return this.manifestHashes.get(key);
   }
 
   async deleteEntry(path: string): Promise<void> {
