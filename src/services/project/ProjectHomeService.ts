@@ -1,6 +1,7 @@
 import { inject, injectable } from '@/fw/di';
 import { appState } from '@/state';
 import { FileSystemAPIService, type FileDescriptor } from '@/services/project/FileSystemAPIService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { SceneThumbnailGenerator } from '@/services/scene/SceneThumbnailGenerator';
 import { ThumbnailCacheService } from '@/services/assets/ThumbnailCacheService';
 
@@ -119,6 +120,10 @@ export class ProjectHomeService {
   @inject(FileSystemAPIService)
   private readonly fileSystem!: FileSystemAPIService;
 
+  /** Reads go through storage so a `pix3 serve` workspace (no directory handle) works too. */
+  @inject(ProjectStorageService)
+  private readonly storage!: ProjectStorageService;
+
   @inject(SceneThumbnailGenerator)
   private readonly sceneThumbnails!: SceneThumbnailGenerator;
 
@@ -186,7 +191,7 @@ export class ProjectHomeService {
         this.thumbnailMem.set(key, cached);
         return cached;
       }
-      const blob = await this.fileSystem.readBlob(scene.resourceId);
+      const blob = await this.storage.readBlob(scene.resourceId);
       const url = await this.sceneThumbnails.generate(blob, scene.resourceId);
       this.thumbnailMem.set(key, url);
       void this.thumbnailCache.set(key, url);
@@ -223,10 +228,9 @@ export class ProjectHomeService {
       let nodeCount = 0;
       let modifiedAt = 0;
       try {
-        const handle = await this.fileSystem.getFileHandle(this.toResourceId(relative));
-        const osFile = await handle.getFile();
-        modifiedAt = osFile.lastModified;
-        nodeCount = this.countNodes(await osFile.text());
+        const resourceId = this.toResourceId(relative);
+        nodeCount = this.countNodes(await this.storage.readTextFile(resourceId));
+        modifiedAt = (await this.storage.getLastModified(resourceId)) ?? 0;
       } catch {
         // Leave defaults; a scene that can't be read still shows as a card.
       }
@@ -336,12 +340,11 @@ export class ProjectHomeService {
       if (!match) continue;
       try {
         const relative = this.stripRes(match.path);
-        const handle = await this.fileSystem.getFileHandle(this.toResourceId(relative));
-        const osFile = await handle.getFile();
-        const text = await osFile.text();
+        const resourceId = this.toResourceId(relative);
+        const text = await this.storage.readTextFile(resourceId);
         return {
           path: relative,
-          modifiedAt: osFile.lastModified,
+          modifiedAt: (await this.storage.getLastModified(resourceId)) ?? 0,
           sections: this.parseGddSections(text),
         };
       } catch {
@@ -383,7 +386,10 @@ export class ProjectHomeService {
   }
 
   private async walkProject(): Promise<WalkedFile[]> {
-    if (!this.fileSystem.getProjectDirectory()) {
+    // Cloud projects keep their dashboard empty (listing them walks the whole manifest remotely).
+    const onDisk =
+      appState.project.backend === 'workspace' || this.fileSystem.getProjectDirectory() !== null;
+    if (!onDisk) {
       return [];
     }
     const out: WalkedFile[] = [];
@@ -395,7 +401,7 @@ export class ProjectHomeService {
     if (depth > MAX_WALK_DEPTH) return;
     let entries: FileDescriptor[];
     try {
-      entries = await this.fileSystem.listDirectory(path);
+      entries = await this.storage.listDirectory(path);
     } catch {
       return;
     }

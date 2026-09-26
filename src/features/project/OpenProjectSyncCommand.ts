@@ -31,6 +31,15 @@ export class OpenProjectSyncCommand extends CommandBase<void, void> {
       };
     }
 
+    if (context.state.project.backend === 'workspace') {
+      return {
+        canExecute: false,
+        reason:
+          'A workspace project is synced by its own folder (git, the server); cloud sync is off.',
+        scope: 'project',
+      };
+    }
+
     return { canExecute: true };
   }
 

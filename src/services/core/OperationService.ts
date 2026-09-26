@@ -15,6 +15,8 @@ import {
   type OperationInvokeOptions,
   type OperationInvokeResult,
   type OperationMetadata,
+  type OperationOrigin,
+  NON_HUMAN_OPERATION_TAG,
 } from '@/core/Operation';
 import { appState, type AppState, type AppStateSnapshot } from '@/state';
 import { subscribe } from 'valtio/vanilla';
@@ -34,6 +36,11 @@ export type OperationEvent =
       readonly didMutate: boolean;
       /** True when the mutation was committed through history and is safe to sync in collaboration. */
       readonly pushedToHistory: boolean;
+      /**
+       * Who asked for it (`OperationInvokeOptions.origin`, default `user`); an operation tagged
+       * `NON_HUMAN_OPERATION_TAG` reports `external` whatever it was invoked with.
+       */
+      readonly origin: OperationOrigin;
       readonly timestamp: number;
     }
   | {
@@ -84,6 +91,16 @@ const READ_ONLY_ALLOWED_OPERATIONS = new Set([
 ]);
 
 const NO_SCENE_HISTORY_KEY = '__none__';
+
+function resolveOrigin(
+  metadata: OperationMetadata,
+  options: OperationInvokeOptions
+): OperationOrigin {
+  if (metadata.tags?.includes(NON_HUMAN_OPERATION_TAG)) {
+    return 'external';
+  }
+  return options.origin ?? 'user';
+}
 
 @injectable()
 export class OperationService {
@@ -193,7 +210,8 @@ export class OperationService {
       execution.metadata,
       execution.context.state,
       execution.result.didMutate,
-      false
+      false,
+      resolveOrigin(execution.metadata, options)
     );
     return execution.result as TInvokeResult;
   }
@@ -238,7 +256,8 @@ export class OperationService {
         execution.metadata,
         execution.context.state,
         execution.result.didMutate,
-        pushed
+        pushed,
+        resolveOrigin(execution.metadata, options)
       );
     }
 
@@ -511,7 +530,8 @@ export class OperationService {
     metadata: OperationMetadata,
     state: AppState,
     didMutate: boolean,
-    pushedToHistory: boolean
+    pushedToHistory: boolean,
+    origin: OperationOrigin
   ): void {
     this.logger.debug('completeOperation: Finishing', {
       operationId: metadata.id,
@@ -534,6 +554,7 @@ export class OperationService {
       metadata,
       didMutate,
       pushedToHistory,
+      origin,
       timestamp: Date.now(),
     });
   }

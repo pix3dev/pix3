@@ -53,6 +53,18 @@ export class SaveAsSceneCommand extends CommandBase<void, void> {
       };
     }
 
+    // Save As without a target path opens the browser's save picker, which only knows this
+    // computer's folders — a `pix3 serve` workspace lives on another machine.
+    if (context.state.project.backend === 'workspace' && !this.params?.filePath) {
+      return {
+        canExecute: false,
+        reason:
+          'Save As is not available for a workspace project yet: save the scene, or duplicate ' +
+          'the file in the asset browser.',
+        scope: 'project',
+      };
+    }
+
     const activeGraph = sceneManager.getActiveSceneGraph();
     const hasActiveScene = Boolean(activeGraph);
     console.debug('[SaveAsSceneCommand] Active scene check', {

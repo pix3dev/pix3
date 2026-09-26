@@ -6,7 +6,7 @@ import {
   type CommandPreconditionResult,
 } from '@/core/command';
 import { OperationService } from '@/services/core/OperationService';
-import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { AddAutoloadOperation, type AddAutoloadParams } from './AddAutoloadOperation';
 
 const SINGLETON_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -60,12 +60,10 @@ export class AddAutoloadCommand extends CommandBase<void, void> {
       };
     }
 
-    const fs = context.container.getService<FileSystemAPIService>(
-      context.container.getOrCreateToken(FileSystemAPIService)
+    const storage = context.container.getService<ProjectStorageService>(
+      context.container.getOrCreateToken(ProjectStorageService)
     );
-    try {
-      await fs.getFileHandle(scriptPath);
-    } catch {
+    if (!(await storage.fileExists(scriptPath))) {
       return {
         canExecute: false,
         reason: `Script not found: ${scriptPath}`,

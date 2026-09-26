@@ -1,12 +1,27 @@
-import { subscribe } from 'valtio/vanilla';
-
 import { injectable } from '@/fw/di';
-import { appState } from '@/state';
-import { isDocumentActive } from '@/services/core/page-activity';
+import { isDocumentVisible } from '@/services/core/page-activity';
+import { ACK_FILE, isPix3InternalPath } from '@/services/project/coauthoring/coauthoring-paths';
 
 /**
- * FileWatchService monitors external changes to opened scene files using polling.
- * When a file is modified externally, it emits a change event that can trigger auto-reload.
+ * FileWatchService monitors external changes to opened scene files.
+ *
+ * Two sources of change, one listener API:
+ * - **polling** (File System Access): a watched path with a `FileSystemFileHandle` is polled with
+ *   `getFile()` and compared by `lastModified`.
+ * - **push** (`pix3 serve` workspace): with {@link setPushMode} on, a path may be watched without
+ *   a handle; the workspace session reports changes through {@link notifyExternalChange} as the
+ *   server's `change` frames arrive. Nothing is polled for those paths.
+ *
+ * Either way a detected change invokes the same listeners; the editor shell routes scene changes
+ * through `ExternalChangeService` (stabilisation window, batch, own-hash skip) into
+ * `ExternalMergeService` (merge with the protected set, or reload), so it does not care where the
+ * change came from.
+ *
+ * Polling runs while the document is **visible**, focused or not (an editor beside the agent's
+ * terminal must see the agent's edits), and keeps running during play: a change is detected and
+ * reported, and `ExternalChangeService` marks the editor `stale` instead of reloading mid-game.
+ * `.pix3/` (recovery journal, protected set, challenge files) is never reported, except
+ * `.pix3/ack.json`, which `AckService` watches explicitly.
  */
 @injectable()
 export class FileWatchService {
@@ -22,19 +37,22 @@ export class FileWatchService {
   /** Callbacks invoked when a watched file is modified externally. */
   private readonly changeListeners = new Map<string, Set<() => void>>();
 
+  /** Handle-less watches are accepted (changes arrive by push, see {@link notifyExternalChange}). */
+  private pushMode = false;
+
+  /** Last content hash reported or written per watched path (push mode dedup). */
+  private readonly lastKnownHashes = new Map<string, string>();
+
   /**
-   * Polling interval in milliseconds. External edits to an open scene are a
-   * human-scale event — each poll costs a `getFile()` per watched file, so a
-   * couple of seconds of latency buys a large idle-CPU/battery saving over the
-   * old 500ms cadence.
+   * Polling interval in milliseconds. Each poll costs one `getFile()` (metadata only) per watched
+   * file. The co-authoring budget is "an agent's edit shows up within ~3 s in an unfocused
+   * window": this interval plus the 2 x 300 ms stabilisation window of `ExternalChangeService`.
    */
-  private readonly pollInterval: number = 2500;
-  private isPageActive = isDocumentActive(document);
-  private isPlaying = appState.ui.isPlaying;
-  private readonly disposePlaySubscription: () => void;
+  private readonly pollInterval: number = 1000;
+  private isPageVisible = isDocumentVisible(document);
 
   private readonly handlePageActivityChange = () => {
-    this.isPageActive = isDocumentActive(document);
+    this.isPageVisible = isDocumentVisible(document);
     this.updatePollingState();
   };
 
@@ -44,20 +62,23 @@ export class FileWatchService {
     window.addEventListener('pageshow', this.handlePageActivityChange);
     window.addEventListener('pagehide', this.handlePageActivityChange);
     document.addEventListener('visibilitychange', this.handlePageActivityChange);
-    // Auto-reload from an external edit mid-play would tear down the running
-    // game anyway, so polling during play is pure waste — pause it and catch up
-    // with an immediate check when play stops.
-    this.disposePlaySubscription = subscribe(appState.ui, () => {
-      if (appState.ui.isPlaying !== this.isPlaying) {
-        this.isPlaying = appState.ui.isPlaying;
-        this.updatePollingState();
-      }
-    });
   }
 
-  /** True while polling timers should be running at all. */
+  /**
+   * True while polling timers should be running: the document is visible. Focus does not matter,
+   * and neither does play mode (changes are detected then and turned into a `stale` flag).
+   */
   private get shouldPoll(): boolean {
-    return this.isPageActive && !this.isPlaying;
+    return this.isPageVisible;
+  }
+
+  /** Check every polled file now (the explicit `syncNow()` path). Resolves when all were read. */
+  async checkAllNow(): Promise<void> {
+    await Promise.all(
+      Array.from(this.fileHandles.entries()).map(([filePath, fileHandle]) =>
+        this.checkFileChange(filePath, fileHandle)
+      )
+    );
   }
 
   /** Start/stop all pollers to match {@link shouldPoll}; checks immediately on resume. */
@@ -84,10 +105,86 @@ export class FileWatchService {
     this.lastModifiedTimes.set(filePath, lastModifiedTime);
   }
 
+  /** Turn push mode on (a workspace is connected) or off (it is gone). */
+  setPushMode(enabled: boolean): void {
+    this.pushMode = enabled;
+    if (!enabled) {
+      this.lastKnownHashes.clear();
+    }
+  }
+
+  /** True while watches without a file handle are accepted (changes are pushed, not polled). */
+  isPushMode(): boolean {
+    return this.pushMode;
+  }
+
+  /**
+   * Record the content hash this editor itself last wrote or read for `filePath`, so a pushed
+   * change carrying the same hash is recognised as nothing new.
+   */
+  setLastKnownHash(filePath: string, sha256: string | null | undefined): void {
+    const key = normalizeWatchPath(filePath);
+    if (sha256) {
+      this.lastKnownHashes.set(key, sha256);
+    } else {
+      this.lastKnownHashes.delete(key);
+    }
+  }
+
+  /**
+   * A pushed external change (workspace `change` frame). Invokes the listeners of every watched
+   * path that names the same file — watched keys are `res://…` for scenes and bare relative paths
+   * for scripts, so matching is on the normalised form. A change whose `sha256` equals the last
+   * known hash of that path is ignored. Returns true when at least one listener ran.
+   */
+  notifyExternalChange(filePath: string, info: { readonly sha256?: string | null } = {}): boolean {
+    const key = normalizeWatchPath(filePath);
+    // `.pix3/` is editor-private — except the agent's read confirmations, watched explicitly.
+    if (isPix3InternalPath(key) && key !== ACK_FILE) {
+      return false;
+    }
+    const sha256 = info.sha256 ?? null;
+    if (sha256 !== null && this.lastKnownHashes.get(key) === sha256) {
+      return false;
+    }
+    if (sha256 !== null) {
+      this.lastKnownHashes.set(key, sha256);
+    } else {
+      this.lastKnownHashes.delete(key);
+    }
+
+    let notified = false;
+    for (const [watchedPath, listeners] of Array.from(this.changeListeners.entries())) {
+      if (normalizeWatchPath(watchedPath) !== key) {
+        continue;
+      }
+      for (const callback of Array.from(listeners)) {
+        notified = true;
+        try {
+          callback();
+        } catch (error) {
+          console.error('[FileWatchService] Change listener error:', error);
+        }
+      }
+    }
+    return notified;
+  }
+
+  /** Whether any listener watches `filePath` (in any of its spellings). */
+  isWatching(filePath: string): boolean {
+    const key = normalizeWatchPath(filePath);
+    for (const watchedPath of this.changeListeners.keys()) {
+      if (normalizeWatchPath(watchedPath) === key) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Start watching a scene file for external changes.
    * @param filePath Resource path (e.g., res://scenes/level.pix3scene)
-   * @param fileHandle File system handle for the file
+   * @param fileHandle File system handle for the file; may be null in push mode
    * @param lastModifiedTime Initial modification time
    * @param onChange Callback invoked when file changes externally
    */
@@ -97,6 +194,14 @@ export class FileWatchService {
     lastModifiedTime: number | null | undefined,
     onChange: () => void
   ): void {
+    if (!fileHandle && this.pushMode) {
+      if (!this.changeListeners.has(filePath)) {
+        this.changeListeners.set(filePath, new Set());
+      }
+      this.changeListeners.get(filePath)!.add(onChange);
+      return;
+    }
+
     if (!fileHandle) {
       console.warn(`[FileWatchService] Cannot watch ${filePath}: no file handle provided`);
       return;
@@ -147,20 +252,22 @@ export class FileWatchService {
           return;
         }
       }
+    } else {
+      this.changeListeners.delete(filePath);
     }
+    this.lastKnownHashes.delete(normalizeWatchPath(filePath));
 
-    // Stop polling if no more listeners
+    // Stop polling if no more listeners. The handle is dropped even while polling is paused
+    // (hidden tab / play mode), or `resumePolling` would bring an unwatched path back.
     const intervalId = this.watchers.get(filePath);
     if (intervalId) {
       window.clearInterval(intervalId);
       this.watchers.delete(filePath);
-      this.fileHandles.delete(filePath);
-      this.lastModifiedTimes.delete(filePath);
-
-      if (import.meta.env.MODE === 'development') {
-        console.debug(`[FileWatchService] Stopped watching: ${filePath}`);
-      }
     }
+    if (this.fileHandles.delete(filePath) && import.meta.env.MODE === 'development') {
+      console.debug(`[FileWatchService] Stopped watching: ${filePath}`);
+    }
+    this.lastModifiedTimes.delete(filePath);
   }
 
   /**
@@ -172,6 +279,7 @@ export class FileWatchService {
     this.fileHandles.clear();
     this.lastModifiedTimes.clear();
     this.changeListeners.clear();
+    this.lastKnownHashes.clear();
   }
 
   private startPolling(filePath: string): void {
@@ -259,7 +367,15 @@ export class FileWatchService {
     window.removeEventListener('pageshow', this.handlePageActivityChange);
     window.removeEventListener('pagehide', this.handlePageActivityChange);
     document.removeEventListener('visibilitychange', this.handlePageActivityChange);
-    this.disposePlaySubscription();
     this.unwatchAll();
   }
+}
+
+/** `res://scenes/a.pix3scene`, `./scenes/a.pix3scene`, `/scenes/a.pix3scene` → `scenes/a.pix3scene`. */
+function normalizeWatchPath(path: string): string {
+  return path
+    .replace(/^res:\/\//i, '')
+    .replace(/\\+/g, '/')
+    .replace(/^(?:\.\/)+/, '')
+    .replace(/^\/+/, '');
 }

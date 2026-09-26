@@ -2,7 +2,12 @@ import { injectable, inject } from '@/fw/di';
 import { subscribe } from 'valtio/vanilla';
 
 import { appState } from '@/state';
-import { Script } from '@pix3/runtime';
+import {
+  PROJECT_SCRIPT_DIRECTORIES,
+  PROJECT_SCRIPT_ENTRY_PATTERN,
+  Script,
+  userScriptComponentId,
+} from '@pix3/runtime';
 import type { ScriptComponent } from '@pix3/runtime';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { ScriptRegistry, SceneManager } from '@pix3/runtime';
@@ -52,7 +57,8 @@ export class ProjectScriptLoaderService {
   private disposeSubscription?: () => void;
   private debounceTimer: number | null = null;
   private readonly debounceMs = 300;
-  private readonly scriptDirectories = ['scripts', 'src/scripts'] as const;
+  // Shared with `pix3 validate` (see `core/project-script-registration.ts` in the runtime).
+  private readonly scriptDirectories = PROJECT_SCRIPT_DIRECTORIES;
   private readonly supportedSourceExtensions = ['.ts', '.js', '.css', '.glsl'] as const;
   private isPageActive = isDocumentActive(document);
   private pendingBuildWhileHidden = false;
@@ -241,7 +247,7 @@ export class ProjectScriptLoaderService {
         if (!this.watchedFilePaths.has(file.path)) {
           try {
             const handle = await this.storage.getFileHandle(file.path);
-            if (handle) {
+            if (handle || this.fileWatchService.isPushMode()) {
               this.fileWatchService.watch(file.path, handle, undefined, () => {
                 void this.syncAndBuild();
               });
@@ -402,7 +408,7 @@ export class ProjectScriptLoaderService {
     }
 
     // Create unique ID for this script
-    const scriptId = `user:${className}`;
+    const scriptId = userScriptComponentId(className);
 
     // Cast the dynamic constructor to the expected registry type
     const typedCtor = ctor as unknown as (new (id: string, type: string) => ScriptComponent) &
@@ -530,7 +536,7 @@ export class ProjectScriptLoaderService {
       ) {
         try {
           const handle = await this.storage.getFileHandle(filePath);
-          if (handle) {
+          if (handle || this.fileWatchService.isPushMode()) {
             this.fileWatchService.watch(filePath, handle, undefined, () => {
               void this.syncAndBuild();
             });
@@ -622,7 +628,7 @@ export class ProjectScriptLoaderService {
         continue;
       }
 
-      if (/extends\s+Script\b/.test(content)) {
+      if (PROJECT_SCRIPT_ENTRY_PATTERN.test(content)) {
         entryFiles.push(filePath);
       }
     }

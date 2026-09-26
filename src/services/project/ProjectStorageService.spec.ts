@@ -181,4 +181,93 @@ describe('ProjectStorageService', () => {
     expect(appState.project.lastModifiedDirectoryPath).toBe('assets');
     expect(appState.project.fileRefreshSignal).toBeGreaterThan(0);
   });
+
+  describe('workspace backend', () => {
+    let workspace: Record<string, ReturnType<typeof vi.fn>>;
+
+    beforeEach(() => {
+      appState.project.backend = 'workspace';
+      appState.project.id = 'ws-1';
+      workspace = {
+        getCachedManifest: vi.fn().mockReturnValue({ files: [] }),
+        getManifest: vi.fn(),
+        getManifestEntries: vi.fn().mockReturnValue([
+          { path: 'scenes', kind: 'dir', size: 0, mtime: 1 },
+          { path: 'scenes/main.pix3scene', kind: 'file', size: 12, mtime: 1700, sha256: 'a' },
+          { path: 'scenes/sub', kind: 'dir', size: 0, mtime: 1 },
+          { path: 'scenes/sub/deep.pix3scene', kind: 'file', size: 3, mtime: 1, sha256: 'b' },
+          { path: 'pix3project.yaml', kind: 'file', size: 5, mtime: 1, sha256: 'c' },
+        ]),
+        getManifestEntry: vi.fn((path: string) =>
+          path === 'scenes/main.pix3scene'
+            ? { path, kind: 'file', size: 12, mtime: 1700, sha256: 'a' }
+            : null
+        ),
+        readText: vi.fn().mockResolvedValue('yaml'),
+        readBlob: vi.fn().mockResolvedValue(new Blob(['x'])),
+        writeFile: vi.fn().mockResolvedValue({ sha256: 'n', size: 1, mtime: 2, seq: 1 }),
+        mkdir: vi.fn().mockResolvedValue({ created: true }),
+        delete: vi.fn().mockResolvedValue({ kind: 'file' }),
+        move: vi.fn().mockResolvedValue({ kind: 'file' }),
+      };
+      Object.defineProperty(service, 'workspace', { value: workspace, configurable: true });
+    });
+
+    it('reports the workspace backend', () => {
+      expect(service.getBackend()).toBe('workspace');
+    });
+
+    it('lists direct children from the manifest', async () => {
+      await expect(service.listDirectory('res://scenes')).resolves.toEqual([
+        { name: 'main.pix3scene', kind: 'file', path: 'scenes/main.pix3scene', size: 12 },
+        { name: 'sub', kind: 'directory', path: 'scenes/sub', size: null },
+      ]);
+      expect(mockFileSystem.listDirectory).not.toHaveBeenCalled();
+    });
+
+    it('reads and writes through the workspace client, never the FSA service', async () => {
+      await expect(service.readTextFile('res://pix3project.yaml')).resolves.toBe('yaml');
+      expect(workspace.readText).toHaveBeenCalledWith('pix3project.yaml');
+
+      await service.writeTextFile('scenes/main.pix3scene', 'new');
+      expect(workspace.writeFile).toHaveBeenCalledWith('scenes/main.pix3scene', 'new');
+      expect(mockFileSystem.writeTextFile).not.toHaveBeenCalled();
+      expect(appState.project.lastModifiedDirectoryPath).toBe('scenes');
+      expect(appState.project.fileRefreshSignal).toBe(1);
+    });
+
+    it('writes .pix3/ bookkeeping without a base when asked, and without a listing refresh', async () => {
+      await service.writeTextFile('.pix3/protected.json', '{}', { unconditional: true });
+      expect(workspace.writeFile).toHaveBeenCalledWith('.pix3/protected.json', '{}', {
+        baseHash: null,
+      });
+      await service.writeTextFile('.pix3/recovery/a%2Fb.pix3scene/x.pix3scene', 'v');
+      expect(appState.project.fileRefreshSignal).toBe(0);
+    });
+
+    it('moves with one server rename and deletes recursively', async () => {
+      await service.moveEntry('scenes/main.pix3scene', 'levels/main.pix3scene');
+      expect(workspace.move).toHaveBeenCalledWith('scenes/main.pix3scene', 'levels/main.pix3scene');
+      expect(workspace.readBlob).not.toHaveBeenCalled();
+
+      await service.deleteEntry('scenes/sub');
+      expect(workspace.delete).toHaveBeenCalledWith('scenes/sub', { recursive: true });
+    });
+
+    it('has no file handles and takes mtime from the manifest', async () => {
+      await expect(service.getFileHandle('scenes/main.pix3scene')).resolves.toBeNull();
+      await expect(service.getLastModified('res://scenes/main.pix3scene')).resolves.toBe(1700);
+      await expect(service.fileExists('scenes/main.pix3scene')).resolves.toBe(true);
+      await expect(service.fileExists('scenes/missing.ts')).resolves.toBe(false);
+    });
+
+    it('refuses writes while another window holds the lease', async () => {
+      appState.project.workspace.lease = 'busy';
+
+      await expect(service.writeTextFile('a.txt', 'x')).rejects.toMatchObject({
+        code: 'read_only',
+      });
+      expect(workspace.writeFile).not.toHaveBeenCalled();
+    });
+  });
 });

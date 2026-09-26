@@ -1,0 +1,168 @@
+pix3-merge-banner {
+  display: contents;
+}
+
+/* Floats below the top bar, centred, below modals and menus; never blocks the canvas input. */
+pix3-merge-banner .merge-banner-stack {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 52px);
+  left: 50%;
+  z-index: var(--pix3-z-floating);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: min(820px, calc(100vw - 32px));
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+pix3-merge-banner .merge-banner {
+  pointer-events: auto;
+  padding: 8px 10px 8px 14px;
+  border-radius: var(--radius-2);
+  border: 1px solid rgba(var(--pix3-accent-rgb), 0.45);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+pix3-merge-banner .merge-banner--error {
+  border-color: var(--danger);
+}
+
+pix3-merge-banner .merge-banner__row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 10px;
+}
+
+pix3-merge-banner .merge-banner__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+pix3-merge-banner .merge-banner--error .merge-banner__icon {
+  color: var(--danger);
+}
+
+pix3-merge-banner .merge-banner__icon svg,
+pix3-merge-banner .merge-banner__btn svg {
+  display: block;
+}
+
+pix3-merge-banner .merge-banner__text {
+  flex: 1 1 260px;
+  min-width: 0;
+}
+
+pix3-merge-banner .merge-banner__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+pix3-merge-banner .merge-banner__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 4px 10px;
+  border-radius: var(--radius-1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 20, 24, 0.9);
+  color: var(--fg-0);
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+pix3-merge-banner .merge-banner__btn:hover:not(:disabled) {
+  border-color: rgba(var(--pix3-accent-rgb), 0.6);
+}
+
+pix3-merge-banner .merge-banner__btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+pix3-merge-banner .merge-banner__btn:focus-visible {
+  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline-offset: 1px;
+}
+
+pix3-merge-banner .merge-banner__btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+pix3-merge-banner .merge-banner__btn--icon {
+  padding: 4px 6px;
+  border-color: transparent;
+  background: transparent;
+  color: var(--fg-2);
+}
+
+pix3-merge-banner .merge-banner__details {
+  margin: 8px 0 0;
+  padding: 6px 0 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  list-style: none;
+  max-height: 40vh;
+  overflow: auto;
+}
+
+pix3-merge-banner .merge-banner__conflict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+pix3-merge-banner .merge-banner__conflict-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+pix3-merge-banner .merge-banner__conflict-path {
+  color: var(--fg-2);
+  font-size: 0.75rem;
+  font-family: var(--font-mono, monospace);
+}
+
+pix3-merge-banner .merge-banner__values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-family: var(--font-mono, monospace);
+  font-size: 0.75rem;
+}
+
+pix3-merge-banner .merge-banner__value--mine {
+  color: #5ec27a;
+}
+
+pix3-merge-banner .merge-banner__value--agent {
+  color: var(--fg-2);
+}
+
+pix3-merge-banner .merge-banner__arrow {
+  color: var(--fg-2);
+}
+
+pix3-merge-banner .merge-banner__arrow {
+  display: inline-flex;
+  align-items: center;
+}
+
+pix3-merge-banner .merge-banner__arrow svg {
+  display: block;
+  width: 0.8rem;
+  height: 0.8rem;
+}

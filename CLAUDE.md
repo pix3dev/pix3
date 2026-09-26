@@ -14,9 +14,11 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | Add/fix an inspector property (schema authoring)                        | `docs/property-schema-reference.md` (recipes at top; source: `packages/pix3-runtime/src/fw/property-schema.ts`)                   |
 | New engine node, full checklist                                         | `nodes-and-systems.md` engine-vs-game + spec "Scene File Format" + `property-schema-reference.md`                                 |
 | `.pix3scene` YAML format / validation                                   | `docs/pix3-specification.md` → "Scene File Format"                                                                                |
+| Strict scene check / which `properties:` keys the loader reads (`pix3 validate`) | `docs/pix3-specification.md` → "Strict profile"; table `packages/pix3-runtime/src/core/scene-disk-format.ts`; CLI `packages/pix3-cli/src/validate/` |
 | Script lifecycle / registry / serialization                             | `docs/pix3-specification.md` → "Script Component System"                                                                          |
 | Prefabs / keyframe animation / localization / signals / groups          | `docs/pix3-specification.md` → "Node Prefabs System" / "Keyframe Animation" / "Localization" / "Signals Engine" / "Groups Engine" |
 | Hide a group of objects without touching the scene file (Peek)          | `docs/pix3-specification.md` → "Editor Peek (View Mask)"; code in `src/services/viewport/PeekService.ts`                          |
+| Autosave / recovery journal / protected set `P` / external-change stabilisation (agent co-authoring) | `docs/pix3-specification.md` → "Co-authoring mode"; code in `src/services/project/coauthoring/` + `autosave/` |
 | Generate / apply UI skins (UI Kit Forge, `skin_ui`, `ui-kit.json`)      | `docs/nodes-and-systems.md` → "2D UI kit generation"; file formats: `docs/pix3-specification.md` → "UI Kit Assets"                |
 | Generate raster art through a signed-in Codex CLI (no image API key)   | `docs/pix3-specification.md` → "AI Image Generation through Codex"; bridge route in `tools/pix3-agent-bridge/src/index.ts` |
 | 2D draw order, overlay flag, texture-goes-black bug                     | this file → "2D overlay rendering"                                                                                                |
@@ -37,6 +39,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | Build a game feature (entry point)                                      | `pix3-game-dev` skill                                                                                                             |
 | Debug the _running_ editor                                              | `debug-running-game` skill                                                                                                        |
 | Run / open / launch the editor for the user                             | this file → "Launch the editor" — always probe port 8123 first                                                                  |
+| Open a project served by `pix3 serve` (remote / no FSA), workspace backend | `docs/pix3-specification.md` → "Workspace backend (pix3 serve)"; wire contract `packages/pix3-cli/README.md`; code `src/services/project/workspace/` |
 
 **Version of record** is the `## N. Change Log` / title of `docs/pix3-specification.md` — never hardcode a spec version number in other docs.
 

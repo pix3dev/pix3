@@ -2,6 +2,8 @@ import { inject, injectable } from '@/fw/di';
 import {
   createDefaultProjectManifest,
   createDefaultQualitySettings,
+  createProjectId,
+  PROJECT_ID_METADATA_KEY,
   type ProjectManifest,
   type ProjectType,
   type TargetPlatform,
@@ -289,6 +291,11 @@ export class ProjectLifecycleService {
       await this.editorTabService.closeAllTabs(true);
     };
 
+    if (params.backend === 'workspace') {
+      // A workspace is created on its own machine (`pix3 new`), then served; the editor connects.
+      throw new Error('Create the project with `pix3 new` on the server, then connect to it.');
+    }
+
     if (params.backend === 'cloud') {
       await this.cloudProjectService.createProjectFromTemplate(
         {
@@ -319,7 +326,11 @@ export class ProjectLifecycleService {
     this.closeCreateDialog();
   }
 
-  private async confirmProjectSwitchIfNeeded(): Promise<boolean> {
+  /**
+   * Ask Save / Don't Save / Cancel when a project with unsaved tabs is about to be replaced.
+   * `true` = go ahead (nothing dirty, saved, or discarded on purpose).
+   */
+  async confirmProjectSwitchIfNeeded(): Promise<boolean> {
     if (appState.project.status !== 'ready') {
       return true;
     }
@@ -373,6 +384,8 @@ export class ProjectLifecycleService {
         ...(manifest.metadata ?? {}),
         projectName: params.name,
         ...(params.templateId ? { templateId: params.templateId } : {}),
+        // Stable identity from birth (same key and position `pix3 new` writes).
+        [PROJECT_ID_METADATA_KEY]: createProjectId(),
       },
     };
   }

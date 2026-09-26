@@ -161,6 +161,7 @@ function createCompletedEvent(pushedToHistory: boolean): OperationEvent {
     },
     didMutate: true,
     pushedToHistory,
+    origin: 'user',
     timestamp: Date.now(),
   };
 }

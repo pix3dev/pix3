@@ -309,3 +309,8 @@ pix3-status-bar .status-sync.is-error:hover {
     transform: rotate(360deg);
   }
 }
+
+/* Autosave pill of the co-authoring mode: "off" is a normal setup, so muted rather than amber. */
+pix3-status-bar .status-sync.is-off {
+  color: var(--fg-3);
+}

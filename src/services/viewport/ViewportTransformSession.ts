@@ -132,6 +132,18 @@ export class ViewportTransformSession {
     return this.active2DTransform !== undefined;
   }
 
+  /**
+   * A drag is editing nodes right now (2D handle drag, 3D gizmo drag, target-handle drag): the
+   * nodes are mid-edit and the committing operation has not run yet.
+   */
+  isGestureActive(): boolean {
+    return (
+      this.active2DTransform !== undefined ||
+      this.transformStartStates.size > 0 ||
+      this.activeTargetDragNodeId !== null
+    );
+  }
+
   start2DTransform(screenX: number, screenY: number, handle: TwoDHandle): void {
     const selection2DOverlay = this.deps.getSelection2DOverlay();
     const orthographicCamera = this.deps.getOrthographicCamera();

@@ -1,4 +1,5 @@
 import { subscribe } from 'valtio/vanilla';
+import { keyed } from 'lit/directives/keyed.js';
 
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { LayoutManagerService } from '@/core/LayoutManager';
@@ -7,6 +8,15 @@ import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { CommandRegistry } from '@/services/core/CommandRegistry';
 import { KeybindingService } from '@/services/editor/KeybindingService';
 import { FileWatchService } from '@/services/project/FileWatchService';
+import { AutosaveService } from '@/services/project/autosave/AutosaveService';
+import { ProtectedSetService } from '@/services/project/coauthoring/ProtectedSetService';
+import { ProjectOwnershipService } from '@/services/project/coauthoring/ProjectOwnershipService';
+import { ExternalMergeService } from '@/services/project/coauthoring/ExternalMergeService';
+import { AckService } from '@/services/project/coauthoring/AckService';
+import {
+  ExternalChangeService,
+  type ExternalBatchResult,
+} from '@/services/project/coauthoring/ExternalChangeService';
 import { DialogService, type DialogInstance } from '@/services/editor/DialogService';
 import {
   AnimationAutoSliceDialogService,
@@ -62,8 +72,6 @@ import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLo
 import { ScriptCompilerService } from '@/services/scripting/ScriptCompilerService';
 import { SaveActiveResourceCommand } from '@/features/editor/SaveActiveResourceCommand';
 import { SaveAsSceneCommand } from '@/features/scene/SaveAsSceneCommand';
-import { ReloadSceneCommand } from '@/features/scene/ReloadSceneCommand';
-import { RefreshPrefabInstancesCommand } from '@/features/scene/RefreshPrefabInstancesCommand';
 import { DeleteObjectCommand } from '@/features/scene/DeleteObjectCommand';
 import { DuplicateNodesCommand } from '@/features/scene/DuplicateNodesCommand';
 import { GroupSelectedNodesCommand } from '@/features/scene/GroupSelectedNodesCommand';
@@ -89,6 +97,11 @@ import { ExportPlayableZipCommand } from '@/features/project/ExportPlayableZipCo
 import { StartRemotePreviewCommand } from '@/features/project/StartRemotePreviewCommand';
 import { NewProjectCommand } from '@/features/project/NewProjectCommand';
 import { CloseProjectCommand } from '@/features/project/CloseProjectCommand';
+import { ConnectWorkspaceCommand } from '@/features/project/ConnectWorkspaceCommand';
+import {
+  WorkspaceConnectDialogService,
+  type WorkspaceConnectDialogRequest,
+} from '@/services/project/workspace/WorkspaceConnectDialogService';
 import { MoveProjectToFolderCommand } from '@/features/project/MoveProjectToFolderCommand';
 import { OpenEditorSettingsCommand } from '@/features/editor/OpenEditorSettingsCommand';
 import { SwitchWorkspaceModeCommand } from '@/features/editor/SwitchWorkspaceModeCommand';
@@ -156,6 +169,10 @@ import './shared/pix3-behavior-picker';
 import './shared/pix3-effect-picker';
 import './shared/pix3-script-creator';
 import './shared/pix3-create-project-dialog';
+import './shared/pix3-workspace-connect-dialog';
+import './shared/pix3-workspace-banner';
+import './shared/pix3-merge-banner';
+import './shared/pix3-recovery-menu';
 import './shared/pix3-project-settings-dialog';
 import './shared/pix3-project-sync-dialog';
 import './shared/pix3-editor-settings-dialog';
@@ -195,6 +212,9 @@ export class Pix3EditorShell extends ComponentBase {
 
   @inject(LocalSyncService)
   private readonly localSyncService!: LocalSyncService;
+
+  @inject(WorkspaceConnectDialogService)
+  private readonly workspaceConnectDialogService!: WorkspaceConnectDialogService;
 
   @inject(ProjectLifecycleService)
   private readonly projectLifecycleService!: ProjectLifecycleService;
@@ -286,6 +306,29 @@ export class Pix3EditorShell extends ComponentBase {
   @inject(AutoloadService)
   private readonly _autoloadService!: AutoloadService; // Injected to ensure autoload lifecycle initialization
 
+  // Co-authoring mode (plan `.plans/external-agent-authoring.md` §4.3 / §5 C).
+  @inject(ProjectOwnershipService)
+  private readonly projectOwnership!: ProjectOwnershipService;
+
+  @inject(ProtectedSetService)
+  private readonly protectedSets!: ProtectedSetService;
+
+  @inject(AutosaveService)
+  private readonly autosave!: AutosaveService;
+
+  @inject(ExternalChangeService)
+  private readonly externalChanges!: ExternalChangeService;
+
+  @inject(ExternalMergeService)
+  private readonly externalMerge!: ExternalMergeService;
+
+  @inject(AckService)
+  private readonly agentAcks!: AckService;
+
+  private disposeOwnershipReleaseHook: (() => void) | null = null;
+
+  private disposeExternalBatchListener?: () => void;
+
   // project open handled by <pix3-welcome>
 
   @state()
@@ -369,6 +412,7 @@ export class Pix3EditorShell extends ComponentBase {
 
   @state()
   private activeCreateProjectDialog: CreateProjectDialogInstance | null = null;
+  private activeWorkspaceConnectDialog: WorkspaceConnectDialogRequest | null = null;
 
   @state()
   private isAccountPopoverOpen = false;
@@ -386,6 +430,7 @@ export class Pix3EditorShell extends ComponentBase {
   private disposeProjectSyncSubscription?: () => void;
   private disposeEditorSettingsSubscription?: () => void;
   private disposeCreateProjectSubscription?: () => void;
+  private disposeWorkspaceConnectSubscription?: () => void;
   private disposeNodeTypePickerSubscription?: () => void;
   private disposePlayableExportDialogSubscription?: () => void;
   private disposePlayableExportProgressDialogSubscription?: () => void;
@@ -454,6 +499,7 @@ export class Pix3EditorShell extends ComponentBase {
     const startRemotePreviewCommand = new StartRemotePreviewCommand();
     const newProjectCommand = new NewProjectCommand();
     const closeProjectCommand = new CloseProjectCommand();
+    const connectWorkspaceCommand = new ConnectWorkspaceCommand();
     const moveProjectToFolderCommand = new MoveProjectToFolderCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
     const switchWorkspaceModeCommand = new SwitchWorkspaceModeCommand();
@@ -557,6 +603,7 @@ export class Pix3EditorShell extends ComponentBase {
       ...align2DMenuCommands,
       newProjectCommand,
       closeProjectCommand,
+      connectWorkspaceCommand,
       moveProjectToFolderCommand,
       projectSettingsCommand,
       projectSyncCommand,
@@ -631,6 +678,13 @@ export class Pix3EditorShell extends ComponentBase {
       this.requestUpdate();
     });
 
+    this.disposeWorkspaceConnectSubscription = this.workspaceConnectDialogService.subscribe(
+      request => {
+        this.activeWorkspaceConnectDialog = request;
+        this.requestUpdate();
+      }
+    );
+
     this.disposeNodeTypePickerSubscription = this.nodeTypePickerService.subscribe(picker => {
       this.activeNodeTypePicker = picker;
       this.requestUpdate();
@@ -687,6 +741,22 @@ export class Pix3EditorShell extends ComponentBase {
 
     this.editorSettingsService.initialize();
     this.routerService.initialize();
+
+    // Co-authoring: ownership first (autosave and the protected set ask it), then the recorder
+    // of human edits, autosave, and the stabilised external-change path feeding scene reloads.
+    this.projectOwnership.initialize();
+    this.externalChanges.initialize();
+    this.protectedSets.initialize();
+    this.autosave.initialize();
+    this.agentAcks.initialize();
+    // Hand-over to another window: flush pending writes and persist `P` before letting go.
+    this.disposeOwnershipReleaseHook = this.projectOwnership.registerReleaseHook(async () => {
+      await this.autosave.handOver();
+      await this.protectedSets.flush();
+    });
+    this.disposeExternalBatchListener = this.externalChanges.onExternalBatch(paths =>
+      this.handleExternalBatch(paths)
+    );
 
     // Restore auth session on startup
     void this.authService.restoreSession();
@@ -831,6 +901,8 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposeEditorSettingsSubscription = undefined;
     this.disposeCreateProjectSubscription?.();
     this.disposeCreateProjectSubscription = undefined;
+    this.disposeWorkspaceConnectSubscription?.();
+    this.disposeWorkspaceConnectSubscription = undefined;
     this.disposeNodeTypePickerSubscription?.();
     this.disposeNodeTypePickerSubscription = undefined;
     this.disposePlayableExportDialogSubscription?.();
@@ -851,6 +923,10 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposeSaveGeneratedAssetSubscription = undefined;
     this.disposeStudioViewportMounter?.();
     this.disposeStudioViewportMounter = undefined;
+    this.disposeExternalBatchListener?.();
+    this.disposeExternalBatchListener = undefined;
+    this.disposeOwnershipReleaseHook?.();
+    this.disposeOwnershipReleaseHook = null;
     if (this.onWelcomeProjectReady) {
       this.removeEventListener(
         'pix3-welcome:project-ready',
@@ -985,14 +1061,17 @@ export class Pix3EditorShell extends ComponentBase {
       }
 
       if (!this.watchedSceneIds.has(sceneId)) {
-        if (descriptor?.fileHandle && currentPath) {
+        // A workspace (`pix3 serve`) has no file handles: its changes are pushed over the events
+        // socket into the same FileWatchService listeners, so the watch needs no handle there.
+        const canWatch = Boolean(descriptor?.fileHandle) || this.fileWatchService.isPushMode();
+        if (canWatch && currentPath) {
           // Only watch res:// paths (project files)
           if (currentPath.startsWith('res://')) {
             this.fileWatchService.watch(
               currentPath,
               descriptor.fileHandle,
               descriptor.lastModifiedTime,
-              () => this.handleFileChanged(sceneId, currentPath)
+              () => this.handleFileChanged(currentPath)
             );
             this.watchedSceneIds.add(sceneId);
             this.watchedScenePaths.set(sceneId, currentPath);
@@ -1003,32 +1082,24 @@ export class Pix3EditorShell extends ComponentBase {
   }
 
   /**
-   * Handle external file change detection - reload the scene.
+   * A watched scene file may have changed on disk (FileWatch poll or workspace push). It goes
+   * through the stabilisation window of `ExternalChangeService` (two matching snapshots, batch,
+   * own-hash skip, parse check, play-mode hold) before {@link handleExternalBatch} reloads it.
    */
-  private handleFileChanged(sceneId: string, filePath: string): void {
+  private handleFileChanged(filePath: string): void {
     if (import.meta.env.DEV) {
-      console.debug('[Pix3EditorShell] External scene file change detected', {
-        sceneId,
-        filePath,
-      });
+      console.debug('[Pix3EditorShell] External scene file change detected', { filePath });
     }
+    this.externalChanges.report(filePath);
+  }
 
-    // Execute reload command
-    const reloadCommand = new ReloadSceneCommand({ sceneId, filePath });
-    void this.commandDispatcher.execute(reloadCommand).catch(error => {
-      console.error('[Pix3EditorShell] Failed to reload scene from external change:', error);
-    });
-
-    const activeSceneId = appState.scenes.activeSceneId;
-    if (activeSceneId && activeSceneId !== sceneId) {
-      const refreshCommand = new RefreshPrefabInstancesCommand({
-        sceneId: activeSceneId,
-        changedPrefabPath: filePath,
-      });
-      void this.commandDispatcher.execute(refreshCommand).catch(error => {
-        console.error('[Pix3EditorShell] Failed to refresh active scene prefab instances:', error);
-      });
-    }
+  /**
+   * A settled batch of external versions: `ExternalMergeService` merges each open scene it names
+   * with the protected set (or reloads it plainly when nothing of the human's is at stake) and
+   * refreshes the active scene's prefab instances. Failed paths stay pending and are retried.
+   */
+  private handleExternalBatch(paths: readonly string[]): Promise<ExternalBatchResult> {
+    return this.externalMerge.handleBatch(paths);
   }
 
   private syncEditorRoute(): void {
@@ -1257,6 +1328,9 @@ export class Pix3EditorShell extends ComponentBase {
         <!-- Shared by both shells: Vibe needs the same "is the bridge up / is a key set / what
              version am I on" readout Studio has, so the bar lives outside the Studio branch. -->
         <pix3-status-bar></pix3-status-bar>
+        <pix3-workspace-banner></pix3-workspace-banner>
+        <pix3-merge-banner></pix3-merge-banner>
+        <pix3-recovery-menu></pix3-recovery-menu>
         ${this.renderWorkspaceOverlay()} ${this.renderUiKitForge()}
         <pix3-share-dialog @pix3-auth:request=${this.onAuthRequest}></pix3-share-dialog>
         ${this.renderDialogHost()} ${this.renderPickerHost()} ${this.renderEffectPickerHost()}
@@ -1264,8 +1338,9 @@ export class Pix3EditorShell extends ComponentBase {
         ${this.renderProjectSyncHost()} ${this.renderEditorSettingsHost()}
         ${this.renderAnimationAutoSliceHost()} ${this.renderAssetImportHost()}
         ${this.renderSaveGeneratedAssetHost()} ${this.renderCreateProjectHost()}
-        ${this.renderNodeTypePickerHost()} ${this.renderPlayableExportDialogHost()}
-        ${this.renderPlayableExportProgressDialogHost()} ${this.renderAuthModal()}
+        ${this.renderWorkspaceConnectHost()} ${this.renderNodeTypePickerHost()}
+        ${this.renderPlayableExportDialogHost()} ${this.renderPlayableExportProgressDialogHost()}
+        ${this.renderAuthModal()}
       </div>
     `;
   }
@@ -1884,6 +1959,23 @@ export class Pix3EditorShell extends ComponentBase {
     }
 
     this.saveGeneratedAssetDialogService.cancel(dialogId);
+  }
+
+  private renderWorkspaceConnectHost() {
+    const request = this.activeWorkspaceConnectDialog;
+    if (!request) {
+      return null;
+    }
+    // Keyed by request id so a re-open (e.g. after a rejected token) starts from fresh fields.
+    return keyed(
+      request.id,
+      html`<pix3-workspace-connect-dialog
+        .endpoint=${request.endpoint}
+        .initialError=${request.errorMessage}
+        .workspaceName=${request.workspaceName}
+        .workspaceId=${request.workspaceId}
+      ></pix3-workspace-connect-dialog>`
+    );
   }
 
   private renderCreateProjectHost() {

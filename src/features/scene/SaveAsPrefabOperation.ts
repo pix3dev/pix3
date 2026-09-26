@@ -8,7 +8,7 @@ import type {
 } from '@/core/Operation';
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
 import { SceneManager, NodeBase, type SceneNodeDefinition } from '@pix3/runtime';
-import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 
 export interface SaveAsPrefabOperationParams {
   nodeId: string;
@@ -47,8 +47,10 @@ export class SaveAsPrefabOperation implements Operation<OperationInvokeResult> {
     const sceneManager = container.getService<SceneManager>(
       container.getOrCreateToken(SceneManager)
     );
-    const fs = container.getService<FileSystemAPIService>(
-      container.getOrCreateToken(FileSystemAPIService)
+    // Storage, not the FSA service: the prefab must land wherever the project lives
+    // (a local folder, OPFS, the cloud copy or a `pix3 serve` workspace).
+    const storage = container.getService<ProjectStorageService>(
+      container.getOrCreateToken(ProjectStorageService)
     );
     const sceneGraph = sceneManager.getSceneGraph(activeSceneId);
     if (!sceneGraph) {
@@ -74,7 +76,7 @@ export class SaveAsPrefabOperation implements Operation<OperationInvokeResult> {
       metadata: {},
     });
 
-    await fs.writeTextFile(prefabPath, prefabText);
+    await storage.writeTextFile(prefabPath, prefabText);
 
     const replacementDoc = stringify({
       version: sceneGraph.version ?? '1.0.0',

@@ -85,6 +85,11 @@ export class SceneTreePanel extends ComponentBase {
   @state()
   private collapsedNodeIds: Set<string> = new Set();
 
+  /** Short highlight of the nodes an external version changed (co-authoring, plan §5 C5). */
+  @state()
+  private recentlyChangedNodeIds: Set<string> = new Set();
+  private disposeCoauthoringSubscription?: () => void;
+
   /**
    * Branch roots the Peek mask is currently hiding — the chips' state, mirrored into the tree.
    *
@@ -176,6 +181,10 @@ export class SceneTreePanel extends ComponentBase {
     this.disposeCollaborationSubscription = subscribe(appState.collaboration, () => {
       this.syncRemoteSelections();
     });
+    this.syncRecentlyChanged();
+    this.disposeCoauthoringSubscription = subscribe(appState.project.coauthoring, () => {
+      this.syncRecentlyChanged();
+    });
 
     // Track focus for context-aware shortcuts
     this.addEventListener('focusin', () => {
@@ -195,6 +204,8 @@ export class SceneTreePanel extends ComponentBase {
     this.disposeCollaborationSubscription = undefined;
     this.disposePeekSubscription?.();
     this.disposePeekSubscription = undefined;
+    this.disposeCoauthoringSubscription?.();
+    this.disposeCoauthoringSubscription = undefined;
     document.removeEventListener('click', this.onWindowClick, { capture: true });
     window.removeEventListener('keydown', this.onWindowEscape);
     this.portal.close();
@@ -248,6 +259,7 @@ export class SceneTreePanel extends ComponentBase {
                       .selectedNodeIds=${this.selectedNodeIds}
                       .primaryNodeId=${this.primaryNodeId}
                       .collapsedNodeIds=${this.collapsedNodeIds}
+                      .recentlyChangedNodeIds=${this.recentlyChangedNodeIds}
                       .peekHiddenNodeIds=${this.peekHiddenNodeIds}
                       .draggedNodeId=${this.draggedNodeId}
                       .draggedNodeType=${this.draggedNodeType}
@@ -416,6 +428,13 @@ export class SceneTreePanel extends ComponentBase {
       return;
     }
     this.peekHiddenNodeIds = next;
+  }
+
+  private syncRecentlyChanged(): void {
+    const ids = appState.project.coauthoring.recentlyChangedNodeIds;
+    const current = this.recentlyChangedNodeIds;
+    if (ids.length === current.size && ids.every(id => current.has(id))) return;
+    this.recentlyChangedNodeIds = new Set(ids);
   }
 
   private syncSceneState(): void {

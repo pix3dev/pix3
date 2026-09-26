@@ -25,7 +25,15 @@ import { ProjectSyncService } from '@/services/project/ProjectSyncService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { CURRENT_EDITOR_VERSION } from '@/version';
 import { subscribe } from 'valtio/vanilla';
-import { appState, type HybridSyncStatus } from '@/state';
+import {
+  appState,
+  type AutosaveStatus,
+  type HybridSyncStatus,
+  type WorkspaceConnectionStatus,
+  type WorkspaceLeaseState,
+} from '@/state';
+import { WorkspaceSessionService } from '@/services/project/workspace/WorkspaceSessionService';
+import { WorkspaceConnectDialogService } from '@/services/project/workspace/WorkspaceConnectDialogService';
 import './pix3-status-bar.ts.css';
 import '../collab/collab-status-bar';
 
@@ -83,6 +91,38 @@ export class Pix3StatusBar extends ComponentBase {
 
   @inject(ProjectSyncService)
   private readonly projectSyncService!: ProjectSyncService;
+
+  @inject(WorkspaceSessionService)
+  private readonly workspaceSession!: WorkspaceSessionService;
+
+  @inject(WorkspaceConnectDialogService)
+  private readonly workspaceConnectDialog!: WorkspaceConnectDialogService;
+
+  /** `pix3 serve` connection, shown only while the open project is a workspace. */
+  @state()
+  private workspaceStatus: WorkspaceConnectionStatus | null = null;
+
+  @state()
+  private workspaceLease: WorkspaceLeaseState = 'none';
+
+  /** Co-authoring autosave pill (null = hidden: no project, or a cloud project). */
+  @state()
+  private autosaveStatus: AutosaveStatus | null = null;
+
+  @state()
+  private autosaveReason: string | null = null;
+
+  @state()
+  private autosaveLastAt: number | null = null;
+
+  @state()
+  private pendingExternalCount = 0;
+
+  @state()
+  private unreadableCount = 0;
+
+  @state()
+  private externalStale = false;
 
   @state()
   private currentMessage: StatusMessage | null = null;
@@ -178,6 +218,8 @@ export class Pix3StatusBar extends ComponentBase {
       }
       this.projectName = appState.project.projectName;
       this.syncHybridSyncState();
+      this.syncWorkspaceState();
+      this.syncCoauthoringState();
     });
 
     this.disposeUiSubscription = subscribe(appState.ui, () => {
@@ -221,6 +263,8 @@ export class Pix3StatusBar extends ComponentBase {
     // Initialize state
     this.projectName = appState.project.projectName;
     this.syncHybridSyncState();
+    this.syncWorkspaceState();
+    this.syncCoauthoringState();
     this.isPlaying = appState.ui.isPlaying;
     this.diagnostics = this.diagnosticsService.getLastSummary();
   }
@@ -333,6 +377,194 @@ export class Pix3StatusBar extends ComponentBase {
     `;
   }
 
+  private syncWorkspaceState(): void {
+    const project = appState.project;
+    this.workspaceStatus =
+      project.backend === 'workspace' && project.status === 'ready'
+        ? project.workspace.status
+        : null;
+    this.workspaceLease = project.workspace.lease;
+  }
+
+  /**
+   * Connection pill of a `pix3 serve` workspace: connected / reconnecting / read-only (another
+   * window holds the lease) / disconnected. Clicking offers the action that fixes the state.
+   */
+  private renderWorkspaceStatus() {
+    const status = this.workspaceStatus;
+    if (!status) {
+      return html``;
+    }
+    const workspace = appState.project.workspace;
+    const where = workspace.root ? `\n${workspace.root}` : '';
+    const endpoint = workspace.endpoint ?? '';
+    const readOnly = this.workspaceLease === 'busy' || this.workspaceLease === 'lost';
+
+    let tone = 'is-ok';
+    let icon = 'server';
+    let label = 'Workspace';
+    let title = `Connected to pix3 serve at ${endpoint}.${where}`;
+
+    if (status === 'reconnecting' || status === 'connecting') {
+      tone = 'is-busy';
+      icon = 'refresh-cw';
+      label = 'Reconnecting…';
+      title = `Lost the connection to ${endpoint}; retrying. Edits are not saved until it is back.`;
+    } else if (status === 'disconnected') {
+      tone = 'is-error';
+      icon = 'alert-triangle';
+      label = 'Disconnected';
+      title = `${workspace.errorMessage ?? `Not connected to ${endpoint}.`}\nClick to reconnect.`;
+    } else if (readOnly) {
+      tone = 'is-warn';
+      icon = 'lock';
+      label = 'Read-only';
+      title =
+        'Another Pix3 window holds the edit lease of this workspace, so this one cannot save.' +
+        '\nClick to take over.';
+    }
+
+    return html`
+      <button
+        type="button"
+        class="status-indicator status-sync status-workspace ${tone}"
+        title=${title}
+        aria-label=${`Workspace: ${label}`}
+        @click=${this.onWorkspaceIndicatorClick}
+      >
+        ${this.icons.getIcon(icon, IconSize.SMALL)}
+        <span class="status-sync-label">${label}</span>
+      </button>
+    `;
+  }
+
+  private syncCoauthoringState(): void {
+    const project = appState.project;
+    const coauthoring = project.coauthoring;
+    const visible = project.status === 'ready' && project.backend !== 'cloud';
+    this.autosaveStatus = visible ? coauthoring.autosaveStatus : null;
+    this.autosaveReason = coauthoring.autosaveReason;
+    this.autosaveLastAt = coauthoring.lastAutosavedAt;
+    this.pendingExternalCount = coauthoring.pendingExternalPaths.length;
+    this.unreadableCount = coauthoring.unreadablePaths.length;
+    this.externalStale = visible && coauthoring.stale;
+  }
+
+  /**
+   * Co-authoring pills: where the open scenes stand relative to the disk (on disk / saving… /
+   * held for an external version / autosave off), plus "stale" while play mode keeps an external
+   * change from loading. Plan `.plans/external-agent-authoring.md` §5 C4.
+   */
+  private renderCoauthoringStatus() {
+    const status = this.autosaveStatus;
+    if (!status) {
+      return html``;
+    }
+    const reason = this.autosaveReason ? `\n${this.autosaveReason}` : '';
+    const last = this.autosaveLastAt
+      ? `\nLast autosave ${new Date(this.autosaveLastAt).toLocaleTimeString()}.`
+      : '';
+
+    let tone = 'is-ok';
+    let icon = 'hard-drive';
+    let label = 'On disk';
+    let title = `Every open scene is saved to the project folder.${last}`;
+    switch (status) {
+      case 'off':
+        tone = 'is-off';
+        icon = 'save';
+        label = 'Autosave off';
+        title = `Scenes are saved only with Save (Ctrl+S).${reason}\nClick to open Settings.`;
+        break;
+      case 'not-owner':
+        tone = 'is-warn';
+        icon = 'lock';
+        label = 'Autosave: other window';
+        title = `${this.autosaveReason ?? 'Another window owns this project.'}`;
+        break;
+      case 'dirty':
+        tone = 'is-pending';
+        icon = 'clock';
+        label = 'Autosave…';
+        title = `Unsaved edits; saving about a second after the last change.${last}`;
+        break;
+      case 'saving':
+        tone = 'is-pending';
+        icon = 'upload';
+        label = 'Saving…';
+        title = 'Writing the scene to the project folder.';
+        break;
+      case 'held':
+        tone = 'is-warn';
+        icon = 'pause-circle';
+        label = this.unreadableCount > 0 ? 'File not readable' : 'Waiting for disk';
+        title =
+          'A newer version of an open scene is on disk (another tool or agent wrote it). ' +
+          `Autosave waits until it has loaded; your edits stay protected.${reason}`;
+        break;
+      case 'error':
+        tone = 'is-error';
+        icon = 'alert-triangle';
+        label = 'Autosave failed';
+        title = `The last autosave failed; the next edit retries.${reason}`;
+        break;
+      default:
+        break;
+    }
+    if (status === 'saved' && this.pendingExternalCount > 0) {
+      tone = 'is-pending';
+      icon = 'download';
+      label = 'Loading changes…';
+      title = `${this.pendingExternalCount} file(s) changed on disk; loading them.`;
+    }
+
+    return html`
+      <button
+        type="button"
+        class="status-indicator status-sync status-autosave ${tone}"
+        title=${title}
+        aria-label=${`Autosave: ${label}`}
+        @click=${this.onAutosaveIndicatorClick}
+      >
+        ${this.icons.getIcon(icon, IconSize.SMALL)}
+        <span class="status-sync-label">${label}</span>
+      </button>
+      ${this.externalStale
+        ? html`
+            <span
+              class="status-indicator status-sync status-stale is-warn"
+              title="Files changed on disk while the game is running. They load when play stops."
+            >
+              ${this.icons.getIcon('alert-circle', IconSize.SMALL)}
+              <span class="status-sync-label">Stale</span>
+            </span>
+          `
+        : html``}
+    `;
+  }
+
+  private onAutosaveIndicatorClick = (): void => {
+    if (this.autosaveStatus === 'off') {
+      void this.editorSettingsService.showSettings('general');
+    }
+  };
+
+  private onWorkspaceIndicatorClick = (): void => {
+    const workspace = appState.project.workspace;
+    if (workspace.status === 'disconnected') {
+      this.workspaceConnectDialog.open({
+        endpoint: workspace.endpoint,
+        errorMessage: workspace.errorMessage,
+        workspaceName: appState.project.projectName,
+        workspaceId: appState.project.id,
+      });
+      return;
+    }
+    if (workspace.lease === 'busy' || workspace.lease === 'lost') {
+      this.workspaceSession.takeOverLease();
+    }
+  };
+
   private onSyncIndicatorClick = (): void => {
     void this.projectSyncService.showDialog();
   };
@@ -442,6 +674,7 @@ export class Pix3StatusBar extends ComponentBase {
                 </button>
               `
             : html``}
+          ${this.renderWorkspaceStatus()} ${this.renderCoauthoringStatus()}
           ${this.renderSyncStatus()} ${this.renderAgentLanes()}
           ${this.isFlow ? html`` : this.renderPerformance()} ${this.renderDiagnostics()}
           ${this.projectName ? this.renderBundleSize() : html``}

@@ -3,8 +3,11 @@ import {
   createDefaultExportSettings,
   createDefaultProjectManifest,
   createDefaultQualitySettings,
+  createProjectId,
+  getProjectId,
   normalizeProjectManifest,
   resolveExportSettings,
+  withProjectId,
 } from './ProjectManifest';
 
 describe('ProjectManifest', () => {
@@ -118,5 +121,24 @@ describe('ProjectManifest', () => {
       'nearest'
     );
     expect(normalizeProjectManifest({ textureFiltering: 'bogus' }).textureFiltering).toBe('linear');
+  });
+
+  it('keeps metadata.projectId through normalize, and mints UUIDs', () => {
+    const id = createProjectId();
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(createProjectId()).not.toBe(id);
+
+    const manifest = withProjectId(
+      normalizeProjectManifest({ metadata: { projectName: 'G', templateId: 't' } }),
+      id
+    );
+    expect(Object.keys(manifest.metadata ?? {})).toEqual([
+      'projectName',
+      'templateId',
+      'projectId',
+    ]);
+    expect(getProjectId(normalizeProjectManifest(JSON.parse(JSON.stringify(manifest))))).toBe(id);
+    expect(getProjectId(createDefaultProjectManifest())).toBeNull();
+    expect(getProjectId(normalizeProjectManifest({ metadata: { projectId: '  ' } }))).toBeNull();
   });
 });

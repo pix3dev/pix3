@@ -7,8 +7,12 @@ import { FileSystemAPIService, type FileDescriptor } from '@/services/project/Fi
 import { CloudProjectCacheService } from '@/services/cloud/CloudProjectCacheService';
 import { CollaborationService } from '@/services/collab/CollaborationService';
 import * as ApiClient from '@/services/cloud/ApiClient';
+import { WorkspaceClient } from '@/services/project/workspace/WorkspaceClient';
+import { WorkspaceError } from '@/services/project/workspace/workspace-protocol';
+import { isPix3InternalPath } from '@/services/project/coauthoring/coauthoring-paths';
 
 type CloudManifestEntry = ApiClient.ManifestEntry;
+export type StorageBackendKind = 'local' | 'cloud' | 'workspace';
 type AssetMutationKind = 'create-directory' | 'write-file' | 'delete-entry' | 'move-entry';
 
 interface AssetMutationEvent {
@@ -27,6 +31,9 @@ export class ProjectStorageService {
   @inject(CloudProjectCacheService)
   private readonly cloudCache!: CloudProjectCacheService;
 
+  @inject(WorkspaceClient)
+  private readonly workspace!: WorkspaceClient;
+
   private cachedProjectId: string | null = null;
   private cachedManifest: CloudManifestEntry[] | null = null;
   private disposeCollaborationSubscription?: () => void;
@@ -40,16 +47,24 @@ export class ProjectStorageService {
     this.rebindCollaborationAssetEvents();
   }
 
-  getBackend(): 'local' | 'cloud' {
+  getBackend(): StorageBackendKind {
     // Browser-storage projects live in an OPFS FileSystemDirectoryHandle, so
-    // they route through the same on-disk path as 'local'. Only 'cloud' uses
-    // the manifest/cache path.
-    return appState.project.backend === 'cloud' ? 'cloud' : 'local';
+    // they route through the same on-disk path as 'local'. 'cloud' uses the
+    // manifest/cache path; 'workspace' is a `pix3 serve` folder over HTTP.
+    const backend = appState.project.backend;
+    if (backend === 'cloud' || backend === 'workspace') {
+      return backend;
+    }
+    return 'local';
   }
 
   async listDirectory(path = '.'): Promise<FileDescriptor[]> {
-    if (this.getBackend() === 'local') {
+    const backend = this.getBackend();
+    if (backend === 'local') {
       return this.fileSystem.listDirectory(path);
+    }
+    if (backend === 'workspace') {
+      return this.listWorkspaceDirectory(path);
     }
 
     const normalizedPath = this.normalizePath(path);
@@ -86,8 +101,12 @@ export class ProjectStorageService {
   }
 
   async readTextFile(path: string): Promise<string> {
-    if (this.getBackend() === 'local') {
+    const backend = this.getBackend();
+    if (backend === 'local') {
       return this.fileSystem.readTextFile(path);
+    }
+    if (backend === 'workspace') {
+      return this.workspace.readText(this.normalizePath(path));
     }
 
     const projectId = this.requireProjectId();
@@ -113,8 +132,12 @@ export class ProjectStorageService {
   }
 
   async readBlob(path: string): Promise<Blob> {
-    if (this.getBackend() === 'local') {
+    const backend = this.getBackend();
+    if (backend === 'local') {
       return this.fileSystem.readBlob(path);
+    }
+    if (backend === 'workspace') {
+      return this.workspace.readBlob(this.normalizePath(path));
     }
 
     const projectId = this.requireProjectId();
@@ -139,9 +162,18 @@ export class ProjectStorageService {
     return blob;
   }
 
-  async writeTextFile(path: string, contents: string): Promise<void> {
+  /**
+   * `options.unconditional`: on a workspace, write without an `If-Match` base. Only for files the
+   * editor owns outright (`.pix3/protected.json`) — never for project content, where the base is
+   * what stops a save from overwriting an agent's newer version.
+   */
+  async writeTextFile(
+    path: string,
+    contents: string,
+    options: { readonly unconditional?: boolean } = {}
+  ): Promise<void> {
     const normalizedPath = this.normalizePath(path);
-    await this.writeTextFileInternal(normalizedPath, contents);
+    await this.writeTextFileInternal(normalizedPath, contents, options.unconditional === true);
     await this.publishAssetMutation({
       kind: 'write-file',
       path: normalizedPath,
@@ -189,6 +221,21 @@ export class ProjectStorageService {
       return;
     }
 
+    if (this.getBackend() === 'workspace') {
+      // The server moves atomically (rename), keeps bytes and creates missing parents.
+      this.ensureWriteAllowed();
+      await this.workspace.move(normalizedSourcePath, normalizedTargetPath);
+      await this.publishAssetMutation({
+        kind: 'move-entry',
+        path: normalizedTargetPath,
+        directories: this.getUniqueDirectories([
+          this.getParentDirectory(normalizedSourcePath),
+          this.getParentDirectory(normalizedTargetPath),
+        ]),
+      });
+      return;
+    }
+
     const sourceEntry = await this.getEntryDescriptor(normalizedSourcePath);
     if (!sourceEntry) {
       throw new Error(`Source entry not found: ${sourcePath}`);
@@ -232,10 +279,15 @@ export class ProjectStorageService {
   }
 
   async getLastModified(path: string): Promise<number | null> {
-    if (this.getBackend() === 'local') {
+    const backend = this.getBackend();
+    if (backend === 'local') {
       const fileHandle = await this.fileSystem.getFileHandle(path);
       const file = await fileHandle.getFile();
       return file.lastModified;
+    }
+    if (backend === 'workspace') {
+      await this.ensureWorkspaceManifest();
+      return this.workspace.getManifestEntry(this.normalizePath(path))?.mtime ?? null;
     }
 
     const normalizedPath = this.normalizePath(path);
@@ -249,6 +301,26 @@ export class ProjectStorageService {
     return Number.isNaN(parsed) ? null : parsed;
   }
 
+  /** Whether a FILE exists at `path` (directories answer false). */
+  async fileExists(path: string): Promise<boolean> {
+    const backend = this.getBackend();
+    if (backend === 'local') {
+      try {
+        await this.fileSystem.getFileHandle(path);
+        return true;
+      } catch {
+        return false;
+      }
+    }
+    if (backend === 'workspace') {
+      await this.ensureWorkspaceManifest();
+      return this.workspace.getManifestEntry(this.normalizePath(path))?.kind === 'file';
+    }
+    const manifest = await this.getManifestEntries();
+    const normalizedPath = this.normalizePath(path);
+    return manifest.some(entry => entry.path === normalizedPath && entry.kind === 'file');
+  }
+
   normalizeResourcePath(path: string): string {
     if (this.getBackend() === 'local') {
       return this.fileSystem.normalizeResourcePath(path);
@@ -257,7 +329,7 @@ export class ProjectStorageService {
   }
 
   async getManifestEntries(forceRefresh = false): Promise<CloudManifestEntry[]> {
-    if (this.getBackend() === 'local') {
+    if (this.getBackend() !== 'cloud') {
       return [];
     }
 
@@ -277,8 +349,11 @@ export class ProjectStorageService {
   }
 
   async refreshManifest(): Promise<void> {
-    if (this.getBackend() === 'cloud') {
+    const backend = this.getBackend();
+    if (backend === 'cloud') {
       await this.getManifestEntries(true);
+    } else if (backend === 'workspace') {
+      await this.workspace.getManifest(true);
     }
   }
 
@@ -286,6 +361,32 @@ export class ProjectStorageService {
     this.disposeCollaborationSubscription?.();
     this.disposeCollaborationSubscription = undefined;
     this.detachAssetEventsObserver();
+  }
+
+  private async ensureWorkspaceManifest(): Promise<void> {
+    if (!this.workspace.getCachedManifest()) {
+      await this.workspace.getManifest();
+    }
+  }
+
+  /** Direct children of `path` from the (cached, event-patched) workspace manifest. */
+  private async listWorkspaceDirectory(path: string): Promise<FileDescriptor[]> {
+    await this.ensureWorkspaceManifest();
+    const normalizedPath = this.normalizePath(path);
+    const entries: FileDescriptor[] = [];
+    for (const entry of this.workspace.getManifestEntries()) {
+      const relative = this.getRelativeToDirectory(entry.path, normalizedPath);
+      if (!relative || relative.includes('/')) {
+        continue;
+      }
+      entries.push({
+        name: relative,
+        kind: entry.kind === 'dir' ? 'directory' : 'file',
+        path: entry.path,
+        size: entry.kind === 'file' ? entry.size : null,
+      });
+    }
+    return entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
   }
 
   private async getEntryDescriptor(path: string): Promise<FileDescriptor | null> {
@@ -311,9 +412,23 @@ export class ProjectStorageService {
     }
   }
 
-  private async writeTextFileInternal(path: string, contents: string): Promise<void> {
-    if (this.getBackend() === 'local') {
+  private async writeTextFileInternal(
+    path: string,
+    contents: string,
+    unconditional = false
+  ): Promise<void> {
+    const backend = this.getBackend();
+    if (backend === 'local') {
       await this.fileSystem.writeTextFile(path, contents);
+      return;
+    }
+    if (backend === 'workspace') {
+      this.ensureWriteAllowed();
+      if (unconditional) {
+        await this.workspace.writeFile(path, contents, { baseHash: null });
+      } else {
+        await this.workspace.writeFile(path, contents);
+      }
       return;
     }
 
@@ -330,8 +445,14 @@ export class ProjectStorageService {
   }
 
   private async writeBinaryFileInternal(path: string, data: ArrayBuffer): Promise<void> {
-    if (this.getBackend() === 'local') {
+    const backend = this.getBackend();
+    if (backend === 'local') {
       await this.fileSystem.writeBinaryFile(path, data);
+      return;
+    }
+    if (backend === 'workspace') {
+      this.ensureWriteAllowed();
+      await this.workspace.writeFile(path, data);
       return;
     }
 
@@ -348,8 +469,15 @@ export class ProjectStorageService {
   }
 
   private async deleteEntryInternal(path: string): Promise<void> {
-    if (this.getBackend() === 'local') {
+    const backend = this.getBackend();
+    if (backend === 'local') {
       await this.fileSystem.deleteEntry(path);
+      return;
+    }
+    if (backend === 'workspace') {
+      this.ensureWriteAllowed();
+      // Same semantics as the FSA path (`removeEntry(..., { recursive: true })`).
+      await this.workspace.delete(path, { recursive: true });
       return;
     }
 
@@ -361,8 +489,14 @@ export class ProjectStorageService {
   }
 
   private async createDirectoryInternal(path: string): Promise<void> {
-    if (this.getBackend() === 'local') {
+    const backend = this.getBackend();
+    if (backend === 'local') {
       await this.fileSystem.createDirectory(path);
+      return;
+    }
+    if (backend === 'workspace') {
+      this.ensureWriteAllowed();
+      await this.workspace.mkdir(path);
       return;
     }
 
@@ -397,6 +531,11 @@ export class ProjectStorageService {
   }
 
   private applyAssetMutationSignal(directories: readonly string[]): void {
+    // `.pix3/` is editor bookkeeping (recovery journal, protected set): the asset browser hides it,
+    // and an autosave every second must not make every listing refresh.
+    if (directories.length > 0 && directories.every(directory => isPix3InternalPath(directory))) {
+      return;
+    }
     appState.project.lastModifiedDirectoryPath = this.coalesceDirectories(directories);
     appState.project.fileRefreshSignal = (appState.project.fileRefreshSignal || 0) + 1;
   }
@@ -538,6 +677,17 @@ export class ProjectStorageService {
   }
 
   private ensureWriteAllowed(): void {
+    if (this.getBackend() === 'workspace') {
+      const lease = appState.project.workspace.lease;
+      if (lease === 'busy' || lease === 'lost') {
+        throw new WorkspaceError(
+          'read_only',
+          'This window is read-only: another Pix3 window holds the workspace edit lease. ' +
+            'Use "Take over" to edit here.'
+        );
+      }
+      return;
+    }
     if (appState.collaboration.isReadOnly) {
       throw new Error('Project is open in read-only collaboration mode.');
     }

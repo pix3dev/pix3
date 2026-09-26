@@ -283,7 +283,9 @@ export class CodeDocumentService {
     record.disposeWatch?.();
     record.disposeWatch = undefined;
 
-    if (this.storage.getBackend() !== 'local' || !record.fileHandle) {
+    const backend = this.storage.getBackend();
+    const pushed = backend === 'workspace' && this.fileWatchService.isPushMode();
+    if (!pushed && (backend !== 'local' || !record.fileHandle)) {
       return;
     }
 

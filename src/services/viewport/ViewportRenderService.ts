@@ -84,6 +84,7 @@ import {
 } from '@/services/viewport/TransformTool2d';
 import { isDocumentActive } from '@/services/core/page-activity';
 import { isPointerBlocked } from './peek-gating';
+import { GestureStateService } from './GestureStateService';
 
 // The transform tool is UI state (`appState.ui.transformMode`) — the four `view.transform-mode-*`
 // commands report it as their checked state. Re-exported here so the many modules that already
@@ -148,6 +149,11 @@ export interface FrameNodesOptions {
 
 @injectable()
 export class ViewportRendererService {
+  @inject(GestureStateService)
+  private readonly gestureState!: GestureStateService;
+
+  private readonly disposeGestureProbe: () => void;
+
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
 
@@ -413,6 +419,9 @@ export class ViewportRendererService {
 
   constructor() {
     this.transformTool2d = new TransformTool2d();
+    this.disposeGestureProbe = this.gestureState.registerProbe(() =>
+      this.transformSession.isGestureActive()
+    );
   }
 
   private disposeObject3D(root: THREE.Object3D): void {
@@ -4643,6 +4652,7 @@ export class ViewportRendererService {
   }
 
   dispose(): void {
+    this.disposeGestureProbe();
     // Cancel animation loop
     if (this.animationId !== undefined) {
       cancelAnimationFrame(this.animationId);

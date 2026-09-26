@@ -1,3 +1,4 @@
+import type { MergeConflict } from '@/services/project/external-merge/merge-external-version';
 import type { ProjectManifest } from '@/core/ProjectManifest';
 import type { AnimationResource } from '@pix3/runtime';
 
@@ -152,7 +153,125 @@ export interface AnimationsState {
 }
 
 export type ProjectStatus = 'idle' | 'selecting' | 'opening' | 'ready' | 'error';
-export type ProjectBackend = 'local' | 'cloud' | 'browser';
+/**
+ * Where the open project's files live. `workspace` is a folder served by `pix3 serve` over HTTP +
+ * WebSocket (no File System Access); see `src/services/project/workspace/`.
+ */
+export type ProjectBackend = 'local' | 'cloud' | 'browser' | 'workspace';
+
+/** Transport state of a `pix3 serve` workspace connection (owned by `WorkspaceSessionService`). */
+export type WorkspaceConnectionStatus =
+  | 'disconnected'
+  | 'connecting'
+  | 'connected'
+  | 'reconnecting';
+
+/**
+ * Edit lease of the workspace. Only the holder edits; `busy` / `lost` windows stay read-only
+ * until the user takes the lease over.
+ */
+export type WorkspaceLeaseState = 'none' | 'pending' | 'held' | 'busy' | 'lost';
+
+export interface WorkspaceConnectionState {
+  status: WorkspaceConnectionStatus;
+  lease: WorkspaceLeaseState;
+  /** `busy` while the other holder is disconnected but may still come back. */
+  leaseInGrace: boolean;
+  /** Normalised server address as this browser reaches it (a forwarded port may differ). */
+  endpoint: string | null;
+  workspaceId: string | null;
+  /** Absolute project root on the server's machine (display only). */
+  root: string | null;
+  serverSession: string | null;
+  errorMessage: string | null;
+}
+
+export const createInitialWorkspaceConnectionState = (): WorkspaceConnectionState => ({
+  status: 'disconnected',
+  lease: 'none',
+  leaseInGrace: false,
+  endpoint: null,
+  workspaceId: null,
+  root: null,
+  serverSession: null,
+  errorMessage: null,
+});
+/**
+ * Autosave of the co-authoring mode (`src/services/project/autosave/AutosaveService.ts`):
+ * - `off`: not enabled for this project (see `CoauthoringState.autosaveReason`);
+ * - `not-owner`: enabled, but another window owns editing (Web Lock / workspace lease);
+ * - `saved`: every open scene is on disk; `dirty`: a save is scheduled; `saving`: writing;
+ * - `held`: an unmerged external version (or a gesture) holds the save back;
+ * - `error`: the last write failed (`autosaveReason` says why); the next edit retries.
+ */
+export type AutosaveStatus = 'off' | 'not-owner' | 'saved' | 'dirty' | 'saving' | 'held' | 'error';
+
+/**
+ * Co-authoring with an external writer (an agent writing project files) — plan
+ * `.plans/external-agent-authoring.md` §4.3 / §5 C. Session state, owned by the co-authoring
+ * services (`AutosaveService`, `ExternalChangeService`), written outside the command gateway.
+ */
+export interface CoauthoringState {
+  autosaveEnabled: boolean;
+  autosaveStatus: AutosaveStatus;
+  /** Human-readable reason for `off` / `held` / `error` / `not-owner`. */
+  autosaveReason: string | null;
+  /** The project carries an agent kit (`AGENTS.md` at the root or a `.pix3/` directory). */
+  hasAgentKit: boolean;
+  /** This window owns editing (Web Lock `pix3-project:<id>` for local folders, lease for workspaces). */
+  isOwner: boolean;
+  lastAutosavedAt: number | null;
+  /** Paths (`scenes/a.pix3scene`, no `res://`) with an external version not applied yet. */
+  pendingExternalPaths: string[];
+  /** Pending paths whose content has failed to parse for a while ("file not readable"). */
+  unreadablePaths: string[];
+  /** An external change arrived during play mode: the editor graph is behind the disk. */
+  stale: boolean;
+  /**
+   * Merge outcomes that need the human (plan §4.3 conflict banner), keyed by project path:
+   * `conflicts` — the merge kept human values over the agent's; `rejected` — the agent's version
+   * could not be merged and the last good graph stays until the human decides.
+   */
+  merges: Record<string, MergeBannerState>;
+  /** Nodes an external version changed; the scene tree highlights them briefly (~3 s). */
+  recentlyChangedNodeIds: string[];
+  /** Last time a scene-mutating command was refused because this window is not the owner. */
+  editBlockedAt: number | null;
+  /** Local folder hand-over: this window asked the owner to let go and waits for the lock. */
+  takeOverPending: boolean;
+}
+
+export interface MergeBannerState {
+  /** Project path without a scheme (`scenes/main.pix3scene`). */
+  path: string;
+  sceneId: string;
+  status: 'conflicts' | 'rejected';
+  conflicts: MergeConflict[];
+  /** Why the agent's version could not be merged (`rejected`). */
+  reason: string | null;
+  /** Byte hash of the agent's version the banner is about. */
+  externalHash: string;
+  /** Journal record (`RecoveryRecord.ref`) of the human version right before the merge. */
+  restoreRef: string | null;
+  at: number;
+}
+
+export const createInitialCoauthoringState = (): CoauthoringState => ({
+  autosaveEnabled: false,
+  autosaveStatus: 'off',
+  autosaveReason: null,
+  hasAgentKit: false,
+  isOwner: true,
+  lastAutosavedAt: null,
+  pendingExternalPaths: [],
+  unreadablePaths: [],
+  stale: false,
+  merges: {},
+  recentlyChangedNodeIds: [],
+  editBlockedAt: null,
+  takeOverPending: false,
+});
+
 export type AssetBrowserViewMode = 'folders' | 'by-type';
 export type HybridSyncStatus =
   | 'unlinked'
@@ -247,6 +366,10 @@ export interface ProjectState {
   openProgress: ProjectOpenProgressState;
   /** Hybrid sync state between the local folder and linked cloud project. */
   hybridSync: ProjectHybridSyncState;
+  /** Connection to a `pix3 serve` workspace (meaningful only while `backend === 'workspace'`). */
+  workspace: WorkspaceConnectionState;
+  /** Autosave / external-version bookkeeping of the co-authoring mode. */
+  coauthoring: CoauthoringState;
 }
 
 export interface SelectionState {
@@ -468,6 +591,11 @@ export interface UIState {
   showDirectionAxes: boolean;
   /** Warn before leaving the page with unsaved changes */
   warnOnUnsavedUnload: boolean;
+  /**
+   * Autosave scenes of local-folder projects that carry no agent kit (a kit — `AGENTS.md` or
+   * `.pix3/` — turns autosave on by itself; workspaces always autosave).
+   */
+  autosaveLocalProjects: boolean;
   /** Pause rendering when the window is unfocused for battery economy */
   pauseRenderingOnUnfocus: boolean;
   /** Preferred aspect ratio for the runtime preview surface */
@@ -667,6 +795,8 @@ export const createInitialAppState = (): AppState => ({
     manifest: null,
     openProgress: createInitialProjectOpenProgressState(),
     hybridSync: createInitialHybridSyncState(),
+    workspace: createInitialWorkspaceConnectionState(),
+    coauthoring: createInitialCoauthoringState(),
   },
   scenes: {
     activeSceneId: null,
@@ -753,6 +883,7 @@ export const createInitialAppState = (): AppState => ({
     polygonEditing: null,
     showDirectionAxes: false,
     warnOnUnsavedUnload: true,
+    autosaveLocalProjects: false,
     pauseRenderingOnUnfocus: true,
     gameAspectRatio: 'free',
     flowStageAspect: 'project',

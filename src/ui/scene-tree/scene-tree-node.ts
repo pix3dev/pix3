@@ -114,6 +114,10 @@ export class SceneTreeNodeComponent extends ComponentBase {
   @property({ type: Object })
   collapsedNodeIds: Set<string> = new Set();
 
+  /** Nodes an external version just changed (`coauthoring.recentlyChangedNodeIds`, ~3 s). */
+  @property({ type: Object })
+  recentlyChangedNodeIds: Set<string> = new Set();
+
   /**
    * Branch roots the viewport's Peek strip is currently masking (see `PeekService`).
    *
@@ -204,6 +208,8 @@ export class SceneTreeNodeComponent extends ComponentBase {
       // subtree is off screen (and dimmed for it), but only this row's eye puts the mask back, and
       // striking the whole subtree turns a one-branch mask into a wall of crossed-out text.
       'tree-node__content--peek-root': this.isPeekHidden,
+      // Changed by an external writer (agent) in the reload that just happened.
+      'tree-node__content--external-change': this.recentlyChangedNodeIds.has(this.node.id),
     });
 
     const expanderClasses = classMap({
@@ -369,6 +375,7 @@ export class SceneTreeNodeComponent extends ComponentBase {
                       .selectedNodeIds=${this.selectedNodeIds}
                       .primaryNodeId=${this.primaryNodeId}
                       .collapsedNodeIds=${this.collapsedNodeIds}
+                      .recentlyChangedNodeIds=${this.recentlyChangedNodeIds}
                       .peekHiddenNodeIds=${this.peekHiddenNodeIds}
                       .peekHiddenAncestor=${this.isPeekMasked}
                       .draggedNodeId=${this.draggedNodeId}

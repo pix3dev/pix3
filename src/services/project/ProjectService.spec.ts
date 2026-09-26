@@ -208,6 +208,81 @@ describe('ProjectService — local project identity', () => {
 });
 
 /**
+ * `metadata.projectId` — the stable identity `pix3 new` writes and the CLI's link/serve channel
+ * filters by. Projects that predate it get one on their first open, written once.
+ */
+describe('ProjectService — metadata.projectId backfill on open', () => {
+  let service: InstanceType<typeof ProjectService>;
+  let storage: {
+    readTextFile: ReturnType<typeof vi.fn>;
+    writeTextFile: ReturnType<typeof vi.fn>;
+  };
+  const onDisk = new Map<string, string>();
+
+  const manifestYaml = (metadata: string): string =>
+    `version: 1.0.0\nprojectType: 2d\nmetadata:\n${metadata}autoloads: []\n`;
+
+  beforeEach(() => {
+    resetAppState();
+    localStorage.clear();
+    vi.clearAllMocks();
+    textWrites.clear();
+    onDisk.clear();
+    service = new ProjectService();
+    vi.spyOn(service, 'persistProjectDirectoryHandle').mockImplementation(async () => {});
+    vi.spyOn(service, 'getPersistedProjectDirectoryHandle').mockImplementation(async () => null);
+    storage = container.getService(
+      container.getOrCreateToken(ProjectStorageService)
+    ) as unknown as typeof storage;
+    storage.readTextFile.mockImplementation(async (path: string) => {
+      const text = textWrites.get(path) ?? onDisk.get(path);
+      if (text === undefined) throw new Error(`no ${path}`);
+      return text;
+    });
+    fsStub.requestProjectDirectory.mockResolvedValue(
+      new FakeDirectoryHandle('old-game') as unknown as FileSystemDirectoryHandle
+    );
+  });
+
+  afterEach(() => {
+    storage.readTextFile.mockImplementation(async () => {
+      throw new Error('no manifest');
+    });
+    vi.restoreAllMocks();
+  });
+
+  it('mints and writes one when the manifest has none, keeping the rest of metadata', async () => {
+    onDisk.set('pix3project.yaml', manifestYaml('  projectName: Old Game\n'));
+    await service.openProjectViaPicker();
+
+    const written = textWrites.get('pix3project.yaml') ?? '';
+    const id = appState.project.manifest?.metadata?.projectId;
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(written).toContain(`projectId: ${String(id)}`);
+    expect(written).toContain('projectName: Old Game');
+
+    // Once: the next open finds it and writes nothing.
+    textWrites.set('pix3project.yaml', written);
+    const writesBefore = storage.writeTextFile.mock.calls.length;
+    await service.openProjectViaPicker();
+    expect(appState.project.manifest?.metadata?.projectId).toBe(id);
+    expect(storage.writeTextFile.mock.calls.length).toBe(writesBefore);
+  });
+
+  it('leaves a manifest that already has one untouched', async () => {
+    onDisk.set('pix3project.yaml', manifestYaml('  projectName: G\n  projectId: keep-me\n'));
+    await service.openProjectViaPicker();
+    expect(appState.project.manifest?.metadata?.projectId).toBe('keep-me');
+    expect(textWrites.has('pix3project.yaml')).toBe(false);
+  });
+
+  it('does not create a manifest for a folder that has none', async () => {
+    await service.openProjectViaPicker();
+    expect(textWrites.has('pix3project.yaml')).toBe(false);
+  });
+});
+
+/**
  * The transition's half of `applyTemplateFiles` (`.plans/done/vibe-idea-stage.md` §3.1, the phase's main
  * risk): a recipe is laid over a project that already has the user's design document, decisions and
  * references in it. What is asserted here is the pair of properties that makes that survivable —
