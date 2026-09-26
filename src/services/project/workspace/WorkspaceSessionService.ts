@@ -16,6 +16,8 @@ import {
   WORKSPACE_PROTOCOL,
   WorkspaceError,
   normalizeWorkspaceEndpoint,
+  type WorkspaceCallFrame,
+  type WorkspaceCallResult,
   type WorkspaceChangeEvent,
   type WorkspaceChangeFrame,
   type WorkspaceHelloFrame,
@@ -27,6 +29,18 @@ export interface WorkspaceConnectOptions {
   /** Refuse to proceed when the address now serves another workspace (recents reopen). */
   readonly expectedWorkspaceId?: string | null;
 }
+
+/** What a call handler knows about the connection a call arrived on. */
+export interface WorkspaceCallContext {
+  readonly serverSession: string | null;
+  readonly leaseId: string | null;
+  readonly root: string | null;
+}
+
+export type WorkspaceCallHandler = (
+  frame: WorkspaceCallFrame,
+  context: WorkspaceCallContext
+) => Promise<WorkspaceCallResult>;
 
 export interface WorkspaceConnection {
   readonly endpoint: string;
@@ -74,6 +88,8 @@ export class WorkspaceSessionService {
   /** Project id the live connection belongs to (set by the open path once state is switched). */
   private attachedProjectId: string | null = null;
   private disposeProjectSubscription: (() => void) | null = null;
+  /** Serves the agent lane's calls (`WorkspaceAgentToolBridge`); null = answer "not served". */
+  private callHandler: WorkspaceCallHandler | null = null;
 
   /**
    * Bind the live connection to the project that was just opened with it. From then on, the
@@ -91,6 +107,16 @@ export class WorkspaceSessionService {
         this.disconnect();
       }
     });
+  }
+
+  /** The agent-channel bridge registers here (it is not imported by this module: no cycle). */
+  setCallHandler(handler: WorkspaceCallHandler | null): void {
+    this.callHandler = handler;
+  }
+
+  /** The lease this window holds right now, or null. */
+  getLeaseId(): string | null {
+    return this.events?.getLeaseId() ?? null;
   }
 
   /** Tests inject a fake-socket events client here. */
@@ -250,6 +276,18 @@ export class WorkspaceSessionService {
         void this.handleChangeFrame(frame);
       },
       onLease: frame => this.handleLease(frame),
+      onCall: frame => {
+        const handler = this.callHandler;
+        if (!handler || this.events !== events) {
+          return null;
+        }
+        const workspace = appState.project.workspace;
+        return handler(frame, {
+          serverSession: workspace.serverSession ?? this.connection?.hello.serverSession ?? null,
+          leaseId: events.getLeaseId(),
+          root: workspace.root,
+        });
+      },
       onRescanNeeded: () => {
         void this.rescan();
       },

@@ -36,6 +36,7 @@ import { WorkspaceSessionService } from '@/services/project/workspace/WorkspaceS
 import { WorkspaceConnectDialogService } from '@/services/project/workspace/WorkspaceConnectDialogService';
 import './pix3-status-bar.ts.css';
 import '../collab/collab-status-bar';
+import './pix3-agent-channel-indicator';
 
 interface StatusMessage {
   text: string;
@@ -674,8 +675,9 @@ export class Pix3StatusBar extends ComponentBase {
                 </button>
               `
             : html``}
-          ${this.renderWorkspaceStatus()} ${this.renderCoauthoringStatus()}
-          ${this.renderSyncStatus()} ${this.renderAgentLanes()}
+          ${this.renderWorkspaceStatus()}
+          <pix3-agent-channel-indicator></pix3-agent-channel-indicator>
+          ${this.renderCoauthoringStatus()} ${this.renderSyncStatus()} ${this.renderAgentLanes()}
           ${this.isFlow ? html`` : this.renderPerformance()} ${this.renderDiagnostics()}
           ${this.projectName ? this.renderBundleSize() : html``}
           <span class="status-version">${this.updateState.currentVersion.displayVersion}</span>

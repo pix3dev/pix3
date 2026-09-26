@@ -17,7 +17,7 @@ import { basename, dirname, join } from 'node:path';
 import { Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
-import type { ToolCallResult } from '../call-relay.ts';
+import { resultText, type ToolCallResult } from '../call-relay.ts';
 import { readProjectId } from '../manifest.ts';
 import {
   CALL_TIMEOUT_MS,
@@ -37,6 +37,13 @@ import {
   sendJson,
 } from '../server/http.ts';
 import { CLI_VERSION } from '../version.ts';
+import {
+  ChangeLog,
+  findRecoveryCopy,
+  mergeLogMentions,
+  readMergeLog,
+  type ChangeLogEntry,
+} from './agent-lane.ts';
 import { WorkspaceAuth } from './auth.ts';
 import { contentTypeFor } from './content-type.ts';
 import { EventHub } from './event-hub.ts';
@@ -113,6 +120,11 @@ const WHOLE_READ_BYTES = 8 * 1024 * 1024;
 const MAX_JOURNAL = 2_000;
 const MAX_HASH_PATHS = 20_000;
 const MUTATION_ID_PATTERN = /^[A-Za-z0-9_.:-]{1,128}$/;
+/** Longest an agent-lane call may wait for the editor (`POST /ws/agent/call`). */
+export const AGENT_CALL_MAX_MS = 120_000;
+/** `GET /ws/agent/tools` asks the window for its manifest with this budget. */
+const TOOLS_MANIFEST_TIMEOUT_MS = 5_000;
+const SHA256_HEX = /^[0-9a-f]{64}$/;
 /** Longest a burst of watch events may keep postponing its `change` frame. */
 const MAX_DEBOUNCE_WAIT_MS = 1_000;
 
@@ -200,6 +212,8 @@ export class WorkspaceServer {
    */
   private ackHash: string | null = null;
   private ackTimer: NodeJS.Timeout | null = null;
+  /** Path changes of the revision set by `seq`, for `GET /ws/agent/changes?since=`. */
+  private readonly changeLog = new ChangeLog();
 
   constructor(options: WorkspaceServerOptions) {
     this.options = options;
@@ -342,9 +356,15 @@ export class WorkspaceServer {
   enqueueCall(
     name: string,
     input: unknown,
-    timeoutMs: number = CALL_TIMEOUT_MS
+    timeoutMs: number = CALL_TIMEOUT_MS,
+    extra?: Record<string, unknown>
   ): Promise<ToolCallResult> {
-    return this.hub.enqueueCall(name, input, timeoutMs);
+    return this.hub.enqueueCall(name, input, timeoutMs, extra);
+  }
+
+  /** Changes recorded after `since` (see {@link ChangeLog.since}). */
+  changesSince(since: number): { paths: string[]; complete: boolean; entries: ChangeLogEntry[] } {
+    return this.changeLog.since(since);
   }
 
   // --- Serialisation, table, events ------------------------------------------------------------
@@ -359,6 +379,12 @@ export class WorkspaceServer {
   private nextSeq(): number {
     this.seq += 1;
     return this.seq;
+  }
+
+  /** Remember which revision-set paths moved at `seq` (`.pix3/` and excluded paths never count). */
+  private logChange(seq: number, paths: readonly string[], source: ChangeLogEntry['source']): void {
+    const relevant = paths.filter(path => path && !isExcludedPath(path));
+    if (relevant.length > 0) this.changeLog.record(seq, relevant, source);
   }
 
   private syncWatcher(): void {
@@ -381,6 +407,11 @@ export class WorkspaceServer {
   private broadcastChange(events: ChangeEvent[]): void {
     if (events.length === 0) return;
     const seq = this.nextSeq();
+    this.logChange(
+      seq,
+      events.flatMap(event => (event.from ? [event.path, event.from] : [event.path])),
+      'external'
+    );
     this.hub.broadcast({ type: 'change', seq, revision: this.revision(), events });
   }
 
@@ -643,6 +674,21 @@ export class WorkspaceServer {
       sendJson(res, 200, this.statusBody(), origin, this.corsHeaders(origin));
       return;
     }
+    if (method === 'GET' && path === '/ws/revision') {
+      this.authorize(req, true);
+      sendJson(
+        res,
+        200,
+        { revision: this.revision(), seq: this.seq, serverSession: this.serverSession },
+        origin,
+        this.corsHeaders(origin)
+      );
+      return;
+    }
+    if (path.startsWith('/ws/agent/')) {
+      await this.agentRoute(req, res, url, method, origin);
+      return;
+    }
     this.authorize(req, false);
 
     if ((method === 'GET' || method === 'HEAD') && path === '/ws/file') {
@@ -678,6 +724,208 @@ export class WorkspaceServer {
       return;
     }
     throw new HttpError(404, 'not_found', 'Not found.');
+  }
+
+  // --- Agent lane (`pix3 mcp --workspace`) ------------------------------------------------------
+
+  /**
+   * `/ws/agent/*` — the routes of a local `pix3 mcp --workspace` process. Authenticated ONLY by
+   * `X-Pix3-Control: <server.control>` from `.pix3/workspace.json` (a same-user local process: the
+   * plan's trust model); the browser's bearer token is refused here, and so is any request that
+   * carries an `Origin` — browsers never call this lane.
+   */
+  private async agentRoute(
+    req: IncomingMessage,
+    res: ServerResponse,
+    url: URL,
+    method: string,
+    origin: string | null
+  ): Promise<void> {
+    if (origin !== null) {
+      throw new HttpError(
+        403,
+        'forbidden_origin',
+        'The agent lane is for local processes (pix3 mcp); browsers never call it.'
+      );
+    }
+    const control = headerValue(req, 'x-pix3-control');
+    if (!control || control !== this.control) {
+      throw new HttpError(
+        401,
+        'unauthorized',
+        'The agent lane needs X-Pix3-Control with the control secret from .pix3/workspace.json.'
+      );
+    }
+    const path = url.pathname;
+    const ok = (body: Record<string, unknown>): void => sendJson(res, 200, body, null);
+
+    if (method === 'GET' && path === '/ws/agent/status') {
+      ok({
+        ...this.statusBody(),
+        holder: this.hub.holderState,
+        projectName: readProjectName(this.root),
+        projectId: readProjectId(this.root),
+      });
+      return;
+    }
+    if (method === 'GET' && path === '/ws/agent/tools') {
+      this.requireEditor();
+      const result = await this.enqueueCall('tools_manifest', {}, TOOLS_MANIFEST_TIMEOUT_MS);
+      this.throwRelayFailure(result, 'tools_manifest');
+      let tools: unknown = null;
+      try {
+        const parsed = JSON.parse(resultText(result)) as unknown;
+        tools =
+          parsed && typeof parsed === 'object' && 'tools' in parsed
+            ? (parsed as { tools: unknown }).tools
+            : null;
+      } catch {
+        tools = null;
+      }
+      if (!Array.isArray(tools)) {
+        throw new HttpError(502, 'bad_editor_reply', 'The editor sent no tool list.');
+      }
+      ok({ tools, serverSession: this.serverSession });
+      return;
+    }
+    if (method === 'POST' && path === '/ws/agent/call') {
+      const body = await readJson(req);
+      if (typeof body.name !== 'string' || !body.name) {
+        throw new HttpError(400, 'bad_request', '`name` must be a tool name.');
+      }
+      const requested = typeof body.timeoutMs === 'number' ? body.timeoutMs : AGENT_CALL_MAX_MS;
+      const timeoutMs = Math.max(1_000, Math.min(AGENT_CALL_MAX_MS, requested));
+      this.requireEditor();
+      const agent =
+        body.agent && typeof body.agent === 'object' && !Array.isArray(body.agent)
+          ? (body.agent as Record<string, unknown>)
+          : null;
+      const result = await this.enqueueCall(
+        body.name,
+        body.input ?? {},
+        timeoutMs,
+        agent
+          ? {
+              agent: {
+                name: typeof agent.name === 'string' ? agent.name.slice(0, 120) : null,
+                session: typeof agent.session === 'string' ? agent.session.slice(0, 80) : null,
+                // Self-declared by the MCP process; nothing here verifies it.
+                verified: false,
+              },
+            }
+          : undefined
+      );
+      this.throwRelayFailure(result, body.name);
+      ok({ result });
+      return;
+    }
+    if (method === 'POST' && path === '/ws/agent/hash') {
+      const body = await readJson(req);
+      ok(await this.hashPaths(body));
+      return;
+    }
+    if (method === 'POST' && path === '/ws/agent/expect') {
+      const body = await readJson(req);
+      ok(await this.compareExpectations(body.expect));
+      return;
+    }
+    if (method === 'GET' && path === '/ws/agent/changes') {
+      const raw = url.searchParams.get('since') ?? '0';
+      if (!/^\d{1,15}$/.test(raw)) {
+        throw new HttpError(400, 'bad_request', '`since` must be a seq number.');
+      }
+      // Reconcile first: the watcher is not obliged to have seen every write (plan §5 D, step 3).
+      await this.serial(async () => {
+        this.broadcastChange(await this.rescan(['']));
+      });
+      const since = Number(raw);
+      const { paths, complete } = this.changeLog.since(since);
+      ok({ since, seq: this.seq, revision: this.revision(), paths, complete });
+      return;
+    }
+    throw new HttpError(404, 'not_found', 'Not found.');
+  }
+
+  /** 409 `no_editor` with what the user has to do, when no window holds the lease. */
+  private requireEditor(): void {
+    if (this.hub.isLeased()) return;
+    throw new HttpError(
+      409,
+      'no_editor',
+      `The Pix3 editor is not open on this project (or has another folder open). Open ${this.root} ` +
+        `in Pix3: File → Connect to Workspace…, address http://${LINK_HOST}:${this.boundPort ?? '?'} ` +
+        '(the token `pix3 serve` printed). Files can still be edited meanwhile.'
+    );
+  }
+
+  /** Relay-made results become HTTP errors; the editor's own error results pass through. */
+  private throwRelayFailure(result: ToolCallResult, name: string): void {
+    switch (result.relayFailure) {
+      case undefined:
+        return;
+      case 'timeout':
+        throw new HttpError(
+          504,
+          'no_editor_reply',
+          `The Pix3 editor holds this workspace but did not answer "${name}" in time.`
+        );
+      case 'no_editor':
+        this.requireEditor();
+        throw new HttpError(409, 'no_editor', resultText(result));
+      case 'cancelled':
+        throw new HttpError(409, 'lease_lost', resultText(result));
+      case 'overloaded':
+        throw new HttpError(429, 'too_many_calls', resultText(result));
+    }
+  }
+
+  /**
+   * `POST /ws/agent/expect {expect: {path: sha256}}` — the agent's expectations against the disk
+   * NOW (plan §5 D, step 1), with what can be said about each file that differs.
+   */
+  private async compareExpectations(raw: unknown): Promise<Record<string, unknown>> {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      throw new HttpError(400, 'bad_request', '`expect` must be an object {path: sha256}.');
+    }
+    const entries = Object.entries(raw as Record<string, unknown>);
+    if (entries.length > MAX_HASH_PATHS) {
+      throw new HttpError(413, 'too_many_paths', `At most ${MAX_HASH_PATHS} paths.`);
+    }
+    const expect = new Map<string, string>();
+    for (const [key, value] of entries) {
+      const wirePath = parseWirePath(key, 'expect');
+      if (typeof value !== 'string' || !SHA256_HEX.test(value.toLowerCase())) {
+        throw new HttpError(400, 'bad_request', `expect["${key}"] must be a hex sha256.`);
+      }
+      expect.set(wirePath, value.toLowerCase());
+    }
+    const { hashes } = (await this.hashPaths({ paths: [...expect.keys()] })) as {
+      hashes: Record<string, string | null>;
+    };
+    const differing: Record<string, unknown>[] = [];
+    let mergeLog: Awaited<ReturnType<typeof readMergeLog>> | null = null;
+    for (const [wirePath, agentHash] of expect) {
+      const diskHash = hashes[wirePath] ?? null;
+      if (diskHash === agentHash) continue;
+      mergeLog ??= await readMergeLog(this.root);
+      let mtime: number | null = null;
+      if (diskHash !== null) {
+        try {
+          mtime = mtimeOf(await lstat(join(this.root, ...wirePath.split('/')), { bigint: true }));
+        } catch {
+          mtime = null;
+        }
+      }
+      const merged = mergeLogMentions(mergeLog, wirePath, diskHash, mtime);
+      differing.push({
+        path: wirePath,
+        diskHash,
+        agentHash,
+        recovery: await findRecoveryCopy(this.root, wirePath, agentHash),
+        ...(merged ? { mergeLog: true } : {}),
+      });
+    }
+    return { matchesAgent: differing.length === 0, differing, hashes, seq: this.seq };
   }
 
   private statusBody(): Record<string, unknown> {
@@ -975,6 +1223,7 @@ export class WorkspaceServer {
         await this.recordAncestors(wirePath);
         this.recordOwnFile(wirePath, stats, sha256);
         const seq = this.nextSeq();
+        this.logChange(seq, [wirePath], 'api');
         return { status: 200, body: { path: wirePath, sha256, size, mtime: mtimeOf(stats), seq } };
       });
     } finally {
@@ -1062,7 +1311,9 @@ export class WorkspaceServer {
       throw new HttpError(409, 'exists', `${wirePath} exists and is not a directory.`);
     await mkdir(resolved.absolute, { recursive: true });
     await this.rescan([this.topmostNew(wirePath)]);
-    return { status: 200, body: { path: wirePath, created: true, seq: this.nextSeq() } };
+    const seq = this.nextSeq();
+    this.logChange(seq, [wirePath], 'api');
+    return { status: 200, body: { path: wirePath, created: true, seq } };
   }
 
   /** The outermost ancestor (or the path itself) the table did not know — what an own write created. */
@@ -1099,9 +1350,11 @@ export class WorkspaceServer {
     }
     await this.rescan([wirePath]);
     await this.refreshAckHash(wirePath);
+    const seq = this.nextSeq();
+    this.logChange(seq, [wirePath], 'api');
     return {
       status: 200,
-      body: { path: wirePath, kind: resolved.kind === 'dir' ? 'dir' : 'file', seq: this.nextSeq() },
+      body: { path: wirePath, kind: resolved.kind === 'dir' ? 'dir' : 'file', seq },
     };
   }
 
@@ -1132,6 +1385,8 @@ export class WorkspaceServer {
     await this.rescan([from, this.topmostNew(to)]);
     await this.refreshAckHash(from, to);
     const moved = this.table.get(to);
+    const seq = this.nextSeq();
+    this.logChange(seq, [from, to], 'api');
     return {
       status: 200,
       body: {
@@ -1139,7 +1394,7 @@ export class WorkspaceServer {
         to,
         kind: source.kind === 'dir' ? 'dir' : 'file',
         ...(moved?.sha256 ? { sha256: moved.sha256 } : {}),
-        seq: this.nextSeq(),
+        seq,
       },
     };
   }

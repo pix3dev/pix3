@@ -40,6 +40,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | Debug the _running_ editor                                              | `debug-running-game` skill                                                                                                        |
 | Run / open / launch the editor for the user                             | this file → "Launch the editor" — always probe port 8123 first                                                                  |
 | Open a project served by `pix3 serve` (remote / no FSA), workspace backend | `docs/pix3-specification.md` → "Workspace backend (pix3 serve)"; wire contract `packages/pix3-cli/README.md`; code `src/services/project/workspace/` |
+| External agent calls editor tools (`pix3 mcp --workspace`), sync barrier before `game_run`, `expect` hashes, `generate_*` permission | `docs/pix3-specification.md` → "Live agent channel"; barrier semantics + error table `packages/pix3-cli/README.md`; code `packages/pix3-cli/src/workspace-agent/`, `src/services/project/workspace/WorkspaceAgentToolBridge.ts` |
 
 **Version of record** is the `## N. Change Log` / title of `docs/pix3-specification.md` — never hardcode a spec version number in other docs.
 

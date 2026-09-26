@@ -4,7 +4,9 @@ Command line for Pix3:
 
 ```text
 pix3 new [<recipe> [dir]] [--name <n>]        create a project from a recipe/template
-pix3 mcp [--project <dir>] [--agent <name>]   stdio MCP server for your agent (+ FSA link server)
+pix3 mcp --workspace [--project <dir>]        stdio MCP server for your agent, through `pix3 serve`
+pix3 mcp [--project <dir>] [--agent <name>]   phase-0 prototype: stdio MCP + FSA link server
+pix3 setup [claude|codex]                     print how to register the MCP server
 pix3 serve [--project <dir>] [--port <n>] [--new-token]
                                               serve a project folder to a Pix3 editor
 pix3 validate [paths…] [--json]               strict scene check
@@ -194,7 +196,13 @@ Hashes of the disk **now** (for the sync barrier). → `200 { "hashes": { "<p>":
 → `200 { "workspaceId", "serverSession", "protocol", "cliVersion", "root", "pid", "port",
 "revision", "seq", "leased" }`. Accepts the bearer token **or** `X-Pix3-Control: <server.control>`
 from `workspace.json` (how another local `pix3` process confirms a live server is the one the file
-describes; the control secret grants nothing else).
+describes; beyond this route and `GET /ws/revision`, the control secret grants only the agent
+lane below — never the file API).
+
+#### `GET /ws/revision`
+
+→ `200 { "revision", "seq", "serverSession" }` — no scan, the table as it is. Bearer token or
+`X-Pix3-Control`.
 
 ### Mutation journal (`X-Mutation-Id`)
 
@@ -232,7 +240,7 @@ socket (`1003`).
 | `{ "type": "lease", "action": "acquire", "leaseId"?: "<id>" }` | Take the free lease; with the previous `leaseId`, resume it during the grace period. |
 | `{ "type": "lease", "action": "takeover" }` | Take the lease from whoever holds it. |
 | `{ "type": "lease", "action": "release" }` | Give it up. |
-| `{ "type": "call-result", "id": "<call id>", "result": { "content": [{ "type": "text", "text": "…" }], "isError"?: true } }` | Answer a `call` (lease holder only). |
+| `{ "type": "call-result", "id": "<call id>", "result": { "content": [Block, …], "isError"?: true, "_meta"?: {…} } }` | Answer a `call` (lease holder only). `Block` = `{ "type": "text", "text" }` or `{ "type": "image", "data": "<base64, no data: prefix>", "mimeType": "image/png" }`. `_meta.pix3 = { playRevision, stale }` on observing tools (see the agent lane). |
 
 **Server → client**
 
@@ -245,7 +253,7 @@ socket (`1003`).
 | `{ "type": "lease", "state": "busy", "inGrace": boolean }` | Someone else holds it (`inGrace`: its holder is disconnected but may come back). |
 | `{ "type": "lease", "state": "lost", "reason": "taken_over" \| "expired" \| "revoked", "leaseId" }` | Sent to the holder that lost it. |
 | `{ "type": "lease", "state": "released" }` | Answer to `release`. |
-| `{ "type": "call", "id", "name", "input" }` | An MCP tool call for the lease holder. |
+| `{ "type": "call", "id", "name", "input", "agent"? }` | An MCP tool call for the lease holder. `agent = { name, session, verified: false }` on agent-lane calls: `name` is what the `pix3 mcp` process calls itself (its MCP client's `clientInfo.name`, else `--agent` / `PIX3_AGENT`), `session` a random id per `pix3 mcp` process. Nothing verifies either. |
 | `{ "type": "error", "error": "<code>", "message", "id"? }` | `unauthorized`, `auth_timeout`, `rate_limited`, `revoked` (then the socket closes), or `bad_frame`, `unknown_frame`, `not_lease_holder`, `bad_result`, `unknown_call`. |
 
 `ChangeEvent`:
@@ -279,7 +287,137 @@ gets `lost/taken_over` and calls it had not
 answered go to the new holder. On `release`, pending calls fail. The HTTP routes do not check the
 lease (v1): a window without it is expected to stay read-only.
 
-**Calls.** In-process API for a later `pix3 mcp --workspace`: `WorkspaceServer.enqueueCall(name,
-input, timeoutMs = 60 000) → Promise<ToolCallResult>`. With no lease holder it resolves at once
-with an error result (`isError: true`); otherwise the call is delivered to the holder and the
-promise settles with its `call-result`, or an error result on timeout.
+**Calls.** `WorkspaceServer.enqueueCall(name, input, timeoutMs = 60 000, extra?) →
+Promise<ToolCallResult>` (in process; the agent lane below is its HTTP face). With no lease holder
+it resolves at once with an error result (`isError: true`, `relayFailure: 'no_editor'`); otherwise
+the call is delivered to the holder (`extra` becomes extra fields of the `call` frame) and the
+promise settles with its `call-result`, or an error result on timeout (`relayFailure: 'timeout'`)
+or lease loss (`'cancelled'`). A reconnecting holder that resumes its lease gets the calls it had
+been handed again, with the same ids — the editor answers a repeated id once.
+
+### Agent lane — `/ws/agent/*`
+
+The routes a local `pix3 mcp --workspace` process drives. **Auth: `X-Pix3-Control: <server.control>`
+only** (from `.pix3/workspace.json`, 0600 — a process of the same user; the plan's trust model).
+The browser's bearer token is refused (`401 unauthorized`), and so is any request carrying an
+`Origin` (`403 forbidden_origin`): browsers never call this lane.
+
+| Route | Answer |
+| --- | --- |
+| `GET /ws/agent/status` | `/ws/status` fields plus `holder: "connected" \| "grace" \| null`, `projectName`, `projectId`. |
+| `GET /ws/agent/tools` | `{ tools: [{name, description, inputSchema}], serverSession }` — the window's own tool definitions for the v1 allowlist (it answers an internal `tools_manifest` call within 5 s). `409 no_editor` without a window. |
+| `POST /ws/agent/call` `{ name, input, timeoutMs?, agent? }` | Parks the call for the lease holder and answers when it replies: `200 { result }` (the window's result as is, error results included). `timeoutMs` is clamped to 1–120 s (default 120 s). `409 no_editor` at once when no window holds the lease (message: open `<root>` in Pix3 — File → Connect to Workspace…); `504 no_editor_reply` when it does not answer in time; `409 lease_lost` when the lease ended under the call (on a takeover the call goes to the new holder instead); `429 too_many_calls`. `agent` → the `call` frame's `agent`. |
+| `POST /ws/agent/hash` `{ paths }` | Same as `POST /ws/hash`. |
+| `POST /ws/agent/expect` `{ expect: { path: sha256 } }` | The agent's expectations against the disk **now**: `{ matchesAgent, differing: [{ path, diskHash \| null, agentHash, recovery, mergeLog? }], hashes, seq }`. `recovery` = the wire path of a file under `.pix3/recovery/<encodeURIComponent(path)>/` whose bytes hash to `agentHash` (every journaled version of that path is hashed), else `null` — a copy is named only when it exists. `mergeLog: true` when `.pix3/merge-log.jsonl` has a line for that path whose `mergedHash`/`hash` is the disk hash, or one no older than the file's mtime minus 5 s — the editor wrote those bytes. |
+| `GET /ws/agent/changes?since=<seq>` | Rescans the whole revision set first (the watcher may have missed a write; differences go out as a `change` frame), then `{ since, seq, revision, paths, complete }`: distinct revision-set paths changed after `since` — external writes and writes through the file API alike (`.pix3/` never). The server keeps the last 5 000 path changes; `complete: false` = the ring no longer reaches back to `since`, so an empty list proves nothing. |
+
+## `pix3 mcp --workspace` — the live channel
+
+A stdio MCP server the agent starts from its config (`.mcp.json`, `pix3 setup`). It has no port
+of its own: it finds the running `pix3 serve` of the project (`--project`, else the nearest
+ancestor of the cwd with `pix3project.yaml`) through `.pix3/workspace.json` and confirms it with
+`GET /ws/agent/status` + the control secret. When none runs, every tool answers
+`no_workspace_server` and stderr says ``Workspace server is not running. Run `pix3 serve` in
+<root>``; the next call looks again, so the agent never restarts its MCP server.
+
+**Tools (v1, exactly):** `project_status`, `play_start`, `play_stop`, `play_restart`,
+`play_status`, `game_run`, `game_input`, `game_observe`, `read_errors`, `read_logs`,
+`viewport_screenshot` (the PNG comes back as an MCP image block), `generate_asset`,
+`generate_sfx`, `get_selection`. No scene-mutating tool: the agent edits files. Schemas are the
+window's (`GET /ws/agent/tools`), with a static fallback so `tools/list` works before a window
+connects (a `notifications/tools/list_changed` follows once a window's schemas are known).
+`play_start` / `play_restart` / `game_run` also take `expect: { path: sha256 }` — the sha256 of the
+raw bytes of every file the agent wrote.
+
+**The sync barrier** (plan §5 D) runs before `play_start`, `play_restart` and `game_run`:
+
+1. **Agent's expectations.** `expect` is checked against the disk (`/ws/agent/expect`) before
+   anything syncs. Any mismatch → `disk_differs_from_agent` with, per file: merged by the editor
+   (`mergeLog: true` — re-read it), or overwritten — with `recovery: ".pix3/recovery/…"` only when
+   a copy with exactly those bytes exists, else "no copy exists — write the file again". Nothing
+   starts. Without `expect` the answer says `agentExpectations: "none"`.
+2. **Editor = disk.** The window's internal `sync_barrier` holds autosave (edits accumulate and are
+   saved after the run), stops play, runs `syncNow()` (waits for the stabilisation window and the
+   script build) and returns `{loaded: {path: sha256}, errors}` — the open scenes and the built
+   script sources. These hashes (plus `expect`) are compared with `/ws/agent/hash` at that moment;
+   a mismatch retries the editor's sync for up to ~5 s. Then: loader/compiler errors →
+   `load_failed` (`{file, line, message, kind}`); a file that stays unreadable →
+   `pending_external`; hashes that never agree → `sync_timeout` with the differing paths. The
+   window then starts the game (`game_run` starts play itself; `play_restart` of a stopped game is
+   a start) and the hold is released (`sync_release`) after the run.
+3. **After the run** (for `game_run` when it finished; for `play_start` / `play_restart` right
+   after the start was acknowledged) the verified files are hashed again and
+   `/ws/agent/changes?since=<seq of the verification>` is read: `changedDuringRun`.
+
+The answer of a barrier tool:
+
+```json
+{
+  "revision": { "<path>": "<sha256 of the verified version>" },
+  "matchesAgent": true,
+  "matchesDisk": true,
+  "changedDuringRun": [],
+  "editorChangedSinceAgentWrite": [],
+  "result": { "…": "the editor tool's own result" }
+}
+```
+
+`matchesAgent` is `null` (with `agentExpectations: "none"`) without `expect`; `matchesDisk` is
+whether every verified hash still matched the disk at the final check; `changedDuringRun` is every
+path whose hash moved between the two checks plus every path the server saw change meanwhile
+(`changeLogIncomplete: true` when its ring did not reach back); `editorChangedSinceAgentWrite` is
+the `expect` paths the merge log says the editor wrote after the check. **A green answer without
+marks means: at start disk = agent's expectations = verified version; at the final check the
+verified hashes match disk; detected changes are listed.** It does not mean the disk did not change
+during the run: `v1 → v2 → v1` between the two checks is invisible, and the game reads resources
+lazily.
+
+**Observing tools** (`play_status`, `game_input`, `game_observe`, `viewport_screenshot`,
+`read_errors`, `read_logs`) neither stop nor sync: `{ revision, stale, result }`, where `revision` is
+what the running game was verified against (`null` when play was not started through the barrier)
+and `stale: true` when the editor saw an external change during play or a `revision` path's disk
+hash moved since. Other tools (`project_status`, `play_stop`, `get_selection`, `generate_*`) answer
+with the editor's result as is. `project_status` without a window answers
+`{ connected: false, server, editor: null, message }` (not an error).
+
+**Error codes** (every error is `isError: true` with `{ "error": "<code>", "message", … }`):
+
+| Code | When |
+| --- | --- |
+| `disk_differs_from_agent` | Step 1: the disk does not hold the `expect` versions (`differing[]` with `recovery`, `mergeLog`, `hint`). |
+| `sync_timeout` | Step 2: the editor's loaded hashes did not match the disk within ~5 s (`differing[]` with `loadedHash` / `agentHash` / `diskHash`). |
+| `load_failed` | Step 2: the loader or the script compiler failed on the current files (`errors[]`). |
+| `pending_external` | Step 2: a file stays unreadable (partial / invalid write); the editor keeps its last good version. |
+| `no_editor` | No window holds the lease, it did not answer (`reason: "no_reply"`), or it lost the lease mid-call (`reason: "lease_lost"`). |
+| `permission_denied` | `generate_*`: the human denied, or did not answer within 60 s. |
+| `no_workspace_server` | No `pix3 serve` runs for the project root. |
+
+Anything else the editor refuses (`unknown_tool`, `agent_disabled` when the human switched the
+channel off) is passed through as the editor wrote it.
+
+**Generation permission.** The first `generate_asset` / `generate_sfx` of a connection (server
+session + lease + `pix3 mcp` process) opens a prompt in the editor naming the process and what it
+calls itself (unverified); the call waits up to 60 s. Allowed → 20 generations, then it asks again.
+In memory only: a reconnect, a new `pix3 serve` run, a lease takeover or a new `pix3 mcp` process
+resets it; the status-bar Agent pill has a revoke button and switches the channel off.
+
+## MCP configuration and `pix3 setup`
+
+`pix3 new` writes the project's `.mcp.json` (Claude Code's project format), **pinned to the CLI
+version that wrote it** — never a bare `@pix3/cli`:
+
+```json
+{ "mcpServers": { "pix3": { "command": "npx", "args": ["-y", "@pix3/cli@<X.Y.Z>", "mcp", "--workspace"] } } }
+```
+
+`pix3 setup [claude|codex]` prints (never runs) the registration for a project without one:
+`claude mcp add pix3 -- npx -y @pix3/cli@<X.Y.Z> mcp --workspace` (run in the project folder), and
+for Codex a `~/.codex/config.toml` block — `[mcp_servers.pix3]` with `command`, `args` (plus
+`--project <root>`, since that config is global) and `tool_timeout_sec = 180`. The Codex keys are
+the ones `tools/pix3-agent-bridge` passes to `codex exec -c mcp_servers.pix3.*`; the file form is
+best-effort, check `codex mcp --help` of your Codex version.
+
+**Dev mode.** From a checkout of the pix3 repo (the CLI runs from `packages/pix3-cli/src/`), or
+with `PIX3_CLI_DEV=1`, both write `node <repo>/packages/pix3-cli/src/index.ts mcp --workspace`
+instead, so the channel can be tried before that version is on npm. `PIX3_CLI_DEV=0` forces the
+pinned form.

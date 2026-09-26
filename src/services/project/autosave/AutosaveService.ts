@@ -75,6 +75,9 @@ export class AutosaveService {
   private kitProjectId: string | null = null;
   private disposers: Array<() => void> = [];
   private debounceMs = AUTOSAVE_DEBOUNCE_MS;
+  /** Explicit holds (the agent channel's sync barrier): id → reason. */
+  private readonly holds = new Map<number, string>();
+  private nextHoldId = 1;
 
   initialize(): void {
     if (this.disposers.length > 0) {
@@ -108,6 +111,37 @@ export class AutosaveService {
 
   isEnabled(): boolean {
     return appState.project.coauthoring.autosaveEnabled;
+  }
+
+  /**
+   * Hold autosave until the returned release is called (plan §5 D, barrier step 2: "the window
+   * pauses autosave — edits accumulate and are flushed after the run"). Holds nest; the last
+   * release schedules the save of whatever became dirty meanwhile. Releasing twice is harmless.
+   */
+  hold(reason: string): () => void {
+    const id = this.nextHoldId++;
+    this.holds.set(id, reason);
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    if (this.isEnabled() && this.ownership.isOwner()) {
+      this.setStatus('held', reason);
+    }
+    return () => {
+      if (!this.holds.delete(id) || this.holds.size > 0) return;
+      if (!this.isEnabled()) return;
+      if (this.hasDirtyScene()) {
+        this.schedule();
+      } else if (appState.project.coauthoring.autosaveStatus === 'held') {
+        this.setStatus('saved');
+      }
+    };
+  }
+
+  /** True while at least one {@link hold} is in force. */
+  isHeld(): boolean {
+    return this.holds.size > 0;
   }
 
   /** Save now (skipping the debounce) — the same rules apply. Resolves when done. */
@@ -213,6 +247,11 @@ export class AutosaveService {
     }
     if (this.gestures.isGestureActive()) {
       this.schedule(GESTURE_RETRY_MS);
+      return;
+    }
+    if (this.holds.size > 0) {
+      // The release reschedules; edits keep accumulating in the dirty scenes meanwhile.
+      this.setStatus('held', Array.from(this.holds.values())[0]);
       return;
     }
 

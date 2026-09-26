@@ -16,8 +16,11 @@ Usage:
   pix3 new                         List recipes and templates
   pix3 new <recipe> [dir]          Create a project (dir defaults to the recipe id)
         [--name <project name>]
-  pix3 mcp [--project <dir>]       Run the MCP server for your agent (stdio) and the
-        [--agent <name>]           loopback link the Pix3 editor connects to
+  pix3 mcp --workspace             MCP server for your agent (stdio), relayed through the
+        [--project <dir>]          running \`pix3 serve\` to the connected Pix3 editor
+  pix3 mcp [--project <dir>]       (phase-0 prototype) MCP server + FSA loopback link
+        [--agent <name>]
+  pix3 setup [claude|codex]        Print how to register the MCP server with your agent
   pix3 serve [--project <dir>]     Serve this project folder to a Pix3 editor over one
         [--port <n>] [--new-token] loopback port (e.g. through VS Code Remote SSH)
   pix3 validate [paths…] [--json]  Strict scene check: schema, references, guards, then
@@ -107,7 +110,8 @@ const runNew = (args: ParsedArgs): number => {
   process.stdout.write(
     `Created ${project.projectName} from ${project.template.id} in ${project.dir}\n` +
       `  ${project.files.length} files, project id ${project.projectId}\n\n` +
-      `Next: open that folder in Pix3 (Open Folder), and start your agent inside it.\n`
+      `Next: open that folder in Pix3 (Open Folder), or run \`pix3 serve\` in it and connect\n` +
+      '      (File → Connect to Workspace…); then start your agent inside it (.mcp.json is set up).\n'
   );
   return 0;
 };
@@ -127,6 +131,15 @@ const main = async (): Promise<number> => {
     case 'new':
       return runNew(args);
     case 'mcp': {
+      if (args.flags.has('workspace')) {
+        const { runMcpWorkspace } = await import('./mcp-workspace.ts');
+        await runMcpWorkspace({
+          cwd: process.cwd(),
+          projectDir: stringFlag(args, 'project'),
+          agent: stringFlag(args, 'agent') ?? (process.env.PIX3_AGENT || undefined),
+        });
+        return -1; // keeps running; exits from its own shutdown path
+      }
       const { runMcp } = await import('./mcp.ts');
       await runMcp({
         cwd: process.cwd(),
@@ -134,6 +147,21 @@ const main = async (): Promise<number> => {
         agent: stringFlag(args, 'agent') ?? (process.env.PIX3_AGENT || undefined),
       });
       return -1; // keeps running; exits from its own shutdown path
+    }
+    case 'setup': {
+      const target = args.positionals[1] ?? null;
+      if (target !== null && target !== 'claude' && target !== 'codex') {
+        process.stderr.write(`pix3: setup takes claude or codex, not "${target}".\n`);
+        return 1;
+      }
+      const { findProjectRoot } = await import('./manifest.ts');
+      const { setupInstructions } = await import('./mcp-config.ts');
+      const projectArg = stringFlag(args, 'project');
+      const root = projectArg
+        ? resolve(process.cwd(), projectArg)
+        : (findProjectRoot(process.cwd()) ?? resolve(process.cwd()));
+      process.stdout.write(setupInstructions(target, root));
+      return 0;
     }
     case 'serve': {
       const { runServe } = await import('./serve/run-serve.ts');

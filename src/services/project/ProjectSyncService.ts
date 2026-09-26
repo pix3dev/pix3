@@ -10,6 +10,7 @@ import {
   toProjectPath,
 } from '@/services/project/coauthoring/coauthoring-paths';
 import { readDiskVersion } from '@/services/project/coauthoring/disk-version';
+import { sha256 } from '@/services/project/external-merge/hash';
 import { PROJECT_SCRIPT_DIRECTORIES } from '@pix3/runtime';
 
 /** Upper bound of `syncNow()`'s wait for the stabilisation window (a file mid-write, a reload). */
@@ -114,7 +115,8 @@ export class ProjectSyncService {
    * 3. script compilation finished (`ProjectScriptLoaderService.ensureReady()`).
    *
    * Resolves to `{ <project path>: <sha256> }` of the version of each open scene the editor now
-   * holds (what it last read or wrote). Not wired to any tool yet.
+   * holds (what it last read or wrote). The agent channel's `sync_barrier` adds the script
+   * sources of the last build ({@link builtScriptHashes}).
    */
   async syncNow(): Promise<Record<string, string>> {
     if (appState.project.status !== 'ready') {
@@ -127,9 +129,11 @@ export class ProjectSyncService {
       await this.workspaceSession.rescan();
     } else {
       await this.fileWatch.checkAllNow();
-      if (loader) {
-        scriptsChanged = await this.scriptsDifferFromLastBuild(loader);
-      }
+    }
+    // Also for a workspace: a pushed `modify` only schedules a (debounced) rebuild, and the
+    // barrier must not report a build that is about to be replaced.
+    if (loader) {
+      scriptsChanged = await this.scriptsDifferFromLastBuild(loader);
     }
 
     for (const path of this.openScenePaths()) {
@@ -160,6 +164,30 @@ export class ProjectSyncService {
     for (const path of this.openScenePaths()) {
       const known = this.diskState.getKnown(path);
       if (known) hashes[path] = known.hash;
+    }
+    return hashes;
+  }
+
+  /**
+   * `{ <project path>: <sha256> }` of every script source the last build compiled. The hash is of
+   * the disk BYTES when the file still decodes to exactly the text that was built (so a BOM does
+   * not read as a difference), else of the built text — which then differs from the disk, as it
+   * should.
+   */
+  async builtScriptHashes(): Promise<Record<string, string>> {
+    const loader = await this.resolveScriptLoader();
+    const hashes: Record<string, string> = {};
+    if (!loader) return hashes;
+    for (const [rawPath, content] of loader.getCollectedFiles()) {
+      const path = toProjectPath(rawPath);
+      let hash: string | null = null;
+      try {
+        const version = await readDiskVersion(this.storage, path);
+        if (version && version.text === content) hash = version.hash;
+      } catch {
+        hash = null;
+      }
+      hashes[path] = hash ?? (await sha256(content));
     }
     return hashes;
   }

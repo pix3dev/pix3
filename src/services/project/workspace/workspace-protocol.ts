@@ -93,11 +93,34 @@ export type WorkspaceLeaseFrame =
     }
   | { readonly type: 'lease'; readonly state: 'released' };
 
+/** Who placed a call: self-declared by the `pix3 mcp` process, never verified by anyone. */
+export interface WorkspaceCallAgent {
+  readonly name: string | null;
+  /** Random id of the `pix3 mcp` process (a new process = a new session). */
+  readonly session: string | null;
+  readonly verified: false;
+}
+
 export interface WorkspaceCallFrame {
   readonly type: 'call';
   readonly id: string;
   readonly name: string;
   readonly input: unknown;
+  /** Set on calls from the agent lane (`pix3 mcp --workspace`). */
+  readonly agent?: WorkspaceCallAgent;
+}
+
+/** A content block of a `call-result` (images: base64 without a `data:` prefix). */
+export type WorkspaceCallContent =
+  | { readonly type: 'text'; readonly text: string }
+  | { readonly type: 'image'; readonly data: string; readonly mimeType: string };
+
+/** `result` of a `{type:'call-result'}` frame (MCP `CallToolResult` subset). */
+export interface WorkspaceCallResult {
+  readonly content: WorkspaceCallContent[];
+  readonly isError?: boolean;
+  /** Side data for the `pix3 mcp` process (`_meta.pix3`: playRevision, stale). */
+  readonly _meta?: Record<string, unknown>;
 }
 
 export interface WorkspaceErrorFrame {

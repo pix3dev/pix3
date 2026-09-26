@@ -3,7 +3,7 @@ import type { IncomingMessage } from 'node:http';
 import type { Duplex } from 'node:stream';
 import { WebSocketServer, type RawData, type WebSocket } from 'ws';
 
-import { CallRelay, parseToolResult, textResult, type ToolCallResult } from '../call-relay.ts';
+import { CallRelay, parseToolResult, relayFailure, type ToolCallResult } from '../call-relay.ts';
 import { CALL_TIMEOUT_MS, WS_AUTH_TIMEOUT_MS, WS_LEASE_GRACE_MS } from '../protocol.ts';
 import { isAllowedOrigin, isLoopbackHost, isRecord, originOf } from '../server/http.ts';
 import type { WorkspaceAuth } from './auth.ts';
@@ -114,12 +114,21 @@ export class EventHub {
   enqueueCall(
     name: string,
     input: unknown,
-    timeoutMs: number = CALL_TIMEOUT_MS
+    timeoutMs: number = CALL_TIMEOUT_MS,
+    extra?: Record<string, unknown>
   ): Promise<ToolCallResult> {
     if (!this.lease) {
-      return Promise.resolve(textResult('No Pix3 editor window holds this workspace.', true));
+      return Promise.resolve(
+        relayFailure('no_editor', 'No Pix3 editor window holds this workspace.')
+      );
     }
-    return this.relay.park(name, input, timeoutMs);
+    return this.relay.park(name, input, timeoutMs, extra);
+  }
+
+  /** `connected`: a live socket holds the lease; `grace`: its holder is gone but may come back. */
+  get holderState(): 'connected' | 'grace' | null {
+    if (!this.lease) return null;
+    return this.lease.client ? 'connected' : 'grace';
   }
 
   /** Ping every authenticated socket; terminate the ones silent for three intervals. */
@@ -371,7 +380,13 @@ export class EventHub {
     const holder = this.lease?.client;
     if (!holder || holder.socket.readyState !== holder.socket.OPEN) return;
     for (const call of this.relay.takeUnflushed()) {
-      this.send(holder, { type: 'call', id: call.id, name: call.name, input: call.input });
+      this.send(holder, {
+        ...call.extra,
+        type: 'call',
+        id: call.id,
+        name: call.name,
+        input: call.input,
+      });
     }
   }
 

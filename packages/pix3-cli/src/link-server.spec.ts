@@ -14,6 +14,7 @@ import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import { resultText } from './call-relay.ts';
 import { LinkServer, type LinkServerOptions } from './link-server.ts';
 import { describeUnlinked, projectStatus } from './mcp.ts';
 import { LINK_PROTOCOL } from './protocol.ts';
@@ -263,7 +264,7 @@ describe('one folder: the lease', () => {
       method: 'POST',
       body: { lease, result: { content: [{ type: 'text', text: 'ok' }] } },
     });
-    expect((await pending).content[0].text).toBe('ok');
+    expect(resultText(await pending)).toBe('ok');
   });
 
   it('tells the agent to open the folder when no window holds the lease', async () => {
@@ -272,8 +273,8 @@ describe('one folder: the lease', () => {
     await server.start();
     const result = await projectStatus(server);
     expect(result.isError).toBeUndefined();
-    expect(result.content[0].text).toContain(projectDir);
-    expect(result.content[0].text).toMatch(/not open on this project/);
+    expect(resultText(result)).toContain(projectDir);
+    expect(resultText(result)).toMatch(/not open on this project/);
   });
 });
 

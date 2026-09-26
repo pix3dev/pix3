@@ -228,6 +228,11 @@ export interface CoauthoringState {
   /** An external change arrived during play mode: the editor graph is behind the disk. */
   stale: boolean;
   /**
+   * `{ path: sha256 }` the running game was verified against by the agent channel's sync barrier
+   * (`WorkspaceAgentToolBridge`), or null when play was not started through it. Cleared on stop.
+   */
+  playRevision: Record<string, string> | null;
+  /**
    * Merge outcomes that need the human (plan §4.3 conflict banner), keyed by project path:
    * `conflicts` — the merge kept human values over the agent's; `rejected` — the agent's version
    * could not be merged and the last good graph stays until the human decides.
@@ -266,6 +271,7 @@ export const createInitialCoauthoringState = (): CoauthoringState => ({
   pendingExternalPaths: [],
   unreadablePaths: [],
   stale: false,
+  playRevision: null,
   merges: {},
   recentlyChangedNodeIds: [],
   editBlockedAt: null,

@@ -183,6 +183,54 @@ describe('WorkspaceEventsClient', () => {
     );
   });
 
+  it('hands MCP calls to onCall and answers with its result while holding the lease', async () => {
+    let finish: (value: { content: Array<{ type: 'text'; text: string }> }) => void = () => {};
+    const onCall = vi.fn(
+      () =>
+        new Promise<{ content: Array<{ type: 'text'; text: string }> }>(resolve => {
+          finish = resolve;
+        })
+    );
+    const socket = connect({ onCall });
+    socket.receive(hello());
+    socket.receive({ type: 'lease', state: 'granted', leaseId: 'L1', resumed: false });
+    socket.receive({
+      type: 'call',
+      id: 'c2',
+      name: 'play_status',
+      input: {},
+      agent: { name: 'claude-code', session: 's', verified: false },
+    });
+    expect(onCall).toHaveBeenCalledWith(expect.objectContaining({ id: 'c2', name: 'play_status' }));
+    expect(socket.sent.some(frame => frame.type === 'call-result')).toBe(false);
+    finish({ content: [{ type: 'text', text: '{"isPlaying":false}' }] });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(socket.sent.at(-1)).toEqual({
+      type: 'call-result',
+      id: 'c2',
+      result: { content: [{ type: 'text', text: '{"isPlaying":false}' }] },
+    });
+  });
+
+  it('drops the answer of a call when the lease was lost meanwhile', async () => {
+    let finish: (value: { content: Array<{ type: 'text'; text: string }> }) => void = () => {};
+    const socket = connect({
+      onCall: () =>
+        new Promise(resolve => {
+          finish = resolve;
+        }),
+    });
+    socket.receive(hello());
+    socket.receive({ type: 'lease', state: 'granted', leaseId: 'L1', resumed: false });
+    socket.receive({ type: 'call', id: 'c3', name: 'play_status', input: {} });
+    socket.receive({ type: 'lease', state: 'lost', reason: 'taken_over', leaseId: 'L1' });
+    finish({ content: [{ type: 'text', text: 'late' }] });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(socket.sent.some(frame => frame.type === 'call-result')).toBe(false);
+  });
+
   it('answers MCP calls with an isError "not implemented" result', () => {
     const socket = connect();
     socket.receive(hello());

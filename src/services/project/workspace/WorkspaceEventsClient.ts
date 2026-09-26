@@ -2,6 +2,7 @@ import {
   WorkspaceError,
   toEventsUrl,
   type WorkspaceCallFrame,
+  type WorkspaceCallResult,
   type WorkspaceChangeFrame,
   type WorkspaceHelloFrame,
   type WorkspaceLeaseFrame,
@@ -37,7 +38,12 @@ export interface WorkspaceEventsHandlers {
    * so the caller must re-scan `/ws/manifest`.
    */
   onRescanNeeded?(hello: WorkspaceHelloFrame): void;
-  onCall?(frame: WorkspaceCallFrame): void;
+  /**
+   * An MCP call for the lease holder. Return the result (it is sent as `call-result` on whatever
+   * socket is current when it settles, if this client still holds the lease), or null to have
+   * the call answered "not served by this editor".
+   */
+  onCall?(frame: WorkspaceCallFrame): Promise<WorkspaceCallResult> | null;
   onConnectionState?(state: WorkspaceEventsConnectionState, error?: WorkspaceError): void;
 }
 
@@ -396,26 +402,47 @@ export class WorkspaceEventsClient {
     });
   }
 
-  /** MCP calls are not served by the editor yet: answer them so the agent is not left hanging. */
+  /**
+   * Hand an MCP call to {@link WorkspaceEventsHandlers.onCall}; the answer goes back on the socket
+   * that is current when it settles (a reconnect in between is fine: the server resumes the lease
+   * and matches the id). Without a handler the call is answered at once, so the agent is not left
+   * hanging.
+   */
   private handleCall(socket: WorkspaceSocketLike, frame: WorkspaceCallFrame): void {
-    console.info('[WorkspaceEventsClient] MCP call received (not implemented yet)', {
-      id: frame.id,
-      name: frame.name,
-    });
-    this.handlers.onCall?.(frame);
-    this.sendOn(socket, {
-      type: 'call-result',
-      id: frame.id,
-      result: {
-        content: [
-          {
-            type: 'text',
-            text: `Pix3 editor: tool "${frame.name}" is not implemented over the workspace channel yet.`,
-          },
-        ],
-        isError: true,
-      },
-    });
+    const pending = this.handlers.onCall?.(frame) ?? null;
+    if (!pending) {
+      this.sendOn(socket, {
+        type: 'call-result',
+        id: frame.id,
+        result: {
+          content: [
+            {
+              type: 'text',
+              text: `Pix3 editor: tool "${frame.name}" is not served over the workspace channel.`,
+            },
+          ],
+          isError: true,
+        },
+      });
+      return;
+    }
+    void pending.then(
+      result => this.sendCallResult(frame.id, result),
+      (error: unknown) =>
+        this.sendCallResult(frame.id, {
+          content: [{ type: 'text', text: error instanceof Error ? error.message : String(error) }],
+          isError: true,
+        })
+    );
+  }
+
+  private sendCallResult(id: string, result: WorkspaceCallResult): void {
+    // Lost the lease meanwhile: the server re-queues the call for the new holder (takeover) or
+    // failed it already; an answer from here would only be refused (`not_lease_holder`).
+    if (this.stopped || this.leaseId === null) {
+      return;
+    }
+    this.send({ type: 'call-result', id, result });
   }
 
   private handleErrorFrame(code: string, message?: string, retryAfter?: number): void {

@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
 
 import { findProjectRoot, readProjectId } from './manifest.ts';
+import { mcpConfigStep, mcpLaunch, renderMcpConfig, setupInstructions } from './mcp-config.ts';
+import { CLI_VERSION } from './version.ts';
 import { createProject, type PostCreateStep } from './new-project.ts';
 import { listTemplates, oneLine, resolveTemplate, resolveTemplatesRoot } from './templates.ts';
 
@@ -141,5 +143,66 @@ describe('pix3 new', () => {
     createProject({ template, dir });
     expect(findProjectRoot(join(dir, 'scenes'))).toBe(dir);
     expect(findProjectRoot(root)).toBeNull();
+  });
+});
+
+describe('MCP configuration', () => {
+  it('pix3 new writes .mcp.json pinned to this CLI version', () => {
+    const template = listTemplates()[0];
+    const dir = join(root, 'pinned');
+    const project = createProject({
+      template,
+      dir,
+      postCreateSteps: [mcpConfigStep({ dev: false })],
+    });
+    expect(project.files).toContain('.mcp.json');
+    expect(JSON.parse(readFileSync(join(dir, '.mcp.json'), 'utf8'))).toEqual({
+      mcpServers: {
+        pix3: {
+          command: 'npx',
+          args: ['-y', `@pix3/cli@${CLI_VERSION}`, 'mcp', '--workspace'],
+        },
+      },
+    });
+    expect(CLI_VERSION).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  it('writes .mcp.json by default, and points a repo checkout at the sources', () => {
+    const template = listTemplates()[0];
+    const dir = join(root, 'default');
+    const project = createProject({ template, dir });
+    expect(project.files).toContain('.mcp.json');
+    const dev = mcpLaunch({ dev: true });
+    expect(dev.command).toBe('node');
+    expect(dev.args[0]).toMatch(/packages[\\/]pix3-cli[\\/]src[\\/]index\.ts$/);
+    expect(dev.args.slice(1)).toEqual(['mcp', '--workspace']);
+  });
+
+  it('keeps other servers of an existing .mcp.json', () => {
+    const merged = JSON.parse(
+      renderMcpConfig(mcpLaunch({ dev: false }), '{"mcpServers":{"other":{"command":"x"}}}')
+    ) as { mcpServers: Record<string, unknown> };
+    expect(Object.keys(merged.mcpServers).sort()).toEqual(['other', 'pix3']);
+  });
+
+  it('pix3 setup prints the claude and codex registrations, pinned', () => {
+    const claude = setupInstructions('claude', '/work/my game', { dev: false });
+    expect(claude).toContain(
+      `claude mcp add pix3 -- npx -y @pix3/cli@${CLI_VERSION} mcp --workspace`
+    );
+    expect(claude).toContain("cd '/work/my game'");
+    expect(claude).not.toContain('mcp_servers');
+
+    const codex = setupInstructions('codex', '/work/game', { dev: false });
+    expect(codex).toContain('[mcp_servers.pix3]');
+    expect(codex).toContain('command = "npx"');
+    expect(codex).toContain(
+      `args = ["-y", "@pix3/cli@${CLI_VERSION}", "mcp", "--workspace", "--project", "/work/game"]`
+    );
+    expect(codex).not.toContain('claude mcp add');
+
+    const both = setupInstructions(null, '/work/game', { dev: false });
+    expect(both).toContain('claude mcp add');
+    expect(both).toContain('[mcp_servers.pix3]');
   });
 });

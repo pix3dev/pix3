@@ -918,3 +918,36 @@ merge-log, живой жест в окне-не-владельце двигае�
 Остаётся по плану: фаза 1 — `pix3 check` (tsc, типы в `.pix3/types/`), `kit`/генерация из
 источников, вход «Работать со своим агентом», бандл CLI; фаза 3 — `pix3 mcp --workspace` с барьером
 §5 D и подтверждением `generate_*`; замеры таймингов и прогон живых агентов по `TRIAL-PROTOCOL.md`.
+
+### 11.6 Состояние на 2026-09-26 — фаза 3, живой канал поверх workspace
+
+Сделано (не закоммичено, живой прогон не проходил): `pix3 mcp --workspace` — stdio MCP-сервер без
+своего порта, находит `pix3 serve` через `.pix3/workspace.json` + пробу `/ws/agent/status` с
+control-секретом, без сервера отвечает `no_workspace_server` и подхватывает сервер на следующем
+вызове (`packages/pix3-cli/src/mcp-workspace.ts`, `workspace-agent/`). Серверный agent lane
+`/ws/agent/{status,tools,call,hash,expect,changes}` + `GET /ws/revision`: только control-секрет,
+bearer и любой `Origin` отклоняются; `409 no_editor` сразу без окна, `504 no_editor_reply`,
+`409 lease_lost`; `expect` отвечает `recovery` (хеш каждого снимка журнала этого пути) и `mergeLog`;
+кольцо 5000 изменений путей по `seq` (внешние и через API) для `changedDuringRun`. Инструменты v1 —
+ровно 14, схемы из окна (`tools_manifest`) со статическим fallback, `expect` у трёх барьерных.
+Барьер §5 D — в MCP-процессе, ответ `{revision, matchesAgent, matchesDisk, changedDuringRun,
+editorChangedSinceAgentWrite, result}`, коды ровно `disk_differs_from_agent`, `sync_timeout`,
+`load_failed`, `pending_external`, `no_editor`, `permission_denied`, `no_workspace_server`.
+Редактор: `WorkspaceAgentToolBridge` (allowlist + `sync_barrier`/`sync_release`/`tools_manifest`,
+выполнение через `AgentToolRegistry.execute`, `__images` → image-блоки, `_meta.pix3 = {playRevision,
+stale}` у наблюдающих, повторно доставленный id отвечается один раз), `AutosaveService.hold`,
+`ProjectSyncService.builtScriptHashes` (и проверка скриптов против сборки теперь и для workspace),
+`ProjectScriptLoaderService.getLastBuildError`, `coauthoring.playRevision`; разрешение `generate_*`
+на подключение (serverSession + lease + процесс `pix3 mcp`), 60 с, лимит 20, отзыв; пилюля
+«Agent: …» в статус-баре с отключением канала. `pix3 new` пишет закреплённый `.mcp.json`, `pix3
+setup [claude|codex]` печатает регистрацию; из checkout репозитория (или `PIX3_CLI_DEV=1`) —
+`node <repo>/packages/pix3-cli/src/index.ts mcp --workspace`.
+
+Отклонения и открытые решения: `editorChangedSinceAgentWrite` — пути `expect`, которые merge-log
+после прогона показывает записанными редактором (любое расхождение `expect` до старта — ошибка
+`disk_differs_from_agent`, как в шаге 1 §5 D); `loaded` — открытые сцены и исходники последней
+сборки, префабы/ассеты, которые игра читает лениво, не сверяются до старта (ловятся только в
+`changedDuringRun`); `game_run` через канал сам стартует play (барьер его останавливает);
+«Журнал на стороне диска» (сервер сам кладёт версии агента в `.pix3/recovery/`) не сделан; `kit
+--update` для MCP-конфигурации не существует (нет `kit`). Не проверено: живой прогон с Claude
+Code/Codex, «20 из 20» из «Готово, когда».

@@ -7,15 +7,16 @@ import {
   createProjectId,
   renderManifest,
 } from './manifest.ts';
+import { mcpConfigStep } from './mcp-config.ts';
 import type { TemplateInfo } from './templates.ts';
 import { CLI_VERSION } from './version.ts';
 
 /**
  * `pix3 new <recipe> [dir]` — the file-level equivalent of the editor's
  * `ProjectService.applyTemplateFiles`: same base directories, same `{{PROJECT_NAME}}`
- * substitution, same manifest, same `.pix3/template.json`. What it deliberately does NOT write yet
- * is the agent kit (`AGENTS.md`, `.claude/skills/…`, types, MCP config) — that is phase 1 and
- * plugs in through {@link PostCreateStep}.
+ * substitution, same manifest, same `.pix3/template.json`, plus the pinned MCP config
+ * (`.mcp.json`). What it deliberately does NOT write yet is the agent kit (`AGENTS.md`,
+ * `.claude/skills/…`, types) — that is phase 1 and plugs in through {@link PostCreateStep}.
  */
 
 /** The editor's flat base layout plus its companion folders (`design`, `references`). */
@@ -40,8 +41,11 @@ export interface CreatedProject {
  */
 export type PostCreateStep = (project: CreatedProject) => string[];
 
-/** Phase 0 ships none. Phase 1 appends `installAgentKit` here. */
-export const DEFAULT_POST_CREATE_STEPS: readonly PostCreateStep[] = [];
+/**
+ * The project-scoped MCP config (`.mcp.json`, pinned CLI version — plan §5 A). Phase 1 appends
+ * `installAgentKit` here.
+ */
+export const DEFAULT_POST_CREATE_STEPS: readonly PostCreateStep[] = [mcpConfigStep()];
 
 export interface CreateProjectOptions {
   readonly template: TemplateInfo;

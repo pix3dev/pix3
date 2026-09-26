@@ -86,6 +86,9 @@ export class ProjectScriptLoaderService {
   /** Project id the last build ran for — `scriptsStatus` alone cannot tell a stale ready apart. */
   private lastBuiltProjectId: string | null = null;
 
+  /** Why the last build failed (null after a successful one) — the sync barrier reports it. */
+  private lastBuildError: { file: string | null; line?: number; message: string } | null = null;
+
   // Enable auto-compilation
   enableAutoCompilation = true;
 
@@ -156,6 +159,11 @@ export class ProjectScriptLoaderService {
     return this.lastCollectedFiles;
   }
 
+  /** The error of the most recent build, or null when it compiled (or has not run). */
+  getLastBuildError(): { file: string | null; line?: number; message: string } | null {
+    return this.lastBuildError;
+  }
+
   async ensureReady(): Promise<void> {
     if (appState.project.status !== 'ready') {
       return;
@@ -212,6 +220,7 @@ export class ProjectScriptLoaderService {
     try {
       appState.project.scriptsStatus = 'loading';
       this.lastBuiltProjectId = appState.project.id;
+      this.lastBuildError = null;
       this.logger.info('Compiling project scripts...');
 
       // Step 1: List all .ts files in supported script directories
@@ -296,10 +305,13 @@ export class ProjectScriptLoaderService {
           async (filePath, context) => this.loadBundledDependency(filePath, context)
         );
       } catch (error) {
-        const userError = this.handleCompilationError(
-          error as CompilationError,
-          checkedDirectories
-        );
+        const compilation = error as CompilationError;
+        this.lastBuildError = {
+          file: compilation.file ?? null,
+          ...(typeof compilation.line === 'number' ? { line: compilation.line } : {}),
+          message: compilation.message ?? String(error),
+        };
+        const userError = this.handleCompilationError(compilation, checkedDirectories);
         appState.project.errorMessage = userError;
         appState.project.scriptsStatus = 'error';
         return;
@@ -322,6 +334,10 @@ export class ProjectScriptLoaderService {
       this.logger.info(`✓ Scripts compiled and loaded successfully`);
     } catch (error) {
       appState.project.scriptsStatus = 'error';
+      this.lastBuildError = {
+        file: null,
+        message: error instanceof Error ? error.message : String(error),
+      };
       this.logger.error('Failed to compile scripts', error);
     }
   }

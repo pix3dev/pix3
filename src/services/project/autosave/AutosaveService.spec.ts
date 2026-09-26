@@ -80,6 +80,31 @@ afterEach(() => {
 });
 
 describe('AutosaveService', () => {
+  it('an explicit hold (the agent sync barrier) keeps edits back until the last release', async () => {
+    const h = createHarness();
+    h.service.initialize();
+    const releaseA = h.service.hold('agent run');
+    const releaseB = h.service.hold('agent run 2');
+    expect(h.service.isHeld()).toBe(true);
+    expect(appState.project.coauthoring.autosaveStatus).toBe('held');
+
+    h.edit();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS * 3);
+    expect(h.invoke).not.toHaveBeenCalled();
+    expect(appState.project.coauthoring.autosaveStatus).toBe('held');
+
+    releaseA();
+    releaseA(); // twice is harmless
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS * 2);
+    expect(h.invoke).not.toHaveBeenCalled();
+
+    releaseB();
+    await vi.advanceTimersByTimeAsync(AUTOSAVE_DEBOUNCE_MS + 50);
+    expect(h.invoke).toHaveBeenCalledTimes(1);
+    expect(appState.project.coauthoring.autosaveStatus).toBe('saved');
+    h.service.dispose();
+  });
+
   it('saves a dirty scene ~1 s after the last committed operation (debounced)', async () => {
     const h = createHarness();
     h.service.initialize();

@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket } from 'ws';
 
+import { resultText } from '../call-relay.ts';
 import { LinkServer } from '../link-server.ts';
 import { WORKSPACE_PROTOCOL } from '../protocol.ts';
 import { openWorkspace } from './open-workspace.ts';
@@ -978,6 +979,183 @@ describe('lease', () => {
       id: redelivered.id,
       result: { content: [{ type: 'text', text: 'b' }] },
     });
-    expect((await pending).content[0].text).toBe('b');
+    expect(resultText(await pending)).toBe('b');
+  });
+});
+
+describe('agent lane (/ws/agent/*)', () => {
+  const agentCall = async (
+    base: string,
+    server: WorkspaceServer,
+    method: string,
+    path: string,
+    body?: unknown,
+    headers: Record<string, string> = {}
+  ): Promise<Reply> =>
+    call(`${base}${path}`, {
+      method,
+      auth: null,
+      headers: {
+        'x-pix3-control': server.controlSecret,
+        ...(body !== undefined ? { 'content-type': 'application/json' } : {}),
+        ...headers,
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+
+  it('takes the control secret, refuses the bearer token and any Origin', async () => {
+    const { server, base } = await startServer();
+    const ok = await agentCall(base, server, 'GET', '/ws/agent/status');
+    expect(ok.status).toBe(200);
+    expect(ok.json).toMatchObject({ serverSession: server.serverSession, holder: null });
+
+    const bearer = await call(`${base}/ws/agent/status`);
+    expect(bearer.status).toBe(401);
+    expect(bearer.json.error).toBe('unauthorized');
+
+    const browser = await agentCall(base, server, 'GET', '/ws/agent/status', undefined, {
+      origin: 'http://localhost:8123',
+    });
+    expect(browser.status).toBe(403);
+    expect(browser.json.error).toBe('forbidden_origin');
+
+    const revision = await call(`${base}/ws/revision`, {
+      auth: null,
+      headers: { 'x-pix3-control': server.controlSecret },
+    });
+    expect(revision.json).toMatchObject({ revision: server.revision(), seq: server.currentSeq });
+  });
+
+  it('answers 409 no_editor with what to open when no window holds the lease', async () => {
+    const { server, base } = await startServer();
+    const reply = await agentCall(base, server, 'POST', '/ws/agent/call', {
+      name: 'play_status',
+      input: {},
+    });
+    expect(reply.status).toBe(409);
+    expect(reply.json.error).toBe('no_editor');
+    expect(String(reply.json.message)).toContain(root);
+  });
+
+  it('relays a call to the lease holder with the agent identity, images included', async () => {
+    const { server, base, port } = await startServer();
+    const window = await authed(port);
+    window.send({ type: 'lease', action: 'acquire' });
+    await window.next(frame => frame.type === 'lease');
+    const pending = agentCall(base, server, 'POST', '/ws/agent/call', {
+      name: 'viewport_screenshot',
+      input: { maxSize: 64 },
+      agent: { name: 'claude-code', session: 'mcp-1' },
+    });
+    const delivered = await window.next(frame => frame.type === 'call');
+    expect(delivered).toMatchObject({
+      name: 'viewport_screenshot',
+      input: { maxSize: 64 },
+      agent: { name: 'claude-code', session: 'mcp-1', verified: false },
+    });
+    window.send({
+      type: 'call-result',
+      id: delivered.id,
+      result: {
+        content: [
+          { type: 'text', text: '{"ok":true}' },
+          { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+        ],
+        _meta: { pix3: { stale: false } },
+      },
+    });
+    const reply = await pending;
+    expect(reply.status).toBe(200);
+    expect(reply.json.result).toEqual({
+      content: [
+        { type: 'text', text: '{"ok":true}' },
+        { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+      ],
+      _meta: { pix3: { stale: false } },
+    });
+  });
+
+  it('answers 504 no_editor_reply when the holder does not answer in time', async () => {
+    const { server, base, port } = await startServer();
+    const window = await authed(port);
+    window.send({ type: 'lease', action: 'acquire' });
+    await window.next(frame => frame.type === 'lease');
+    const reply = await agentCall(base, server, 'POST', '/ws/agent/call', {
+      name: 'play_status',
+      input: {},
+      timeoutMs: 1_000,
+    });
+    expect(reply.status).toBe(504);
+    expect(reply.json.error).toBe('no_editor_reply');
+  });
+
+  it('compares expectations with the disk and names the recovery copy and merge-log hints', async () => {
+    const { server, base } = await startServer();
+    const agentVersion = 'root: [agent]\n';
+    write('scenes/main.pix3scene', 'root: [human]\n');
+    write('scenes/other.pix3scene', 'root: [editor]\n');
+    write('scenes/same.pix3scene', 'root: []\n');
+    // The editor journaled the agent's version of main before overwriting it.
+    write(
+      `.pix3/recovery/${encodeURIComponent('scenes/main.pix3scene')}/2026-09-26T12-00-00-000Z-${sha(agentVersion).slice(0, 8)}.pix3scene`,
+      agentVersion
+    );
+    // …and merged other (the merge log names the hash it wrote).
+    write(
+      '.pix3/merge-log.jsonl',
+      JSON.stringify({
+        at: '2020-01-01T00:00:00.000Z',
+        file: 'scenes/other.pix3scene',
+        event: 'merge',
+        mergedHash: sha('root: [editor]\n'),
+      }) + '\n'
+    );
+    const reply = await agentCall(base, server, 'POST', '/ws/agent/expect', {
+      expect: {
+        'scenes/main.pix3scene': sha(agentVersion),
+        'scenes/other.pix3scene': sha('root: [agent-other]\n'),
+        'scenes/gone.pix3scene': sha('x'),
+        'scenes/same.pix3scene': sha('root: []\n'),
+      },
+    });
+    expect(reply.status).toBe(200);
+    expect(reply.json.matchesAgent).toBe(false);
+    const differing = reply.json.differing as Array<Record<string, unknown>>;
+    const byPath = new Map(differing.map(diff => [diff.path, diff]));
+    expect(byPath.size).toBe(3);
+    expect(byPath.get('scenes/main.pix3scene')).toMatchObject({
+      diskHash: sha('root: [human]\n'),
+      agentHash: sha(agentVersion),
+      recovery: expect.stringMatching(
+        /^\.pix3\/recovery\/scenes%2Fmain\.pix3scene\/.+\.pix3scene$/
+      ),
+    });
+    expect(byPath.get('scenes/main.pix3scene')?.mergeLog).toBeUndefined();
+    expect(byPath.get('scenes/other.pix3scene')).toMatchObject({ recovery: null, mergeLog: true });
+    expect(byPath.get('scenes/gone.pix3scene')).toMatchObject({ diskHash: null, recovery: null });
+
+    const clean = await agentCall(base, server, 'POST', '/ws/agent/expect', {
+      expect: { 'scenes/same.pix3scene': sha('root: []\n') },
+    });
+    expect(clean.json).toMatchObject({ matchesAgent: true, differing: [] });
+  });
+
+  it('lists paths changed since a seq — external writes and API writes alike', async () => {
+    const { server, base } = await startServer();
+    const start = server.currentSeq;
+    const none = await agentCall(base, server, 'GET', `/ws/agent/changes?since=${start}`);
+    expect(none.json).toMatchObject({ paths: [], complete: true });
+
+    write('scripts/player.ts', 'export {};\n');
+    await put(base, 'scenes/main.pix3scene', 'root: [1]\n');
+    // No wait for the watcher: the route reconciles with a scan first.
+    const reply = await agentCall(base, server, 'GET', `/ws/agent/changes?since=${start}`);
+    expect(reply.status).toBe(200);
+    expect(reply.json.paths).toEqual(
+      expect.arrayContaining(['scenes/main.pix3scene', 'scripts/player.ts'])
+    );
+    expect(reply.json.complete).toBe(true);
+    const after = await agentCall(base, server, 'GET', `/ws/agent/changes?since=${reply.json.seq}`);
+    expect(after.json.paths).toEqual([]);
   });
 });

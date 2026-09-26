@@ -9,6 +9,7 @@ import { CommandRegistry } from '@/services/core/CommandRegistry';
 import { KeybindingService } from '@/services/editor/KeybindingService';
 import { FileWatchService } from '@/services/project/FileWatchService';
 import { AutosaveService } from '@/services/project/autosave/AutosaveService';
+import { WorkspaceAgentToolBridge } from '@/services/project/workspace/WorkspaceAgentToolBridge';
 import { ProtectedSetService } from '@/services/project/coauthoring/ProtectedSetService';
 import { ProjectOwnershipService } from '@/services/project/coauthoring/ProjectOwnershipService';
 import { ExternalMergeService } from '@/services/project/coauthoring/ExternalMergeService';
@@ -315,6 +316,9 @@ export class Pix3EditorShell extends ComponentBase {
 
   @inject(AutosaveService)
   private readonly autosave!: AutosaveService;
+
+  @inject(WorkspaceAgentToolBridge)
+  private readonly workspaceAgentBridge!: WorkspaceAgentToolBridge;
 
   @inject(ExternalChangeService)
   private readonly externalChanges!: ExternalChangeService;
@@ -749,6 +753,8 @@ export class Pix3EditorShell extends ComponentBase {
     this.protectedSets.initialize();
     this.autosave.initialize();
     this.agentAcks.initialize();
+    // The live agent channel (`pix3 mcp --workspace` → `pix3 serve` → this window).
+    this.workspaceAgentBridge.initialize();
     // Hand-over to another window: flush pending writes and persist `P` before letting go.
     this.disposeOwnershipReleaseHook = this.projectOwnership.registerReleaseHook(async () => {
       await this.autosave.handOver();
