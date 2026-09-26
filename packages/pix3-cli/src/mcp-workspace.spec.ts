@@ -239,6 +239,7 @@ describe('pix3 mcp --workspace', () => {
       matchesAgent: true,
       matchesDisk: true,
       changedDuringRun: [],
+      editorWroteDuringRun: [],
       editorChangedSinceAgentWrite: [],
       result: { verdict: 'PASS frame 12' },
     });
@@ -321,6 +322,43 @@ describe('pix3 mcp --workspace', () => {
     expect(reply.body.changedDuringRun).toEqual(
       expect.arrayContaining(['scenes/main.pix3scene', 'scripts/new.ts'])
     );
+  }, 20_000);
+
+  it('the editor’s own writes during the run are editorWroteDuringRun, not changedDuringRun', async () => {
+    const server = await startServer();
+    const scene = 'root: []\n';
+    await openWindow(
+      server,
+      barrierWindow(
+        () => ({ 'scenes/main.pix3scene': sha(scene) }),
+        async name => {
+          if (name === 'game_run') {
+            // The editor writes its run report through the workspace API (ProjectTraceStore)…
+            const response = await fetch(
+              `http://127.0.0.1:${server.port}/ws/file?path=${encodeURIComponent('design/tests/reports/0001-run-error-f0.json')}`,
+              {
+                method: 'PUT',
+                headers: { authorization: `Bearer ${token}`, 'x-mutation-id': 'm-run-report' },
+                body: '{"verdict":"PASS"}\n',
+              }
+            );
+            expect(response.status).toBe(200);
+            // …while someone else writes a file on disk.
+            write('scripts/agent.ts', 'export {};\n');
+          }
+          return textResult({ verdict: 'PASS' });
+        }
+      )
+    );
+    const client = await startMcp();
+    const reply = await callTool(client, 'game_run', { until: [{ kind: 'frames', n: 1 }] });
+    expect(reply.isError).toBe(false);
+    expect(reply.body.matchesDisk).toBe(true);
+    expect(reply.body.changedDuringRun).toEqual(['scripts/agent.ts']);
+    // Files only: no `design/tests/reports` directory entry anywhere.
+    expect(reply.body.editorWroteDuringRun).toEqual([
+      'design/tests/reports/0001-run-error-f0.json',
+    ]);
   }, 20_000);
 
   it('sync_timeout when the editor keeps reporting another version than the disk', async () => {

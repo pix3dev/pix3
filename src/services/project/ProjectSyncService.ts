@@ -140,7 +140,12 @@ export class ProjectSyncService {
       try {
         const version = await readDiskVersion(this.storage, path);
         if (!version) continue;
-        if (!this.diskState.isKnownHash(path, version.hash)) {
+        // A pending path is re-read even when its disk hash is the known one: a broken version
+        // put back to exactly the editor's bytes must clear the pending/unreadable state.
+        if (
+          !this.diskState.isKnownHash(path, version.hash) ||
+          this.externalChanges.isPending(path)
+        ) {
           this.externalChanges.report(path);
         }
       } catch (error) {

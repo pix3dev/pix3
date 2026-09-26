@@ -309,7 +309,7 @@ The browser's bearer token is refused (`401 unauthorized`), and so is any reques
 | `POST /ws/agent/call` `{ name, input, timeoutMs?, agent? }` | Parks the call for the lease holder and answers when it replies: `200 { result }` (the window's result as is, error results included). `timeoutMs` is clamped to 1–120 s (default 120 s). `409 no_editor` at once when no window holds the lease (message: open `<root>` in Pix3 — File → Connect to Workspace…); `504 no_editor_reply` when it does not answer in time; `409 lease_lost` when the lease ended under the call (on a takeover the call goes to the new holder instead); `429 too_many_calls`. `agent` → the `call` frame's `agent`. |
 | `POST /ws/agent/hash` `{ paths }` | Same as `POST /ws/hash`. |
 | `POST /ws/agent/expect` `{ expect: { path: sha256 } }` | The agent's expectations against the disk **now**: `{ matchesAgent, differing: [{ path, diskHash \| null, agentHash, recovery, mergeLog? }], hashes, seq }`. `recovery` = the wire path of a file under `.pix3/recovery/<encodeURIComponent(path)>/` whose bytes hash to `agentHash` (every journaled version of that path is hashed), else `null` — a copy is named only when it exists. `mergeLog: true` when `.pix3/merge-log.jsonl` has a line for that path whose `mergedHash`/`hash` is the disk hash, or one no older than the file's mtime minus 5 s — the editor wrote those bytes. |
-| `GET /ws/agent/changes?since=<seq>` | Rescans the whole revision set first (the watcher may have missed a write; differences go out as a `change` frame), then `{ since, seq, revision, paths, complete }`: distinct revision-set paths changed after `since` — external writes and writes through the file API alike (`.pix3/` never). The server keeps the last 5 000 path changes; `complete: false` = the ring no longer reaches back to `since`, so an empty list proves nothing. |
+| `GET /ws/agent/changes?since=<seq>` | Rescans the whole revision set first (the watcher may have missed a write; differences go out as a `change` frame), then `{ since, seq, revision, paths, complete, entries }`: `paths` = distinct revision-set **files** changed after `since` — external writes and writes through the file API alike (`.pix3/` never, directories never); `entries` = one `{ seq, path, origin }` per recorded change, `origin` = `external` (seen by the watcher or this rescan) or `editor` (a mutation through the file API, i.e. the editor window). The server keeps the last 5 000 file changes; `complete: false` = the ring no longer reaches back to `since`, so an empty list proves nothing. |
 
 ## `pix3 mcp --workspace` — the live channel
 
@@ -347,7 +347,8 @@ raw bytes of every file the agent wrote.
    a start) and the hold is released (`sync_release`) after the run.
 3. **After the run** (for `game_run` when it finished; for `play_start` / `play_restart` right
    after the start was acknowledged) the verified files are hashed again and
-   `/ws/agent/changes?since=<seq of the verification>` is read: `changedDuringRun`.
+   `/ws/agent/changes?since=<seq of the verification>` is read: `changedDuringRun` and
+   `editorWroteDuringRun`.
 
 The answer of a barrier tool:
 
@@ -357,15 +358,20 @@ The answer of a barrier tool:
   "matchesAgent": true,
   "matchesDisk": true,
   "changedDuringRun": [],
+  "editorWroteDuringRun": [],
   "editorChangedSinceAgentWrite": [],
   "result": { "…": "the editor tool's own result" }
 }
 ```
 
 `matchesAgent` is `null` (with `agentExpectations: "none"`) without `expect`; `matchesDisk` is
-whether every verified hash still matched the disk at the final check; `changedDuringRun` is every
-path whose hash moved between the two checks plus every path the server saw change meanwhile
-(`changeLogIncomplete: true` when its ring did not reach back); `editorChangedSinceAgentWrite` is
+whether every verified hash still matched the disk at the final check; `changedDuringRun` is what
+the barrier did not verify: every file changed meanwhile by someone other than the editor, plus
+every verified file whose hash moved between the two checks with no editor write on record
+(`changeLogIncomplete: true` when the server's ring did not reach back); `editorWroteDuringRun` is
+every file whose only changes since the verification are the editor's own writes through the file
+API (e.g. a run report under `design/tests/reports/`) — known to the server, so not a
+detection. Both list files only, never directories; `editorChangedSinceAgentWrite` is
 the `expect` paths the merge log says the editor wrote after the check. **A green answer without
 marks means: at start disk = agent's expectations = verified version; at the final check the
 verified hashes match disk; detected changes are listed.** It does not mean the disk did not change

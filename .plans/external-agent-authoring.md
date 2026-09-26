@@ -951,3 +951,20 @@ setup [claude|codex]` печатает регистрацию; из checkout р�
 «Журнал на стороне диска» (сервер сам кладёт версии агента в `.pix3/recovery/`) не сделан; `kit
 --update` для MCP-конфигурации не существует (нет `kit`). Не проверено: живой прогон с Claude
 Code/Codex, «20 из 20» из «Готово, когда».
+
+### 11.7 Живая приёмка канала MCP (2026-09-26, координатор через CDP)
+
+Прогнано на реальном `pix3 serve`, редакторе в Chrome пользователя (обратный туннель 9222) и
+`pix3 mcp --workspace` через MCP-клиент. Прошло: подключение и аренда, `project_status`,
+`play_start` без `expect`, запись агента + `play_restart` с верным `expect` (сцена в `revision`,
+граф обновлён), устаревший `expect` → `disk_differs_from_agent` без ложной копии, `stale: true`
+при правке скрипта во время игры, битый YAML → `pending_external`, полная цепочка «ручная правка →
+автосохранение → устаревшая запись агента → merge + плашка + merge-log → барьер с подсказкой про
+merge-log», промпт `generate_asset` (Deny → `permission_denied`, Allow → вызов идёт).
+Найдено и починено: `game_run` стартовал до `SceneRunner.running` (обрыв на кадре 0); отчёты
+редактора `design/tests/reports/` попадали в `changedDuringRun` — теперь отдельное поле
+`editorWroteDuringRun`, сервер помечает origin каждого изменения; сцена навсегда оставалась
+`pendingExternal` после восстановления битого файла до прежних байтов. Плюс отказ `NaN`/`Infinity`
+в `UpdateObjectPropertyOperation`. Повторный прогон после починки: `game_run` 240 кадров PASS с
+верной классификацией изменений, восстановление снимает pending.
+Следующее: `pix3 check`, kit, бандл CLI, прогон живого Claude Code по `TRIAL-PROTOCOL.md`.

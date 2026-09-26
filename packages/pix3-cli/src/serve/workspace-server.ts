@@ -43,6 +43,7 @@ import {
   mergeLogMentions,
   readMergeLog,
   type ChangeLogEntry,
+  type ChangeOrigin,
 } from './agent-lane.ts';
 import { WorkspaceAuth } from './auth.ts';
 import { contentTypeFor } from './content-type.ts';
@@ -381,10 +382,19 @@ export class WorkspaceServer {
     return this.seq;
   }
 
-  /** Remember which revision-set paths moved at `seq` (`.pix3/` and excluded paths never count). */
-  private logChange(seq: number, paths: readonly string[], source: ChangeLogEntry['source']): void {
-    const relevant = paths.filter(path => path && !isExcludedPath(path));
-    if (relevant.length > 0) this.changeLog.record(seq, relevant, source);
+  /**
+   * Remember which revision-set files moved at `seq` (`.pix3/` and excluded paths never count, nor
+   * do directories — a created/removed directory is only the container of the file changes).
+   */
+  private logChange(seq: number, events: readonly ChangeEvent[], origin: ChangeOrigin): void {
+    const relevant = new Set<string>();
+    for (const event of events) {
+      if (event.kind !== 'file') continue;
+      for (const path of event.from ? [event.path, event.from] : [event.path]) {
+        if (path && !isExcludedPath(path)) relevant.add(path);
+      }
+    }
+    if (relevant.size > 0) this.changeLog.record(seq, relevant, origin);
   }
 
   private syncWatcher(): void {
@@ -407,11 +417,7 @@ export class WorkspaceServer {
   private broadcastChange(events: ChangeEvent[]): void {
     if (events.length === 0) return;
     const seq = this.nextSeq();
-    this.logChange(
-      seq,
-      events.flatMap(event => (event.from ? [event.path, event.from] : [event.path])),
-      'external'
-    );
+    this.logChange(seq, events, 'external');
     this.hub.broadcast({ type: 'change', seq, revision: this.revision(), events });
   }
 
@@ -839,8 +845,15 @@ export class WorkspaceServer {
         this.broadcastChange(await this.rescan(['']));
       });
       const since = Number(raw);
-      const { paths, complete } = this.changeLog.since(since);
-      ok({ since, seq: this.seq, revision: this.revision(), paths, complete });
+      const { paths, complete, entries } = this.changeLog.since(since);
+      ok({
+        since,
+        seq: this.seq,
+        revision: this.revision(),
+        paths,
+        complete,
+        entries: entries.map(({ seq, path, origin }) => ({ seq, path, origin })),
+      });
       return;
     }
     throw new HttpError(404, 'not_found', 'Not found.');
@@ -1223,7 +1236,7 @@ export class WorkspaceServer {
         await this.recordAncestors(wirePath);
         this.recordOwnFile(wirePath, stats, sha256);
         const seq = this.nextSeq();
-        this.logChange(seq, [wirePath], 'api');
+        this.logChange(seq, [{ op: 'modify', path: wirePath, kind: 'file' }], 'editor');
         return { status: 200, body: { path: wirePath, sha256, size, mtime: mtimeOf(stats), seq } };
       });
     } finally {
@@ -1310,9 +1323,9 @@ export class WorkspaceServer {
     if (resolved.kind !== null)
       throw new HttpError(409, 'exists', `${wirePath} exists and is not a directory.`);
     await mkdir(resolved.absolute, { recursive: true });
-    await this.rescan([this.topmostNew(wirePath)]);
+    const events = await this.rescan([this.topmostNew(wirePath)]);
     const seq = this.nextSeq();
-    this.logChange(seq, [wirePath], 'api');
+    this.logChange(seq, events, 'editor');
     return { status: 200, body: { path: wirePath, created: true, seq } };
   }
 
@@ -1348,10 +1361,10 @@ export class WorkspaceServer {
     } else {
       await unlink(resolved.absolute);
     }
-    await this.rescan([wirePath]);
+    const events = await this.rescan([wirePath]);
     await this.refreshAckHash(wirePath);
     const seq = this.nextSeq();
-    this.logChange(seq, [wirePath], 'api');
+    this.logChange(seq, events, 'editor');
     return {
       status: 200,
       body: { path: wirePath, kind: resolved.kind === 'dir' ? 'dir' : 'file', seq },
@@ -1382,11 +1395,11 @@ export class WorkspaceServer {
       }
     }
     await rename(source.absolute, target.absolute);
-    await this.rescan([from, this.topmostNew(to)]);
+    const events = await this.rescan([from, this.topmostNew(to)]);
     await this.refreshAckHash(from, to);
     const moved = this.table.get(to);
     const seq = this.nextSeq();
-    this.logChange(seq, [from, to], 'api');
+    this.logChange(seq, events, 'editor');
     return {
       status: 200,
       body: {

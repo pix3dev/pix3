@@ -3,6 +3,7 @@ import {
   LaneHttpError,
   NoWorkspaceServerError,
   type AgentLaneClient,
+  type ChangesReport,
   type ExpectDiff,
 } from './lane-client.ts';
 import {
@@ -29,8 +30,11 @@ import {
  *    `load_failed`; a file that stays unreadable → `pending_external`; hashes that never agree →
  *    `sync_timeout`.
  * 3. **After the run**, the verified files are hashed again and the server's change log since the
- *    verification is read: `changedDuringRun`. Detection, not proof — `v1 → v2 → v1` between the
- *    two checks is invisible.
+ *    verification is read (files only, never directories): `changedDuringRun` = what the barrier
+ *    could not vouch for — changed by someone other than the editor, or a verified file whose hash
+ *    moved with no editor write on record; `editorWroteDuringRun` = files whose only changes since
+ *    the barrier are the editor's own writes through the file API (run reports, bookkeeping).
+ *    Detection, not proof — `v1 → v2 → v1` between the two checks is invisible.
  *
  * Observing tools do not stop or sync: they report the revision the running game started from and
  * `stale` when the disk moved since.
@@ -396,10 +400,11 @@ export class WorkspaceAgentTools {
       const result = await this.lane.call(name, input);
       const after = await this.lane.hash(Object.keys(verified));
       const changes = await this.lane.changes(verifiedSeq);
-      const changedDuringRun = new Set<string>(changes.paths);
-      for (const [path, hash] of Object.entries(verified)) {
-        if (after.hashes[path] !== hash) changedDuringRun.add(path);
-      }
+      const { changedDuringRun, editorWroteDuringRun } = splitRunChanges(
+        changes,
+        verified,
+        after.hashes
+      );
       const matchesDisk = Object.entries(verified).every(
         ([path, hash]) => after.hashes[path] === hash
       );
@@ -416,7 +421,8 @@ export class WorkspaceAgentTools {
         matchesAgent: expect ? true : null,
         ...(expect ? {} : { agentExpectations: 'none' }),
         matchesDisk,
-        changedDuringRun: [...changedDuringRun].sort(),
+        changedDuringRun,
+        editorWroteDuringRun,
         ...(changes.complete ? {} : { changeLogIncomplete: true }),
         editorChangedSinceAgentWrite,
         result: payload,
@@ -432,6 +438,42 @@ export class WorkspaceAgentTools {
     }
   }
 }
+
+/**
+ * Split the post-run diff (step 3). A path with any external change, or a verified file whose hash
+ * moved without an editor write on record, is `changedDuringRun`; a path whose only recorded
+ * changes are the editor's own is `editorWroteDuringRun`. An older server sends no `entries`:
+ * every path is then external, as before.
+ */
+export const splitRunChanges = (
+  changes: ChangesReport,
+  verified: Readonly<Record<string, string>>,
+  afterHashes: Readonly<Record<string, string | null | undefined>>
+): { changedDuringRun: string[]; editorWroteDuringRun: string[] } => {
+  const origins = new Map<string, Set<'external' | 'editor'>>();
+  const note = (path: string, origin: 'external' | 'editor'): void => {
+    const set = origins.get(path) ?? new Set();
+    set.add(origin);
+    origins.set(path, set);
+  };
+  if (changes.entries) {
+    for (const entry of changes.entries) note(entry.path, entry.origin);
+  } else {
+    for (const path of changes.paths) note(path, 'external');
+  }
+  for (const [path, hash] of Object.entries(verified)) {
+    if (afterHashes[path] !== hash && !origins.get(path)?.has('editor')) note(path, 'external');
+  }
+  const changedDuringRun: string[] = [];
+  const editorWroteDuringRun: string[] = [];
+  for (const [path, set] of origins) {
+    (set.has('external') ? changedDuringRun : editorWroteDuringRun).push(path);
+  }
+  return {
+    changedDuringRun: changedDuringRun.sort(),
+    editorWroteDuringRun: editorWroteDuringRun.sort(),
+  };
+};
 
 const pendingMessage = (pending: readonly SyncError[]): string => {
   const files = pending.map(error => error.file ?? '?').join(', ');

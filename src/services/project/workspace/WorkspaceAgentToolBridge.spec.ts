@@ -17,6 +17,10 @@ import type {
 
 interface FakeHost extends WorkspaceAgentHost {
   playing: boolean;
+  /** Epoch ms at which the runtime reports running; `null` = with play (immediately). */
+  runningAt: number | null;
+  /** Epoch ms at which each executed tool ran. */
+  readonly executedAt: number[];
   readonly executed: Array<{ name: string; args: Record<string, unknown> }>;
   readonly releases: number[];
   results: Record<string, unknown>;
@@ -27,6 +31,8 @@ interface FakeHost extends WorkspaceAgentHost {
 const makeHost = (): FakeHost => {
   const host: FakeHost = {
     playing: false,
+    runningAt: null,
+    executedAt: [],
     executed: [],
     releases: [],
     results: {},
@@ -34,6 +40,7 @@ const makeHost = (): FakeHost => {
     build: null,
     executeTool: vi.fn(async (name: string, args: Record<string, unknown>) => {
       host.executed.push({ name, args });
+      host.executedAt.push(Date.now());
       if (name === 'play_start') host.playing = true;
       return host.results[name] ?? { ok: true };
     }),
@@ -44,7 +51,9 @@ const makeHost = (): FakeHost => {
     stopPlay: vi.fn(async () => {
       host.playing = false;
     }),
-    waitForRuntime: vi.fn(async () => true),
+    isRuntimeRunning: vi.fn(
+      () => host.playing && (host.runningAt === null || Date.now() >= host.runningAt)
+    ),
     holdAutosave: vi.fn(() => {
       const index = host.releases.length;
       host.releases.push(0);
@@ -173,13 +182,76 @@ describe('WorkspaceAgentToolBridge', () => {
     const run = await bridge.handleCall(frame('game_run', { until: [] }), context);
     expect(body(run)).toEqual({ verdict: 'PASS' });
     expect(host.executed.map(e => e.name)).toEqual(['play_start', 'game_run']);
-    expect(host.waitForRuntime).toHaveBeenCalled();
+    expect(host.isRuntimeRunning).toHaveBeenCalled();
     expect(appState.project.coauthoring.playRevision).toEqual(host.loaded);
 
     // play_restart of a stopped game is a start.
     host.playing = false;
     await bridge.handleCall(frame('play_restart'), context);
     expect(host.executed.at(-1)?.name).toBe('play_start');
+  });
+
+  it('game_run waits until the started runtime is actually running before it runs', async () => {
+    await bridge.handleCall(frame('sync_barrier'), context);
+    // play_start returns while the scene is still loading: the runner exists but is not running.
+    const loadMs = 160;
+    host.executeTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      host.executed.push({ name, args });
+      host.executedAt.push(Date.now());
+      if (name === 'play_start') {
+        host.playing = true;
+        host.runningAt = Date.now() + loadMs;
+      }
+      if (name === 'game_run' && Date.now() < (host.runningAt ?? 0)) {
+        return {
+          ok: false,
+          error: 'the runner stopped at frame 0 (the scene is no longer running)',
+        };
+      }
+      return { verdict: 'PASS' };
+    });
+    const run = await bridge.handleCall(frame('game_run', { until: [] }), context);
+    expect(run.isError).toBeUndefined();
+    expect(body(run)).toEqual({ verdict: 'PASS' });
+    expect(host.executed.map(e => e.name)).toEqual(['play_start', 'game_run']);
+    expect(host.executedAt[1]).toBeGreaterThanOrEqual(host.runningAt ?? Infinity);
+
+    // Already playing but mid-restart (a new runner still loading): wait as well.
+    host.runningAt = Date.now() + loadMs;
+    const again = await bridge.handleCall(frame('game_run', { until: [] }), context);
+    expect(again.isError).toBeUndefined();
+    expect(host.executed.map(e => e.name)).toEqual(['play_start', 'game_run', 'game_run']);
+    expect(host.executedAt[2]).toBeGreaterThanOrEqual(host.runningAt ?? Infinity);
+  });
+
+  it('a play_restart substituted by play_start answers only once the runtime is running', async () => {
+    host.executeTool = vi.fn(async (name: string, args: Record<string, unknown>) => {
+      host.executed.push({ name, args });
+      if (name === 'play_start') {
+        host.playing = true;
+        host.runningAt = Date.now() + 120;
+      }
+      return { ok: true };
+    });
+    const restart = await bridge.handleCall(frame('play_restart'), context);
+    expect(restart.isError).toBeUndefined();
+    expect(host.executed.map(e => e.name)).toEqual(['play_start']);
+    expect(Date.now()).toBeGreaterThanOrEqual(host.runningAt ?? Infinity);
+  });
+
+  it('game_run reports load_failed when the runtime never starts running', async () => {
+    vi.useFakeTimers();
+    try {
+      host.runningAt = Number.MAX_SAFE_INTEGER;
+      const pending = bridge.handleCall(frame('game_run', { until: [] }), context);
+      await vi.advanceTimersByTimeAsync(6_000);
+      const run = await pending;
+      expect(run.isError).toBe(true);
+      expect(body(run).error).toBe('load_failed');
+      expect(host.executed.map(e => e.name)).toEqual(['play_start']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('observing tools report the started revision and the stale flag', async () => {

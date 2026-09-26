@@ -63,7 +63,10 @@ interface PendingEntry {
  * 3. **Last good graph.** A scene/prefab version that does not parse is not delivered: the path
  *    stays pending (autosave holds it), retried with backoff; after {@link UNREADABLE_NOTICE_MS}
  *    a non-blocking notice "file not readable: …" goes to the log/status bar, and the batch is no
- *    longer held for it. A consumer failure (the loader rejected it) is treated the same way.
+ *    longer held for it (the file is still re-read every couple of seconds). A consumer failure
+ *    (the loader rejected it) is treated the same way. A pending path whose content returns to
+ *    the version the editor holds (known hash) is dropped like an own write: pending, the
+ *    notice and the autosave hold clear, nothing reloads.
  * 4. **Play mode.** Detected but not delivered while playing: `coauthoring.stale` is set, and the
  *    batch goes out when play stops.
  *
@@ -277,6 +280,9 @@ export class ExternalChangeService {
     for (const entry of Array.from(this.entries.values())) {
       const snapshot = entry.last!;
       if (snapshot.missing || this.diskState.isKnownHash(entry.path, snapshot.hash)) {
+        // An own write — or a broken version put back to exactly the bytes the editor holds: the
+        // graph already matches, so no reload; the pending/unreadable state of the broken version
+        // goes (`setUnreadable` below), and the autosave hold with it.
         this.drop(entry.path);
         continue;
       }
@@ -323,7 +329,7 @@ export class ExternalChangeService {
     const hasOpenFailure = (): boolean =>
       Array.from(this.entries.values()).some(e => e.failure !== null && !e.noticeShown);
     if (deliverable.length === 0 || youngFailure) {
-      return hasOpenFailure() ? retryDelay() : null;
+      return hasOpenFailure() ? retryDelay() : this.noticedPollDelay();
     }
 
     // 3. Play mode: detect, do not reload.
@@ -365,7 +371,18 @@ export class ExternalChangeService {
     if (Array.from(this.entries.values()).some(e => e.failure === null)) {
       return this.stabilityIntervalMs;
     }
-    return hasOpenFailure() ? retryDelay() : null;
+    return hasOpenFailure() ? retryDelay() : this.noticedPollDelay();
+  }
+
+  /**
+   * Entries past their notice are still re-read now and then: nothing else is obliged to report
+   * the file again. A writer that restores the exact bytes the editor already has produces no
+   * push the editor acts on (its hash is "known"), and `syncNow` skips a path whose disk hash is
+   * the known one — without this poll the path would stay pending/unreadable, and autosave held,
+   * until a version with a NEW hash arrived.
+   */
+  private noticedPollDelay(): number | null {
+    return this.entries.size > 0 ? Math.min(MAX_RETRY_MS, this.stabilityIntervalMs * 4) : null;
   }
 
   private drop(path: string): void {
@@ -410,7 +427,9 @@ export class ExternalChangeService {
     if (this.disposePlaySubscription) {
       return true; // held for play mode: nothing more happens until play stops
     }
-    return Array.from(this.entries.values()).every(e => e.noticeShown);
+    // A noticed entry reported again (`stable` reset) is not settled until it was re-read: the
+    // caller of `whenSettled` (syncNow) wants to know whether the file came back.
+    return Array.from(this.entries.values()).every(e => e.noticeShown && e.stable);
   }
 
   private resolveSettled(): void {

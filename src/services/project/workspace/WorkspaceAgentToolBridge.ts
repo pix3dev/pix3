@@ -82,6 +82,7 @@ export const GENERATE_SESSION_LIMIT = 20;
 export const PERMISSION_TIMEOUT_MS = 60_000;
 export const HOLD_SAFETY_MS = 180_000;
 const RUNTIME_ATTACH_TIMEOUT_MS = 5_000;
+const RUNTIME_POLL_MS = 50;
 const PLAY_STOP_TIMEOUT_MS = 3_000;
 const MERGE_LOG_TAIL = 10;
 /** Answers kept for calls the server re-delivers after a reconnect (same id = same call). */
@@ -124,7 +125,12 @@ export interface WorkspaceAgentHost {
   toolSpecs(names: ReadonlySet<string>): Promise<AgentToolSpec[]>;
   isPlaying(): boolean;
   stopPlay(): Promise<void>;
-  waitForRuntime(timeoutMs: number): Promise<boolean>;
+  /**
+   * The game is actually running: a runtime is attached, its `SceneRunner.running` is true and
+   * play mode is not stopped. A runner exists before its scene finished loading (and is swapped
+   * during a restart), so "attached" alone is not enough for `game_run` to step frames.
+   */
+  isRuntimeRunning(): boolean;
   holdAutosave(reason: string): () => void;
   /** `syncNow()` + the built scripts: `{path: sha256}` of what the editor has loaded. */
   syncLoaded(): Promise<Record<string, string>>;
@@ -147,6 +153,14 @@ const errorResult = (
   message: string,
   extra: Record<string, unknown> = {}
 ): WorkspaceCallResult => text(JSON.stringify({ error: code, message, ...extra }), true);
+
+const runtimeNotRunning = (): WorkspaceCallResult =>
+  errorResult(
+    'load_failed',
+    `Play mode started but the game was not running within ${RUNTIME_ATTACH_TIMEOUT_MS} ms ` +
+      '(the scene did not finish loading).',
+    { errors: [{ file: null, message: 'runtime not running', kind: 'load' }] }
+  );
 
 /** A tool handler's value as an MCP result: JSON text + `__images` lifted into image blocks. */
 export function toCallResult(value: unknown): WorkspaceCallResult {
@@ -409,26 +423,29 @@ export class WorkspaceAgentToolBridge {
     const host = this.host();
     let tool = name;
     let args = input;
-    if (name === 'play_restart' && !host.isPlaying()) {
+    const substitutedStart = name === 'play_restart' && !host.isPlaying();
+    if (substitutedStart) {
       // The barrier stopped play; a restart of a stopped game is a start.
       tool = 'play_start';
       args = {};
     }
-    if (name === 'game_run' && !host.isPlaying()) {
-      // Through the channel `game_run` means "run the verified files": start them first.
-      const started = toCallResult(await host.executeTool('play_start', {}));
-      if (started.isError) return started;
-      if (!(await host.waitForRuntime(RUNTIME_ATTACH_TIMEOUT_MS))) {
-        return errorResult(
-          'load_failed',
-          'Play mode started but the game runtime did not attach.',
-          {
-            errors: [{ file: null, message: 'runtime not attached', kind: 'load' }],
-          }
-        );
+    if (name === 'game_run') {
+      if (!host.isPlaying()) {
+        // Through the channel `game_run` means "run the verified files": start them first.
+        const started = toCallResult(await host.executeTool('play_start', {}));
+        if (started.isError) return started;
       }
+      // Also when play was already on: the runtime may be mid-restart (a new runner loading).
+      if (!(await this.waitForRuntime(host))) return runtimeNotRunning();
     }
     const result = toCallResult(await host.executeTool(tool, args));
+    if (
+      (name === 'play_start' || name === 'play_restart') &&
+      !result.isError &&
+      !(await this.waitForRuntime(host))
+    ) {
+      return runtimeNotRunning();
+    }
     if (START_TOOLS.has(name) && !result.isError && this.lastBarrierLoaded) {
       appState.project.coauthoring.playRevision = { ...this.lastBarrierLoaded };
     }
@@ -445,6 +462,16 @@ export class WorkspaceAgentToolBridge {
       };
     }
     return result;
+  }
+
+  /** Poll until the game runtime is actually running (see `isRuntimeRunning`), or time out. */
+  private async waitForRuntime(host: WorkspaceAgentHost): Promise<boolean> {
+    const deadline = Date.now() + RUNTIME_ATTACH_TIMEOUT_MS;
+    while (!host.isRuntimeRunning()) {
+      if (Date.now() >= deadline) return false;
+      await sleep(RUNTIME_POLL_MS);
+    }
+    return true;
   }
 
   // --- internal tools ---------------------------------------------------------------------------
@@ -690,13 +717,16 @@ export class WorkspaceAgentToolBridge {
       const deadline = Date.now() + PLAY_STOP_TIMEOUT_MS;
       while (appState.ui.isPlaying && Date.now() < deadline) await sleep(50);
     },
-    waitForRuntime: async timeoutMs => {
-      const deadline = Date.now() + timeoutMs;
-      while (Date.now() < deadline) {
-        if (this.playSession.getActiveRuntime()) return true;
-        await sleep(50);
-      }
-      return this.playSession.getActiveRuntime() !== null;
+    isRuntimeRunning: () => {
+      const runtime = this.playSession.getActiveRuntime();
+      // 'paused' counts: a previous run's `pauseOnOutcome` (or the focus rule) leaves the loaded
+      // game paused, and `GameTestService` resumes it to step frames.
+      return (
+        runtime !== null &&
+        runtime.runner.running &&
+        appState.ui.isPlaying &&
+        appState.ui.playModeStatus !== 'stopped'
+      );
     },
     holdAutosave: reason => this.autosave.hold(reason),
     syncLoaded: async () => {

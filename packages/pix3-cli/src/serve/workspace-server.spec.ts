@@ -1158,4 +1158,40 @@ describe('agent lane (/ws/agent/*)', () => {
     const after = await agentCall(base, server, 'GET', `/ws/agent/changes?since=${reply.json.seq}`);
     expect(after.json.paths).toEqual([]);
   });
+
+  it('records the origin of every change and never lists directories', async () => {
+    const { server, base } = await startServer();
+    const start = server.currentSeq;
+    // An external writer, in a new directory…
+    write('scripts/ai/enemy.ts', 'export {};\n');
+    // …and the editor through the file API, also into new directories (a run report).
+    const mkdir = await post(`${base}/ws/mkdir`, { path: 'design/tests' });
+    expect(mkdir.status).toBe(200);
+    const report = await put(base, 'design/tests/reports/0001-run.json', '{}\n', {
+      'x-mutation-id': 'm-report-1',
+    });
+    expect(report.status).toBe(200);
+    const reply = await agentCall(base, server, 'GET', `/ws/agent/changes?since=${start}`);
+    expect(reply.status).toBe(200);
+    expect(reply.json.paths).toEqual(['design/tests/reports/0001-run.json', 'scripts/ai/enemy.ts']);
+    const entries = reply.json.entries as Array<Record<string, unknown>>;
+    const origins = new Map(entries.map(entry => [entry.path, entry.origin]));
+    expect(origins.get('scripts/ai/enemy.ts')).toBe('external');
+    expect(origins.get('design/tests/reports/0001-run.json')).toBe('editor');
+    expect(entries.every(entry => typeof entry.seq === 'number')).toBe(true);
+    // No directory entry — neither the watcher's (scripts/ai) nor the API's (design/tests…).
+    expect([...origins.keys()].sort()).toEqual([
+      'design/tests/reports/0001-run.json',
+      'scripts/ai/enemy.ts',
+    ]);
+
+    // The editor deleting a file is an editor change too.
+    const since = Number(reply.json.seq);
+    const removed = await post(`${base}/ws/delete`, { path: 'design/tests', recursive: true });
+    expect(removed.status).toBe(200);
+    const after = await agentCall(base, server, 'GET', `/ws/agent/changes?since=${since}`);
+    expect(after.json.entries).toEqual([
+      expect.objectContaining({ path: 'design/tests/reports/0001-run.json', origin: 'editor' }),
+    ]);
+  });
 });

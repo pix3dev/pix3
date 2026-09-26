@@ -7,7 +7,7 @@ import { hashFile } from './scan.ts';
  * Helpers of the workspace server's **agent lane** (`/ws/agent/*`): the routes a local
  * `pix3 mcp --workspace` process drives with the control secret of `.pix3/workspace.json`.
  *
- * - {@link ChangeLog}: the last {@link CHANGE_LOG_LIMIT} path changes with their `seq`, so the MCP
+ * - {@link ChangeLog}: the last {@link CHANGE_LOG_LIMIT} file changes with their `seq` and origin, so the MCP
  *   process can ask "what changed since the barrier" (`GET /ws/agent/changes?since=<seq>`).
  * - {@link findRecoveryCopy} / {@link mergeLogMentions}: the hints of `disk_differs_from_agent`
  *   (plan §5 D, step 1): whether the editor's recovery journal holds a copy of exactly the bytes
@@ -24,21 +24,28 @@ export const MERGE_LOG_FILE = '.pix3/merge-log.jsonl';
 /** How far before the file's mtime a merge-log line may be and still describe that write. */
 const MERGE_LOG_SLACK_MS = 5_000;
 
+/**
+ * Who changed a path: `external` = seen by the watcher / a scan (an agent, git, an editor of
+ * another program); `editor` = a mutation through the file API, i.e. the editor window itself
+ * (those are not broadcast back as `change` frames).
+ */
+export type ChangeOrigin = 'external' | 'editor';
+
 export interface ChangeLogEntry {
   readonly seq: number;
+  /** Always a file path — directory entries are never recorded. */
   readonly path: string;
-  /** `external` = seen by the watcher / a scan; `api` = written through the file API (the editor). */
-  readonly source: 'external' | 'api';
+  readonly origin: ChangeOrigin;
 }
 
-/** Ring of path changes of the revision set, in `seq` order. */
+/** Ring of file changes of the revision set, in `seq` order. */
 export class ChangeLog {
   private readonly entries: ChangeLogEntry[] = [];
   /** Highest `seq` whose entries were dropped from the ring (0 = nothing dropped yet). */
   private droppedThrough = 0;
 
-  record(seq: number, paths: Iterable<string>, source: ChangeLogEntry['source']): void {
-    for (const path of paths) this.entries.push({ seq, path, source });
+  record(seq: number, paths: Iterable<string>, origin: ChangeOrigin): void {
+    for (const path of paths) this.entries.push({ seq, path, origin });
     const overflow = this.entries.length - CHANGE_LOG_LIMIT;
     if (overflow > 0) {
       const dropped = this.entries.splice(0, overflow);

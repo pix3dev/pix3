@@ -69,12 +69,21 @@ export interface ExpectReport {
   readonly seq: number;
 }
 
+export interface ChangeEntry {
+  readonly seq: number;
+  readonly path: string;
+  /** `external` = the watcher saw it; `editor` = the editor window wrote it through the file API. */
+  readonly origin: 'external' | 'editor';
+}
+
 export interface ChangesReport {
   readonly since: number;
   readonly seq: number;
   readonly revision: string;
   readonly paths: string[];
   readonly complete: boolean;
+  /** Per change, with its origin. Absent from an older `pix3 serve` (then every path is external). */
+  readonly entries?: ChangeEntry[];
 }
 
 export interface AgentIdentity {
