@@ -425,7 +425,9 @@ export class WorkspaceAgentTools {
       const startupMs = startupMsOf(result, payload);
       const envelope = {
         revision: verified,
-        ...(startupMs !== null ? { startupMs } : {}),
+        // Always present: a number when the editor measured a start, null when no start happened
+        // (the game was already running) or an editor too old to report one.
+        startupMs,
         matchesAgent: expect ? true : null,
         ...(expect ? {} : { agentExpectations: 'none' }),
         matchesDisk,
@@ -483,7 +485,10 @@ export const splitRunChanges = (
   };
 };
 
-/** How long the editor took to get the game running (success: `_meta.pix3`; failure: the payload). */
+/**
+ * How long the editor took to get the game running (success: `_meta.pix3`; failure: the payload);
+ * null when the editor reports none — no start happened because the game was already running.
+ */
 const startupMsOf = (result: ToolCallResult, payload: unknown): number | null => {
   const meta = isRecord(result._meta) && isRecord(result._meta.pix3) ? result._meta.pix3 : {};
   if (typeof meta.startupMs === 'number') return meta.startupMs;

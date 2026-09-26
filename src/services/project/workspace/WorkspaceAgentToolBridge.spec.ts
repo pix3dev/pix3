@@ -10,6 +10,7 @@ import {
 } from '@/services/project/workspace/WorkspaceAgentToolBridge';
 import type { WorkspaceCallContext } from '@/services/project/workspace/WorkspaceSessionService';
 import { ServiceContainer } from '@/fw/di';
+import { AgentToolRegistry } from '@/services/agent/AgentToolRegistry';
 import { isEditorKeepAlive, setEditorKeepAlive } from '@/services/core/page-activity';
 import { AgentKeepaliveService } from '@/services/project/workspace/AgentKeepaliveService';
 import type {
@@ -56,6 +57,13 @@ const makeHost = (): FakeHost => {
     toolSpecs: vi.fn(async (names: ReadonlySet<string>) =>
       [...names].map(name => ({ name, description: name, inputSchema: { type: 'object' } }))
     ),
+    toolNames: vi.fn(async () => [
+      ...WORKSPACE_AGENT_TOOLS,
+      'game_controls',
+      'scene_tree',
+      'node_inspect',
+      'find_nodes',
+    ]),
     isPlaying: () => host.playing,
     stopPlay: vi.fn(async () => {
       host.playing = false;
@@ -130,6 +138,66 @@ describe('WorkspaceAgentToolBridge', () => {
     const manifest = await bridge.handleCall(frame('tools_manifest'), context);
     const names = (body(manifest).tools as Array<{ name: string }>).map(tool => tool.name);
     expect(names.sort()).toEqual([...WORKSPACE_AGENT_TOOLS].sort());
+  });
+
+  describe('channel prose', () => {
+    const TOOL_TOKEN = /\b[a-z]+(?:_[a-z0-9]+)+\b/g;
+    const served = new Set<string>([
+      ...WORKSPACE_AGENT_TOOLS,
+      'sync_barrier',
+      'sync_release',
+      'tools_manifest',
+    ]);
+    const foreignNames = (textValue: string, editorTools: ReadonlySet<string>): string[] =>
+      [...new Set([...textValue.matchAll(TOOL_TOKEN)].map(match => match[0]))].filter(
+        token => editorTools.has(token) && !served.has(token)
+      );
+
+    it('the manifest served to the channel names no tool outside the allowlist', async () => {
+      // The real registry: its descriptions are written for the in-editor agent (~100 tools).
+      const registry = new AgentToolRegistry();
+      const editorTools = new Set(registry.list().map(tool => tool.name));
+      host.toolSpecs = vi.fn(async (names: ReadonlySet<string>) => registry.specs(names));
+      host.toolNames = vi.fn(async () => [...editorTools]);
+      const raw = JSON.stringify(registry.specs(new Set(WORKSPACE_AGENT_TOOLS)));
+      // The premise: unrewritten, the served specs do point at tools the channel lacks.
+      expect(foreignNames(raw, editorTools)).toEqual(
+        expect.arrayContaining(['game_controls', 'game_trace'])
+      );
+
+      const manifest = await bridge.handleCall(frame('tools_manifest'), context);
+      const served14 = (body(manifest).tools as Array<{ name: string }>).map(tool => tool.name);
+      expect(served14.sort()).toEqual([...WORKSPACE_AGENT_TOOLS].sort());
+      const first = manifest.content[0];
+      const manifestText = first.type === 'text' ? first.text : '';
+      expect(foreignNames(manifestText, editorTools)).toEqual([]);
+      // The coordinate guidance of game_input survives the rewrite.
+      expect(manifestText).toContain("space:'overlay'");
+    });
+
+    it('rewrites unserved tool names in results, but leaves data and read_logs verbatim', async () => {
+      host.results.game_input = {
+        ok: true,
+        verdict:
+          'NO ACTIVITY: nothing moved. If the game should have reacted — check read_logs / ' +
+          'read_errors and scene_tree.',
+        steps: [{ error: 'Get the names from game_controls.' }],
+        observed: { Hud: { before: { text: 'scene_tree' }, after: { text: 'scene_tree' } } },
+      };
+      const input = await bridge.handleCall(frame('game_input', { steps: [] }), context);
+      const inputText = input.content[0].type === 'text' ? input.content[0].text : '';
+      expect(
+        foreignNames(inputText.replace(/"text":"scene_tree"/g, ''), new Set(await host.toolNames()))
+      ).toEqual([]);
+      expect(body(input).verdict).toContain('read_errors and game_observe');
+      expect(body(input).observed).toEqual({
+        Hud: { before: { text: 'scene_tree' }, after: { text: 'scene_tree' } },
+      });
+
+      host.results.read_logs = { ok: true, entries: [{ message: 'scene_tree rebuilt' }] };
+      const logs = await bridge.handleCall(frame('read_logs'), context);
+      expect(body(logs)).toEqual({ ok: true, entries: [{ message: 'scene_tree rebuilt' }] });
+    });
   });
 
   it('lifts __images into image blocks and flags ok:false as an error', async () => {
@@ -232,6 +300,16 @@ describe('WorkspaceAgentToolBridge', () => {
     expect(again.isError).toBeUndefined();
     expect(host.executed.map(e => e.name)).toEqual(['play_start', 'game_run', 'game_run']);
     expect(host.executedAt[2]).toBeGreaterThanOrEqual(host.runningAt ?? Infinity);
+  });
+
+  it('game_run on a game that is already running reports no startupMs (no start happened)', async () => {
+    await bridge.handleCall(frame('sync_barrier'), context);
+    const first = await bridge.handleCall(frame('game_run', { until: [] }), context);
+    expect(typeof (first._meta?.pix3 as { startupMs?: unknown }).startupMs).toBe('number');
+
+    const again = await bridge.handleCall(frame('game_run', { until: [] }), context);
+    expect(again.isError).toBeUndefined();
+    expect((again._meta?.pix3 as { startupMs?: unknown } | undefined)?.startupMs).toBeUndefined();
   });
 
   it('a play_restart substituted by play_start answers only once the runtime is running', async () => {

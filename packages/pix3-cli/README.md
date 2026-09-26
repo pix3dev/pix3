@@ -470,7 +470,8 @@ raw bytes of every file the agent wrote.
    window then starts the game (`game_run` starts play itself; `play_restart` of a stopped game is
    a start) and answers only once the game is actually running: up to 30 s, as soon as it runs,
    failing fast (`load_failed` with the play-mode error) when play mode stops instead; `startupMs`
-   says how long the start took. The MCP process gives the tool call 120 s (the server's cap). The
+   says how long the start took (always present in the answer: `null` means no start happened —
+   `game_run` found the game already running — never "0 ms"). The MCP process gives the tool call 120 s (the server's cap). The
    hold is released (`sync_release`) after the run.
 3. **After the run** (for `game_run` when it finished; for `play_start` / `play_restart` right
    after the start was acknowledged) the verified files are hashed again and
@@ -492,7 +493,9 @@ The answer of a barrier tool:
 }
 ```
 
-`matchesAgent` is `null` (with `agentExpectations: "none"`) without `expect`; `matchesDisk` is
+`startupMs` is always present: the milliseconds from the start request until the game was
+running, or `null` when no start happened (the game was already running, so there was nothing to
+measure). `matchesAgent` is `null` (with `agentExpectations: "none"`) without `expect`; `matchesDisk` is
 whether every verified hash still matched the disk at the final check; `changedDuringRun` is what
 the barrier did not verify: every file changed meanwhile by someone other than the editor, plus
 every verified file whose hash moved between the two checks with no editor write on record

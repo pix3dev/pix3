@@ -19,6 +19,10 @@ import type {
   WorkspaceCallResult,
 } from '@/services/project/workspace/workspace-protocol';
 import type { AgentToolRegistry, AgentToolSpec } from '@/services/agent/AgentToolRegistry';
+import {
+  rewriteForChannel,
+  rewriteValueForChannel,
+} from '@/services/project/workspace/channel-tool-hints';
 import type { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
 
 /**
@@ -28,6 +32,10 @@ import type { ProjectScriptLoaderService } from '@/services/scripting/ProjectScr
  * - **Allowlist.** Exactly {@link WORKSPACE_AGENT_TOOLS} (no scene-mutating tool, plan §4.1) plus
  *   the internal `sync_barrier`, `sync_release` and `tools_manifest`. Tools execute through
  *   `AgentToolRegistry.execute` — the same entry the debug bridge uses, no chat session.
+ * - **Channel prose.** The registry's descriptions and result strings are written for the
+ *   in-editor agent and name tools this channel does not serve; `tools_manifest` and every tool
+ *   result (except the user's own console lines in `read_logs` / `read_errors`) go through
+ *   `channel-tool-hints.ts`, so the external agent is never pointed at a tool it cannot call.
  * - **Results** are MCP `CallToolResult`s: the handler's JSON as one text block; images the tool
  *   returned under `__images` become `{type:'image', data, mimeType}` blocks (base64, no `data:`
  *   prefix) — `pix3 mcp` hands them to the agent as real images. `{ok:false}` sets `isError`.
@@ -41,7 +49,7 @@ import type { ProjectScriptLoaderService } from '@/services/scripting/ProjectScr
  * - **Start wait.** `play_start`, `play_restart` and `game_run` answer only once the game is
  *   actually running — up to {@link RUNTIME_START_TIMEOUT_MS} (a heavy game takes seconds to load),
  *   failing fast when play mode stops instead — and report how long that took as
- *   `_meta.pix3.startupMs`.
+ *   `_meta.pix3.startupMs` (absent when `game_run` found the game already running: no start).
  * - **`generate_*` permission** (plan §1.2 "Граница доверия"): the first generation of a
  *   connection — server session + lease + `pix3 mcp` process — asks the human (non-blocking prompt,
  *   {@link PERMISSION_TIMEOUT_MS} to decide, else `permission_denied`). Allowed → up to
@@ -76,6 +84,8 @@ const INTERNAL_TOOLS: ReadonlySet<string> = new Set([
 ]);
 const GENERATE_TOOLS: ReadonlySet<string> = new Set(['generate_asset', 'generate_sfx']);
 const START_TOOLS: ReadonlySet<string> = new Set(['play_start', 'play_restart', 'game_run']);
+/** Results carrying the user's own console text, which must reach the agent verbatim. */
+const VERBATIM_RESULT_TOOLS: ReadonlySet<string> = new Set(['read_logs', 'read_errors']);
 const OBSERVING_TOOLS: ReadonlySet<string> = new Set([
   'play_status',
   'game_input',
@@ -138,6 +148,8 @@ export interface SyncBarrierError {
 export interface WorkspaceAgentHost {
   executeTool(name: string, args: Record<string, unknown>): Promise<unknown>;
   toolSpecs(names: ReadonlySet<string>): Promise<AgentToolSpec[]>;
+  /** Every tool the editor registry knows, served here or not (for the channel prose rewrite). */
+  toolNames(): Promise<readonly string[]>;
   isPlaying(): boolean;
   stopPlay(): Promise<void>;
   /**
@@ -494,6 +506,9 @@ export class WorkspaceAgentToolBridge {
     const startedAt = Date.now();
     let startupMs: number | null = null;
     if (name === 'game_run') {
+      // No start happens when the game is already up: `startupMs` then stays null (not a ~0 ms
+      // "start" that would read as a measured one).
+      const alreadyRunning = host.isPlaying() && host.isRuntimeRunning();
       if (!host.isPlaying()) {
         // Through the channel `game_run` means "run the verified files": start them first.
         const started = toCallResult(await host.executeTool('play_start', {}));
@@ -502,9 +517,10 @@ export class WorkspaceAgentToolBridge {
       // Also when play was already on: the runtime may be mid-restart (a new runner loading).
       const wait = await this.waitForRuntime(host, startedAt);
       if (!wait.ok) return runtimeNotRunning(wait);
-      startupMs = wait.startupMs;
+      startupMs = alreadyRunning ? null : wait.startupMs;
     }
     let result = toCallResult(await host.executeTool(tool, args));
+    if (!VERBATIM_RESULT_TOOLS.has(name)) result = await this.rewriteResult(result);
     if ((name === 'play_start' || name === 'play_restart') && !result.isError) {
       const wait = await this.waitForRuntime(host, startedAt);
       if (!wait.ok) return runtimeNotRunning(wait);
@@ -557,8 +573,38 @@ export class WorkspaceAgentToolBridge {
 
   // --- internal tools ---------------------------------------------------------------------------
 
+  /** The tool names the channel prose rewrite needs: every editor tool, and the served ones. */
+  private async channelNames(): Promise<[ReadonlySet<string>, ReadonlySet<string>]> {
+    const served = new Set([...WORKSPACE_AGENT_TOOLS, ...INTERNAL_TOOLS]);
+    return [new Set(await this.host().toolNames()), served];
+  }
+
+  /** A tool result with its prose rewritten for the channel (see `channel-tool-hints.ts`). */
+  private async rewriteResult(result: WorkspaceCallResult): Promise<WorkspaceCallResult> {
+    const [editorTools, served] = await this.channelNames();
+    const content = result.content.map(block => {
+      if (block.type !== 'text') return block;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(block.text);
+      } catch {
+        return { ...block, text: rewriteForChannel(block.text, editorTools, served) };
+      }
+      return {
+        ...block,
+        text: JSON.stringify(rewriteValueForChannel(parsed, editorTools, served)),
+      };
+    });
+    return { ...result, content };
+  }
+
   private async toolsManifest(): Promise<WorkspaceCallResult> {
-    const specs = await this.host().toolSpecs(new Set(WORKSPACE_AGENT_TOOLS));
+    const [editorTools, served] = await this.channelNames();
+    const specs = rewriteValueForChannel(
+      await this.host().toolSpecs(new Set(WORKSPACE_AGENT_TOOLS)),
+      editorTools,
+      served
+    );
     const tools: AgentToolSpec[] = [
       {
         name: 'project_status',
@@ -793,6 +839,7 @@ export class WorkspaceAgentToolBridge {
   private readonly editorHost: WorkspaceAgentHost = {
     executeTool: async (name, args) => (await this.registry()).execute(name, args),
     toolSpecs: async names => (await this.registry()).specs(names),
+    toolNames: async () => (await this.registry()).list().map(tool => tool.name),
     isPlaying: () => appState.ui.isPlaying,
     stopPlay: async () => {
       await this.dispatcher.executeById('game.stop');

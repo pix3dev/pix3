@@ -311,6 +311,22 @@ describe('pix3 mcp --workspace', () => {
     });
   }, 20_000);
 
+  it('always carries startupMs: null when the editor reports no start (game already running)', async () => {
+    const server = await startServer();
+    await openWindow(
+      server,
+      barrierWindow(
+        () => ({ 'scenes/main.pix3scene': sha('root: []\n') }),
+        () => textResult({ verdict: 'PASS' })
+      )
+    );
+    const client = await startMcp();
+    const run = await callTool(client, 'game_run', { until: [{ kind: 'frames', n: 1 }] });
+    expect(run.isError).toBe(false);
+    expect(run.body).toHaveProperty('startupMs', null);
+    expect(run.body).toMatchObject({ matchesDisk: true, result: { verdict: 'PASS' } });
+  }, 20_000);
+
   it('mismatching expect → disk_differs_from_agent, with the recovery copy only when it exists', async () => {
     const server = await startServer();
     const calls = await openWindow(server, () => textResult({}));
