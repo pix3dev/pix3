@@ -14,7 +14,9 @@
   "main": "dist/index.js",
   "files": [
     "dist",
-    "templates"
+    "templates",
+    "kit",
+    "runtime-types"
   ],
   "engines": {
     "node": ">=24.15.0 <25"
@@ -23,9 +25,11 @@
     "start": "node src/index.ts",
     "build": "tsc -p tsconfig.build.json && node scripts/build-validate.mjs",
     "copy-templates": "node scripts/copy-templates.mjs",
-    "prepack": "npm run copy-templates && npm run build",
+    "prepack": "npm run copy-templates && npm run build && npm run build-runtime-types && npm run build-kit",
     "postpack": "node scripts/copy-templates.mjs --clean",
-    "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.build.json"
+    "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.build.json",
+    "build-kit": "node scripts/build-kit.mjs",
+    "build-runtime-types": "node scripts/build-runtime-types.mjs"
   },
   "keywords": [
     "pix3",

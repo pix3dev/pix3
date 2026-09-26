@@ -166,6 +166,21 @@ pix3-status-bar .status-perf.high {
   color: var(--danger);
 }
 
+/* Fixed-width values so digit-count changes don't shift the labels to the left. */
+pix3-status-bar .status-perf-value {
+  display: inline-block;
+  text-align: right;
+  white-space: nowrap;
+}
+
+pix3-status-bar .status-perf-value.cpu {
+  min-width: 4ch; /* "100%" */
+}
+
+pix3-status-bar .status-perf-value.gpu {
+  min-width: 7.5ch; /* "999.9ms" */
+}
+
 pix3-status-bar .status-perf-sep {
   opacity: 0.45;
 }

@@ -3,33 +3,13 @@ import { resolve } from 'node:path';
 
 import { createProject } from './new-project.ts';
 import { listTemplates, oneLine, resolveTemplate } from './templates.ts';
+import { USAGE } from './usage.ts';
 import { CLI_VERSION } from './version.ts';
 
 /**
  * `pix3` — entry point of `@pix3/cli`. Deliberately free of heavy imports: `new` must stay instant
  * under a cold `npx`, so `mcp` loads the MCP SDK lazily (`mcp.ts` is itself imported on demand).
  */
-
-const USAGE = `pix3 ${CLI_VERSION}
-
-Usage:
-  pix3 new                         List recipes and templates
-  pix3 new <recipe> [dir]          Create a project (dir defaults to the recipe id)
-        [--name <project name>]
-  pix3 mcp --workspace             MCP server for your agent (stdio), relayed through the
-        [--project <dir>]          running \`pix3 serve\` to the connected Pix3 editor
-  pix3 mcp [--project <dir>]       (phase-0 prototype) MCP server + FSA loopback link
-        [--agent <name>]
-  pix3 setup [claude|codex]        Print how to register the MCP server with your agent
-  pix3 serve [--project <dir>]     Serve this project folder to a Pix3 editor over one
-        [--port <n>] [--new-token] loopback port (e.g. through VS Code Remote SSH)
-  pix3 validate [paths…] [--json]  Strict scene check: schema, references, guards, then
-        [--no-hydrate]             hydration with the real loader (exit 1 on errors)
-  pix3 read <path>                 Print a project file and confirm to the editor that you
-                                   read exactly these bytes (.pix3/ack.json)
-  pix3 ack <path> --sha256 <hash>  Confirm you read the version with this byte hash
-  pix3 --version
-`;
 
 interface ParsedArgs {
   readonly positionals: string[];
@@ -90,7 +70,7 @@ const printTemplateList = (): void => {
   );
 };
 
-const runNew = (args: ParsedArgs): number => {
+const runNew = async (args: ParsedArgs): Promise<number> => {
   const [, query, dirArg] = args.positionals;
   if (!query) {
     printTemplateList();
@@ -102,16 +82,26 @@ const runNew = (args: ParsedArgs): number => {
     return 1;
   }
   const dir = resolve(process.cwd(), dirArg ?? resolved.template.id);
+  // The kit and the script types are prebuilt in a published package (plain file copies); a repo
+  // checkout regenerates them first when their sources changed (printed).
+  const log = (line: string): void => void process.stderr.write(`${line}\n`);
+  const { ensureKit } = await import('./kit/kit-source.ts');
+  const { ensureRuntimeTypes } = await import('./types/runtime-types.ts');
+  const { agentKitStep } = await import('./kit/install.ts');
+  const kit = await ensureKit({ log });
+  const runtimeTypes = ensureRuntimeTypes({ log });
   const project = createProject({
     template: resolved.template,
     dir,
     projectName: stringFlag(args, 'name'),
+    postCreateSteps: [agentKitStep(kit, runtimeTypes)],
   });
   process.stdout.write(
     `Created ${project.projectName} from ${project.template.id} in ${project.dir}\n` +
-      `  ${project.files.length} files, project id ${project.projectId}\n\n` +
+      `  ${project.files.length} files, project id ${project.projectId}, agent kit ${kit.manifest.version}\n\n` +
       `Next: open that folder in Pix3 (Open Folder), or run \`pix3 serve\` in it and connect\n` +
-      '      (File → Connect to Workspace…); then start your agent inside it (.mcp.json is set up).\n'
+      '      (File → Connect to Workspace…); then start your agent inside it — AGENTS.md / CLAUDE.md\n' +
+      '      and .claude/skills/ tell it how, .mcp.json connects it, `pix3 check` verifies its work.\n'
   );
   return 0;
 };
@@ -130,6 +120,21 @@ const main = async (): Promise<number> => {
   switch (command) {
     case 'new':
       return runNew(args);
+    case 'check': // own argument parsing; validator, TypeScript and types load lazily
+      return (await import('./check/check.ts')).runCheck(
+        process.argv.slice(process.argv.indexOf('check') + 1),
+        {
+          cwd: process.cwd(),
+          stdout: text => process.stdout.write(text),
+          stderr: text => process.stderr.write(text),
+        }
+      );
+    case 'kit':
+      return (await import('./kit/command.ts')).runKitCli({
+        cwd: process.cwd(),
+        projectDir: stringFlag(args, 'project'),
+        update: args.flags.has('update'),
+      });
     case 'mcp': {
       if (args.flags.has('workspace')) {
         const { runMcpWorkspace } = await import('./mcp-workspace.ts');

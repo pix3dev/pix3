@@ -7,6 +7,7 @@ import {
   type ExpectDiff,
 } from './lane-client.ts';
 import {
+  BARRIER_ERROR_CODES,
   BARRIER_TOOLS,
   OBSERVING_TOOLS,
   WORKSPACE_TOOL_NAMES,
@@ -45,14 +46,7 @@ const SYNC_RETRY_DELAY_MS = 250;
 /** How long one `sync_barrier` call may take (it waits for the editor's stabilisation window). */
 const SYNC_CALL_TIMEOUT_MS = 30_000;
 
-export type BarrierErrorCode =
-  | 'disk_differs_from_agent'
-  | 'sync_timeout'
-  | 'load_failed'
-  | 'pending_external'
-  | 'no_editor'
-  | 'permission_denied'
-  | 'no_workspace_server';
+export type BarrierErrorCode = (typeof BARRIER_ERROR_CODES)[number];
 
 export interface McpToolResult {
   content: ToolContentBlock[];

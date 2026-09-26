@@ -52,6 +52,20 @@ export const WORKSPACE_TOOL_NAMES: readonly string[] = [
   'get_selection',
 ];
 
+/**
+ * The error codes of the sync barrier and the channel (`pix3 mcp --workspace` → README "Error
+ * codes"). Anything else an error result carries is the editor's own and passed through.
+ */
+export const BARRIER_ERROR_CODES = [
+  'disk_differs_from_agent',
+  'sync_timeout',
+  'load_failed',
+  'pending_external',
+  'no_editor',
+  'permission_denied',
+  'no_workspace_server',
+] as const;
+
 const EMPTY: JsonSchema = { type: 'object', properties: {}, additionalProperties: false };
 
 /** `expect` — added to every barrier tool's schema, whatever the window advertises. */

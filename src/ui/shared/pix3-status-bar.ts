@@ -796,9 +796,13 @@ export class Pix3StatusBar extends ComponentBase {
 
     return html`
       <span class="status-indicator status-perf ${level}" title=${title}>
-        <span class="status-perf-metric">CPU ${cpuPct}%</span>
+        <span class="status-perf-metric"
+          >CPU <span class="status-perf-value cpu">${cpuPct}%</span></span
+        >
         <span class="status-perf-sep">·</span>
-        <span class="status-perf-metric">${gpuLabel} ${gpuValue}</span>
+        <span class="status-perf-metric"
+          >${gpuLabel} <span class="status-perf-value gpu">${gpuValue}</span></span
+        >
       </span>
     `;
   }

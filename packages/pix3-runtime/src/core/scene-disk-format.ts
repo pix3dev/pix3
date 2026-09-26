@@ -201,8 +201,17 @@ const TYPE_SPECS: Readonly<Record<string, TypeSpec>> = {
     extras: { texturePath: { kind: 'resource-path', preferred: 'texture' } },
   },
   // `UIControl2D.texturePath` is read by every control's loader branch except Label2D's, while
-  // `SceneSaver.serializeCommonUIControlProps` writes it for all of them.
-  Label2D: { family: '2d', writeOnly: ['texturePath'] },
+  // `SceneSaver.serializeCommonUIControlProps` writes it for all of them. The shared caption-style
+  // reader (`SceneLoader.readLabelStyle`) also hands Label2D `labelOutlineWidth/Color`, which its
+  // constructor takes as a fallback for `outlineWidth/Color` — read-compat; the saver drops them.
+  Label2D: {
+    family: '2d',
+    writeOnly: ['texturePath'],
+    extras: {
+      labelOutlineWidth: { schemaName: 'outlineWidth', preferred: 'outlineWidth' },
+      labelOutlineColor: { schemaName: 'outlineColor', preferred: 'outlineColor' },
+    },
+  },
   Group2D: { family: '2d' },
   CanvasLayer2D: { family: '2d' },
   Camera2D: { family: '2d' },

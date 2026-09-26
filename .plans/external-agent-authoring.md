@@ -968,3 +968,35 @@ merge-log», промпт `generate_asset` (Deny → `permission_denied`, Allow 
 в `UpdateObjectPropertyOperation`. Повторный прогон после починки: `game_run` 240 кадров PASS с
 верной классификацией изменений, восстановление снимает pending.
 Следующее: `pix3 check`, kit, бандл CLI, прогон живого Claude Code по `TRIAL-PROTOCOL.md`.
+
+### 11.8 Состояние на 2026-09-26 — фаза 1: `pix3 check` и `pix3 kit`
+
+Сделано (не закоммичено): `pix3 check [--json] [--no-hydrate] [--offline] [--project]`
+(`packages/pix3-cli/src/check/`) = validate обоих уровней + `tsc --noEmit` по скриптам через API
+компилятора + последние 10 строк `.pix3/merge-log.jsonl` (человеческими словами: «editor KEPT …
+— `pix3 read <file>`») + версии; коды `E_TYPE`, `E_TYPECHECK_UNAVAILABLE`,
+`W_RUNTIME_VERSION_MISMATCH`, `W_RUNTIME_NOT_INSTALLED`, `W_KIT_OUTDATED`; `--json` отдаёт `files`
+с sha256 **байтов** сцен и скриптов (хеши для `expect`; validate теперь тоже хеширует байты).
+TypeScript не зависимость: проект → соседний install CLI → `~/.pix3/typescript/5.8.3/` (ленивый
+`npm install --prefix`, печатается; `--offline` — ошибка с командой). Типы: `tsconfig.types.json`
+рантайма (только граф `index.ts`, чисто) → `runtime-types/` CLI + `@types/three` без его
+`node_modules`; `lit`/`postprocessing`/spine не нужны (`skipLibCheck`). В проекте без своего
+`tsconfig.json` — `.pix3/types/`, `.pix3/tsconfig.check.json`, корневой `tsconfig.json` с
+`extends`; со своим (DeepCore) — его tsconfig как есть. `pix3 kit [--update]` + `new` через тот же
+шаг: kit генерируется `scripts/build-kit.mjs` из `kit-src/` (проза черновика) + `{{include}}` по
+спеке / node-types-reference / nodes-and-systems / engine-api-map / README CLI + таблица `core:`
+из реестра рантайма; `kit.spec.ts` ловит дрейф (директивы, команды/флаги, 14 инструментов, коды,
+типы нод, свойства таблиц против дескриптора дискового формата, `core:` id, компиляция
+TS-примеров). Спек нашёл и починил: неверную таблицу `InventorySlot2D` и строку quick reference в
+`docs/node-types-reference.md`, «clockwise» у 2D-поворота (на деле против часовой), пробел
+дескриптора — `Label2D` читает `labelOutlineWidth/Color` (read-compat, теперь `W_LEGACY_KEY`, а не
+ложная ошибка). Замеры (упакованный CLI вне репозитория, чистый `HOME`): `new` 0,13 с, первый
+`check` 2,1 с с установкой TypeScript, дальше 1,45 с; все 11 шаблонов зелёные; DeepCore без
+`node_modules` — 230 `E_TYPE` (каскад от отсутствующих модулей) + `W_RUNTIME_NOT_INSTALLED`, после
+`npm install` — зелёный за 4,6 с с `W_RUNTIME_VERSION_MISMATCH` (с реестра пришёл runtime 1.4.1).
+Конфликт §5 C п.2 подтверждён: «build from templates» экспорта пишет свой корневой `tsconfig.json`
+поверх kit'ового — после этого проект считается «со своим tsconfig» (и `--update` его не трогает).
+Не сделано из фазы 1: вход «Работать со своим агентом» в редакторе (редактору нужен тот же kit —
+Vite-glob `packages/pix3-cli/kit/`), `@pix3/cli` в `publish-packages.yml`, бандл CLI в один файл,
+проверка в живом редакторе, что проект с kit открывается и играет без правок (корневой
+`tsconfig.json`, 6 МБ `.pix3/types/`), прогон живых агентов по `TRIAL-PROTOCOL.md` («≤ 30 с»).

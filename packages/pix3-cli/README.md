@@ -10,13 +10,124 @@ pix3 setup [claude|codex]                     print how to register the MCP serv
 pix3 serve [--project <dir>] [--port <n>] [--new-token]
                                               serve a project folder to a Pix3 editor
 pix3 validate [paths…] [--json]               strict scene check
+pix3 check [--json] [--no-hydrate] [--offline] [--project <dir>]
+                                              validate + tsc over the scripts + merge-log + versions
+pix3 kit [--update] [--project <dir>]         install / update the agent kit in a project
 pix3 read <path>                              print a file and ack its bytes' sha256
 pix3 ack <path> --sha256 <hash>               ack a version you read (hash of raw bytes)
 ```
 
+`new`, `kit`, `mcp`, `serve`, `read`/`ack` load neither TypeScript nor the kit generator: the kit
+and the runtime types are prebuilt into the package (`kit/`, `runtime-types/`, at `prepack`).
+
 `read` / `ack` append `{ path, sha256, at }` to `.pix3/ack.json`. The editor, merging the next
 version of that file you write, lifts the protection of the manual edits that version contained
 and removes the ack (one-shot); see `docs/pix3-specification.md` → "Co-authoring mode".
+
+## `pix3 check` — everything an agent should run after a batch of edits
+
+`pix3 check` = `pix3 validate` (both levels) + a TypeScript type-check of the project's scripts +
+the newest `.pix3/merge-log.jsonl` entries + a version check. Exit 0 = no errors (warnings
+allowed), 1 = at least one error, 2 = could not run. Diagnostics are one list, validate's plus:
+
+| Code | Severity | When |
+| --- | --- | --- |
+| `E_TYPE` | error | a tsc diagnostic (`message` starts with `TS<code>:`; `file`, `line`) |
+| `E_TYPECHECK_UNAVAILABLE` | error | TypeScript could not be found or installed (`fix` = the command to run) |
+| `W_RUNTIME_VERSION_MISMATCH` | warning | own `tsconfig.json`, and `node_modules/@pix3/runtime` is not this CLI's version |
+| `W_RUNTIME_NOT_INSTALLED` | warning | own `tsconfig.json`, and no `node_modules/@pix3/runtime` |
+| `W_KIT_OUTDATED` | warning | `metadata.agentKit.version` is not this CLI's version (`pix3 kit --update`) |
+
+`--json`:
+
+```text
+{
+  "ok": true, "projectRoot": "…", "errorCount": 0, "warningCount": 2,
+  "level2": { "state": "ran", "filesHydrated": 5, "filesSkipped": 0 },
+  "files": [{ "file": "scenes/main.pix3scene", "sha256": "<hex of the raw bytes>" }],
+  "diagnostics": [{ "severity", "code", "file", "line?", "nodeId?", "path?", "message", "fix?" }],
+  "notes": [],
+  "typecheck": { "ok": true, "errors": 0, "tsconfig": ".pix3/tsconfig.check.json", "mode": "pix3-types",
+                 "files": 5, "typescript": { "version": "5.8.3", "source": "cache" } },
+  "mergeLog": [{ "at", "file", "event", "…": "the newest 10 lines of .pix3/merge-log.jsonl" }],
+  "kit": { "version": "1.6.0", "cliVersion": "1.6.0", "upToDate": true },
+  "timingsMs": { "validate": 190, "typecheck": 1180, "total": 1380 }
+}
+```
+
+`files` holds every scene validated and every script type-checked, hashed over the **raw bytes** —
+the hashes `expect` (barrier tools) and `pix3 ack --sha256` take. `typecheck.errors` counts the
+`E_TYPE` / `E_TYPECHECK_UNAVAILABLE` entries of `diagnostics`.
+
+**Which tsconfig.** A project with its **own** root `tsconfig.json` (a Vite project, or one the
+editor's *build from templates* turned into one) is checked with it, as is, against its own
+`node_modules` (`mode: "project"`); nothing is written into it. Otherwise (`mode: "pix3-types"`)
+`check` uses `.pix3/tsconfig.check.json` against the bundled types in `.pix3/types/`, and first
+(re)writes both when they are missing or from another CLI build.
+
+**Where TypeScript comes from** — it is not a dependency of `@pix3/cli`: (1) the project's own
+`node_modules/typescript` (or an ancestor's); (2) the CLI's sibling install
+(`import.meta.resolve('typescript')`, e.g. the monorepo); (3) `~/.pix3/typescript/5.8.3/`,
+installed there once with `npm install --prefix ~/.pix3/typescript/5.8.3 typescript@5.8.3 …`
+(printed before it runs). `--offline` never installs: it fails with `E_TYPECHECK_UNAVAILABLE` and
+the command. `PIX3_TYPESCRIPT=<package dir>` overrides the search. Loaded with a dynamic `import()`.
+
+Measured (recipe-tapper-2d, 5 scripts, packed CLI installed outside the repo, fresh `HOME`):
+first `check` 2.1 s including the TypeScript install, then 1.45 s (validate ~0.2 s, tsc ~1.2 s).
+
+## `pix3 kit` — the agent kit
+
+`pix3 kit` installs the agent kit into an existing project (one the editor created, or after a CLI
+upgrade); `pix3 new` runs the same step. What lands in the project:
+
+| Path | What |
+| --- | --- |
+| `AGENTS.md` | Root rules (read by Codex, Cursor, …). If the project already has its own, it is kept and the kit goes to `AGENTS.pix3.md` (the command prints the line to add). |
+| `CLAUDE.md` | `@AGENTS.md` (plus `@AGENTS.pix3.md` in that case). A `CLAUDE.md` of the project's own is never touched — the command prints the line to add. |
+| `.claude/skills/pix3-{scene-format,nodes,scripts,verify}/SKILL.md` + `reference.md` | Skills loaded on demand; the `reference.md` files are generated from `docs/` and the runtime's registry |
+| `.mcp.json` | The pinned `pix3 mcp --workspace` entry; other servers kept |
+| `.gitignore` | `.pix3/` appended when not covered; existing content kept |
+| `tsconfig.json`, `.pix3/tsconfig.check.json`, `.pix3/types/` | Only without a `tsconfig.json` of the project's own (see below) |
+| `pix3project.yaml` | `metadata.agentKit: { version, files }` (everything else as written) |
+| `.pix3/kit-manifest.json` | sha256 of every file the kit wrote |
+
+Without `--update`, existing files are never replaced (missing ones are written; an unchanged file
+from an older kit is reported `outdated`). `--update` replaces every kit file whose bytes still
+match the hash in `.pix3/kit-manifest.json` and **skips** (and reports) every file edited since.
+`.pix3/` is gitignored, so on a fresh clone the manifest is gone and every differing kit file counts
+as edited.
+
+**Generated, not copied.** `scripts/build-kit.mjs` (run at `prepack`; a repo checkout regenerates
+`kit/` automatically whenever an input changed) expands the templates in `kit-src/`: hand-written
+prose plus `{{include:<repo path>#<heading>}}` / `{{include:<repo path>@<paragraph>}}` directives
+over `docs/pix3-specification.md`, `docs/node-types-reference.md`, `docs/nodes-and-systems.md`,
+`src/services/agent/agent-skills/engine-api-map.md` and this README, and `{{generated:…}}` blocks
+computed from code (the `core:` component table from the runtime's registry, the MCP tool list,
+the barrier error codes). Syntax: `src/kit/generate.ts`. `src/kit.spec.ts` builds the kit and fails
+on drift: an unresolved directive, a `pix3` command or flag not in the usage text, a tool name
+outside the 14, a diagnostic code no command emits, a node type the loader does not know, a
+property in the nodes skill's tables that the disk-format descriptor
+(`packages/pix3-runtime/src/core/scene-disk-format.ts`) does not accept, a `core:` component that
+does not exist.
+
+### Script types (`.pix3/types/`)
+
+`scripts/build-runtime-types.mjs` (at `prepack`; rebuilt on demand in a checkout when the runtime
+sources change) runs `tsc -p packages/pix3-runtime/tsconfig.types.json` (declarations of what
+`src/index.ts` reaches — no specs, samples or `testing/`) into `runtime-types/@pix3/runtime/`, and
+copies `@types/three` (without its `node_modules`) to `runtime-types/@types/three/` — the runtime's
+public types extend three.js. `lit` (re-exported `property`/`state` decorators), `postprocessing`
+and the Spine runtime are not shipped: they are only reached from inside declaration files, which
+`skipLibCheck` leaves alone (they type as `any`). In a project without its own `tsconfig.json`:
+
+```text
+.pix3/types/@pix3/runtime/**      the runtime's .d.ts (+ package.json with the version)
+.pix3/types/@types/three/**       three.js types
+.pix3/types/version.json          which CLI build wrote them
+.pix3/tsconfig.check.json         paths → ./types/…, strict, noEmit, skipLibCheck, lib ES2022 + DOM,
+                                  include ../scripts/**/*.ts and ../src/scripts/**/*.ts
+tsconfig.json                     { "extends": "./.pix3/tsconfig.check.json" } — so an IDE sees them
+```
 
 ## `pix3 serve` — workspace server
 
@@ -409,8 +520,8 @@ resets it; the status-bar Agent pill has a revoke button and switches the channe
 
 ## MCP configuration and `pix3 setup`
 
-`pix3 new` writes the project's `.mcp.json` (Claude Code's project format), **pinned to the CLI
-version that wrote it** — never a bare `@pix3/cli`:
+`pix3 new` and `pix3 kit` write the project's `.mcp.json` (Claude Code's project format), **pinned
+to the CLI version that wrote it** — never a bare `@pix3/cli`:
 
 ```json
 { "mcpServers": { "pix3": { "command": "npx", "args": ["-y", "@pix3/cli@<X.Y.Z>", "mcp", "--workspace"] } } }

@@ -14,9 +14,10 @@ import { CLI_VERSION } from './version.ts';
 /**
  * `pix3 new <recipe> [dir]` — the file-level equivalent of the editor's
  * `ProjectService.applyTemplateFiles`: same base directories, same `{{PROJECT_NAME}}`
- * substitution, same manifest, same `.pix3/template.json`, plus the pinned MCP config
- * (`.mcp.json`). What it deliberately does NOT write yet is the agent kit (`AGENTS.md`,
- * `.claude/skills/…`, types) — that is phase 1 and plugs in through {@link PostCreateStep}.
+ * substitution, same manifest, same `.pix3/template.json`. Everything after the template goes
+ * through {@link PostCreateStep}s: `pix3 new` passes the agent kit (`kit/install.ts`
+ * `agentKitStep` — AGENTS.md, CLAUDE.md, skills, `.mcp.json`, `.gitignore`, script types); the
+ * default here is only the pinned MCP config, so a bare `createProject` stays kit-free.
  */
 
 /** The editor's flat base layout plus its companion folders (`design`, `references`). */
@@ -42,8 +43,8 @@ export interface CreatedProject {
 export type PostCreateStep = (project: CreatedProject) => string[];
 
 /**
- * The project-scoped MCP config (`.mcp.json`, pinned CLI version — plan §5 A). Phase 1 appends
- * `installAgentKit` here.
+ * The project-scoped MCP config (`.mcp.json`, pinned CLI version — plan §5 A). `pix3 new` replaces
+ * this with `agentKitStep`, which writes the same `.mcp.json` as part of the kit.
  */
 export const DEFAULT_POST_CREATE_STEPS: readonly PostCreateStep[] = [mcpConfigStep()];
 

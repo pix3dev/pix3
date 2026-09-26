@@ -112,6 +112,12 @@ const decodeURIComponentSafe = (value: string): string => {
 
 export const sha256 = (text: string): string => createHash('sha256').update(text).digest('hex');
 
+/** sha256 of a project file's RAW BYTES — the hash `pix3 read`, `pix3 serve` and `expect` use. */
+export const sha256OfFile = (project: ProjectFiles, projectPath: string): string =>
+  createHash('sha256')
+    .update(readFileSync(project.absolute(projectPath)))
+    .digest('hex');
+
 export interface ProjectManifestInfo {
   readonly targetPlatform?: string;
 }

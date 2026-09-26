@@ -128,7 +128,7 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
   the main axis always, the cross axis only when its own Anchors are off.
 - Cannot have children by default (set `isContainer = true` to enable)
 - Transforms affect all children in local space
-- Rotation is clockwise, in degrees
+- Rotation is in degrees; positive is counter-clockwise (Y points up), and scripts see radians in `rotation.z`
 - **Draw order:** by default the 2D pass paints in scene-tree DFS order (a later/deeper node draws
   on top — Godot-like). `zIndex` lifts a node out of that order without moving it in the tree:
   nodes are bucketed by _effective_ z first, and tree order only breaks ties inside a bucket. With
@@ -650,14 +650,18 @@ A specialized slot control for inventory systems. Supports drag-and-drop for ite
 
 **Properties:**
 
-| Property          | Type   | Default | Description             |
-| ----------------- | ------ | ------- | ----------------------- |
-| `width`           | number | 64      | Slot size               |
-| `height`          | number | 64      | Slot size               |
-| `backgroundColor` | color  | #2a2a2a | Empty slot color        |
-| `borderColor`     | color  | #444444 | Border color            |
-| `highlightColor`  | color  | #4a9eff | Selection highlight     |
-| `itemCount`       | number | 0       | Number of items in slot |
+| Property           | Type    | Default        | Description                                       |
+| ------------------ | ------- | -------------- | ------------------------------------------------- |
+| `width`            | number  | 60             | Slot size (20..200)                               |
+| `height`           | number  | 60             | Slot size (20..200)                               |
+| `backdropColor`    | color   | #555555        | Slot background                                   |
+| `borderColor`      | color   | #888888        | Border colour                                     |
+| `borderWidth`      | number  | 2              | Border thickness, px                              |
+| `quantity`         | number  | 0              | Stack count shown in the corner (≥ 0)             |
+| `showQuantity`     | boolean | true           | Draw the count                                    |
+| `quantityFontSize` | number  | 12             | Count text size, px                               |
+| `selectionColor`   | color   | #ffff00        | Highlight colour while selected                   |
+| `selectedAction`   | string  | `SlotSelected` | Virtual button pressed while the slot is selected |
 
 **Signals:**
 
@@ -985,7 +989,7 @@ A `THREE.InstancedMesh` wrapper for rendering many copies of one geometry/materi
 | `castShadow`                                | boolean | —           | Forwarded to the underlying mesh                                                                                |
 | `receiveShadow`                             | boolean | —           | Forwarded to the underlying mesh                                                                                |
 | `frustumCulled`                             | boolean | —           | Forwarded to the underlying mesh                                                                                |
-| `visibleInstanceCount`                      | number  | —           | How many instances currently draw (read-only display)                                                           |
+| `visibleInstanceCount`                      | number  | —           | How many instances currently draw (read-only display; not saved)                                               |
 | `material.type`                             | enum    | `standard`  | Material family — `standard` (PBR) / `lambert` (mobile default) / `basic` (unlit); inspector: **Material Type** |
 | `material.color`                            | color   | `#ffffff`   | Colour every instance shares; a per-instance colour multiplies it                                               |
 | `material.roughness` / `material.metalness` | number  | 0.35 / 0.25 | `standard` only; dropped from the file for the other families                                                   |
@@ -1144,8 +1148,8 @@ impostors, floating markers, particles you place by hand, and 2.5D characters.
 | `billboard`          | boolean | false   | Face the camera every frame                                            |
 | `billboardRoll`      | number  | 0       | Roll, in degrees, applied after billboarding                           |
 | `opacity`            | number  | 1       | Alpha                                                                  |
-| `textureAspectRatio` | number  | null    | Captured from the texture on load                                      |
-| `aspectRatioLocked`  | boolean | false   | Keep width/height at the texture's aspect when either is edited        |
+| `textureAspectRatio` | number  | null    | Captured from the texture on load (not saved)                          |
+| `aspectRatioLocked`  | boolean | false   | Keep width/height at the texture's aspect (inspector-only, not saved)  |
 
 **Usage Notes:**
 
@@ -1173,7 +1177,7 @@ frame rate.
 | `playing`      | boolean | true     | Play on start                                                |
 | `loop`         | boolean | true     | Repeat when the clip ends                                    |
 | `freeOnFinish` | boolean | false    | Remove the node when a non-looping clip ends                 |
-| `currentFrame` | number  | 0        | Frame index                                                  |
+| `currentFrame` | number  | 0        | Frame index (playback state, not saved)                      |
 | `billboard`    | boolean | **true** | Face the camera (note: the opposite default from `Sprite3D`) |
 | `color`        | color   | #ffffff  | Tint                                                         |
 | `opacity`      | number  | 1        | Alpha                                                        |
@@ -1393,7 +1397,7 @@ filter).
 | MeshInstance         | src                                                                                                  |
 | Sprite3D             | texture, width, height (world units), billboard, billboardRoll, opacity                              |
 | AnimatedSprite3D     | width, height, fps, playing, loop, freeOnFinish, billboard (default true)                            |
-| InstancedMesh3D      | maxInstances, enablePerInstanceColor, visibleInstanceCount (bulk write\*/flush), material.type/color |
+| InstancedMesh3D      | maxInstances, enablePerInstanceColor, material.type/color (bulk write\*/flush from scripts)          |
 | DirectionalLightNode | color, intensity, castShadow                                                                         |
 | AmbientLightNode     | color, intensity (flat fill, no shadows)                                                             |
 | HemisphereLightNode  | skyColor, groundColor, intensity                                                                     |
@@ -1404,7 +1408,7 @@ filter).
 | Joystick2D           | enabled, radius, floating, axisHorizontal, axisVertical                                              |
 | Checkbox2D           | size, checked, textureBox, textureBoxChecked, textureMark                                            |
 | Bar2D                | width, value, minValue, maxValue, barColor, backBackgroundColor, textureTrough/Fill, sliceBorder\*   |
-| InventorySlot2D      | width, itemCount                                                                                     |
+| InventorySlot2D      | width, height, quantity, showQuantity, backdropColor, selectionColor                                 |
 | AudioPlayer          | audioTrack, autoplay, loop, volume, bus, pitchVariation, volumeVariation                             |
 | PostProcess          | affect2D, bloom*, vignette*, chromaticAberration*, aoMode, ssao*, lut\*                              |
 | Group                | NodeBase only — an organisational container                                                          |
