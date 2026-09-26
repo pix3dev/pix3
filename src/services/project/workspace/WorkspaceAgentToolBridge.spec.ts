@@ -9,6 +9,9 @@ import {
   type WorkspaceAgentHost,
 } from '@/services/project/workspace/WorkspaceAgentToolBridge';
 import type { WorkspaceCallContext } from '@/services/project/workspace/WorkspaceSessionService';
+import { ServiceContainer } from '@/fw/di';
+import { isEditorKeepAlive, setEditorKeepAlive } from '@/services/core/page-activity';
+import { AgentKeepaliveService } from '@/services/project/workspace/AgentKeepaliveService';
 import type {
   WorkspaceCallFrame,
   WorkspaceCallResult,
@@ -451,5 +454,33 @@ describe('WorkspaceAgentToolBridge', () => {
     expect(host.executed).toEqual([]);
     bridge.setEnabled(true);
     expect((await bridge.handleCall(frame('play_status'), context)).isError).toBeUndefined();
+  });
+
+  it('keeps the editor alive during a call and while the game it started runs', async () => {
+    const container = ServiceContainer.getInstance();
+    const keepalive = container.getService<AgentKeepaliveService>(
+      container.getOrCreateToken(AgentKeepaliveService)
+    );
+    try {
+      let aliveDuringCall = false;
+      vi.mocked(host.executeTool).mockImplementationOnce(async name => {
+        aliveDuringCall = isEditorKeepAlive();
+        host.executed.push({ name, args: {} });
+        return { ok: true };
+      });
+      await bridge.handleCall(frame('get_selection'), context);
+      expect(aliveDuringCall).toBe(true);
+      // Finished a moment ago: still alive (the agent is likely to call again).
+      expect(keepalive.reasons()).toMatchObject({ calls: true, play: false });
+
+      appState.ui.isPlaying = true;
+      const started = await bridge.handleCall(frame('play_start'), context);
+      expect(started.isError).toBeUndefined();
+      expect(keepalive.reasons().play).toBe(true);
+      expect(appState.project.coauthoring.agentKeepalive).toBe(true);
+    } finally {
+      keepalive.dispose();
+      setEditorKeepAlive(false);
+    }
   });
 });

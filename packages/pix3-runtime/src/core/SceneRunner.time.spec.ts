@@ -555,3 +555,36 @@ describe('SceneRunner time mode audio', () => {
     expect(audio.setBusVolume).toHaveBeenCalledWith('master', 1, expect.any(Number));
   });
 });
+
+describe('SceneRunner frame scheduler', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('drives the loop from a host scheduler instead of rAF, and moves an armed frame over', () => {
+    const { runner, internals, script, raf, caf } = createHarness();
+    internals.tick();
+    expect(raf).toHaveBeenCalledTimes(1);
+    expect(script.received).toHaveLength(1);
+
+    const queued: Array<(timestampMs: number) => void> = [];
+    const scheduler = {
+      request: vi.fn((callback: (timestampMs: number) => void) => queued.push(callback)),
+      cancel: vi.fn(),
+    };
+    runner.setFrameScheduler(scheduler);
+    // The frame armed on rAF was withdrawn and re-armed on the host scheduler.
+    expect(caf).toHaveBeenCalledWith(7);
+    expect(scheduler.request).toHaveBeenCalledTimes(1);
+
+    for (let i = 0; i < 3; i++) queued.shift()?.(performance.now());
+    expect(script.received).toHaveLength(4);
+    expect(raf).toHaveBeenCalledTimes(1);
+
+    runner.pause();
+    expect(scheduler.cancel).toHaveBeenCalled();
+    runner.setFrameScheduler(null);
+    runner.resume();
+    expect(raf).toHaveBeenCalledTimes(2);
+  });
+});

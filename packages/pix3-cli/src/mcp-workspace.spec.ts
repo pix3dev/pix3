@@ -34,8 +34,14 @@ const write = (rel: string, data: string): void => {
   writeFileSync(file, data);
 };
 
-const startServer = async (): Promise<WorkspaceServer> => {
-  const server = new WorkspaceServer({ root, ports: [0], debounceMs: 30, leaseGraceMs: 300 });
+const startServer = async (agentPresenceTtlMs?: number): Promise<WorkspaceServer> => {
+  const server = new WorkspaceServer({
+    root,
+    ports: [0],
+    debounceMs: 30,
+    leaseGraceMs: 300,
+    agentPresenceTtlMs,
+  });
   servers.push(server);
   await server.start();
   return server;
@@ -79,11 +85,14 @@ const textResult = (value: unknown): Frame => ({
   content: [{ type: 'text', text: typeof value === 'string' ? value : JSON.stringify(value) }],
 });
 
-const startMcp = async (projectDir: string = root): Promise<Client> => {
+const startMcp = async (
+  projectDir: string = root,
+  env: Record<string, string> = {}
+): Promise<Client> => {
   const transport = new StdioClientTransport({
     command: process.execPath,
     args: [CLI_ENTRY, 'mcp', '--workspace', '--project', projectDir],
-    env: { ...process.env, PIX3_AGENT: 'spec-agent' } as Record<string, string>,
+    env: { ...process.env, PIX3_AGENT: 'spec-agent', ...env } as Record<string, string>,
     stderr: 'pipe',
   });
   const client = new Client({ name: 'spec-client', version: '0.0.0' });
@@ -505,5 +514,29 @@ describe('pix3 mcp --workspace', () => {
     const up = await callTool(client, 'project_status');
     expect(up.isError).toBe(false);
     expect(up.body.connected).toBe(false);
+  }, 20_000);
+
+  it('announces its presence while alive, heartbeats past the TTL, and leaves on close', async () => {
+    const server = await startServer(600);
+    const client = await startMcp(root, { PIX3_PRESENCE_HEARTBEAT_MS: '150' });
+    const until = async (attached: boolean, timeoutMs: number): Promise<void> => {
+      const deadline = Date.now() + timeoutMs;
+      while (server.agentPresence.attached !== attached) {
+        if (Date.now() > deadline) throw new Error(`presence never became ${attached}`);
+        await new Promise(resolve => setTimeout(resolve, 25));
+      }
+    };
+    await until(true, 5_000);
+    // The MCP client's own name, once it has introduced itself.
+    await new Promise(resolve => setTimeout(resolve, 200));
+    expect(server.agentPresence.agent).toEqual({ name: 'spec-client', verified: false });
+    // Well past the 600 ms TTL: only the heartbeats keep it attached.
+    await new Promise(resolve => setTimeout(resolve, 1_500));
+    expect(server.agentPresence.attached).toBe(true);
+
+    await client.close();
+    clients.splice(clients.indexOf(client), 1);
+    // `leaving` arrives on shutdown — well before the TTL would have expired it.
+    await until(false, 500);
   }, 20_000);
 });

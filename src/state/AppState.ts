@@ -184,6 +184,13 @@ export interface WorkspaceConnectionState {
   root: string | null;
   serverSession: string | null;
   errorMessage: string | null;
+  /**
+   * A `pix3 mcp --workspace` process is alive for this workspace (the server's `agent-presence`
+   * frame / `hello.agentPresence`); last known value while the socket is down.
+   */
+  agentAttached: boolean;
+  /** Its self-declared name (never verified). */
+  agentName: string | null;
 }
 
 export const createInitialWorkspaceConnectionState = (): WorkspaceConnectionState => ({
@@ -195,6 +202,8 @@ export const createInitialWorkspaceConnectionState = (): WorkspaceConnectionStat
   root: null,
   serverSession: null,
   errorMessage: null,
+  agentAttached: false,
+  agentName: null,
 });
 /**
  * Autosave of the co-authoring mode (`src/services/project/autosave/AutosaveService.ts`):
@@ -244,6 +253,11 @@ export interface CoauthoringState {
   editBlockedAt: number | null;
   /** Local folder hand-over: this window asked the owner to let go and waits for the lock. */
   takeOverPending: boolean;
+  /**
+   * An agent is working with this editor, so background pauses are off (`AgentKeepaliveService`):
+   * presence attached, a call in flight or recent, or a game the agent started still running.
+   */
+  agentKeepalive: boolean;
 }
 
 export interface MergeBannerState {
@@ -276,6 +290,7 @@ export const createInitialCoauthoringState = (): CoauthoringState => ({
   recentlyChangedNodeIds: [],
   editBlockedAt: null,
   takeOverPending: false,
+  agentKeepalive: false,
 });
 
 export type AssetBrowserViewMode = 'folders' | 'by-type';
@@ -604,6 +619,11 @@ export interface UIState {
   autosaveLocalProjects: boolean;
   /** Pause rendering when the window is unfocused for battery economy */
   pauseRenderingOnUnfocus: boolean;
+  /**
+   * Keep the editor running in the background while an agent is connected (`AgentKeepaliveService`):
+   * the battery-saving pauses never gate work an agent asked for.
+   */
+  keepEditorRunningForAgent: boolean;
   /** Preferred aspect ratio for the runtime preview surface */
   gameAspectRatio: GameAspectRatio;
   /**
@@ -891,6 +911,7 @@ export const createInitialAppState = (): AppState => ({
     warnOnUnsavedUnload: true,
     autosaveLocalProjects: false,
     pauseRenderingOnUnfocus: true,
+    keepEditorRunningForAgent: true,
     gameAspectRatio: 'free',
     flowStageAspect: 'project',
     isPlaying: false,

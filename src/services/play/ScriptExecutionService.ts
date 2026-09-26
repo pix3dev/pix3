@@ -16,7 +16,8 @@ import {
 } from '@pix3/runtime';
 import { NodeBase } from '@pix3/runtime';
 import { AutoloadService } from '@/services/project/AutoloadService';
-import { isDocumentActive } from '@/services/core/page-activity';
+import { isEditorActive, onEditorKeepAliveChange } from '@/services/core/page-activity';
+import { BackgroundTicker } from '@/services/core/background-ticker';
 
 interface NodeStateSnapshot {
   nodeId: string;
@@ -43,7 +44,11 @@ export class ScriptExecutionService {
   private animationFrameId: number | null = null;
   private lastTimestamp: number = 0;
   private isRunning: boolean = false;
-  private isPageActive: boolean = isDocumentActive(document);
+  /** Document active, or an agent keeps the editor alive (`AgentKeepaliveService`). */
+  private isPageActive: boolean = isEditorActive(document);
+  /** rAF while visible; worker ticks in a hidden tab while keepalive is on. */
+  private readonly ticker = new BackgroundTicker();
+  private readonly disposeKeepAlive: () => void;
   private currentSceneId: string | null = null;
   private nodeStateSnapshots: Map<string, NodeStateSnapshot[]> = new Map();
   private readonly handlePageActivityEvent = (): void => {
@@ -56,6 +61,7 @@ export class ScriptExecutionService {
     window.addEventListener('pageshow', this.handlePageActivityEvent);
     window.addEventListener('pagehide', this.handlePageActivityEvent);
     document.addEventListener('visibilitychange', this.handlePageActivityEvent);
+    this.disposeKeepAlive = onEditorKeepAliveChange(this.handlePageActivityEvent);
   }
 
   /**
@@ -92,7 +98,7 @@ export class ScriptExecutionService {
     this.isRunning = false;
 
     if (this.animationFrameId !== null) {
-      cancelAnimationFrame(this.animationFrameId);
+      this.ticker.cancel(this.animationFrameId);
       this.animationFrameId = null;
     }
 
@@ -144,7 +150,7 @@ export class ScriptExecutionService {
       return;
     }
 
-    this.animationFrameId = requestAnimationFrame(timestamp => {
+    this.animationFrameId = this.ticker.request(timestamp => {
       this.tick(timestamp);
     });
   }
@@ -343,10 +349,12 @@ export class ScriptExecutionService {
     window.removeEventListener('pageshow', this.handlePageActivityEvent);
     window.removeEventListener('pagehide', this.handlePageActivityEvent);
     document.removeEventListener('visibilitychange', this.handlePageActivityEvent);
+    this.disposeKeepAlive();
+    this.ticker.dispose();
   }
 
   private updatePageActivity(): void {
-    this.isPageActive = isDocumentActive(document);
+    this.isPageActive = isEditorActive(document);
     this.handlePageActivityChange();
   }
 
@@ -357,7 +365,7 @@ export class ScriptExecutionService {
 
     if (this.shouldPauseForBackgroundWork()) {
       if (this.animationFrameId !== null) {
-        cancelAnimationFrame(this.animationFrameId);
+        this.ticker.cancel(this.animationFrameId);
         this.animationFrameId = null;
       }
       return;

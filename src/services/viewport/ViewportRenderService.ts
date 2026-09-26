@@ -82,7 +82,12 @@ import {
   type Transform2DUpdateOptions,
   type Selection2DOverlay,
 } from '@/services/viewport/TransformTool2d';
-import { isDocumentActive } from '@/services/core/page-activity';
+import {
+  isDocumentActive,
+  isEditorKeepAlive,
+  onEditorKeepAliveChange,
+} from '@/services/core/page-activity';
+import { BackgroundTicker } from '@/services/core/background-ticker';
 import { isPointerBlocked } from './peek-gating';
 import { GestureStateService } from './GestureStateService';
 
@@ -198,6 +203,11 @@ export class ViewportRendererService {
   private animationId?: number;
   private isPaused = true;
   private isWindowFocused = isDocumentActive(document);
+  /**
+   * Frame source of the render loop: rAF, or worker ticks in a hidden tab while an agent keeps the
+   * editor alive — there rAF never fires, and a loop parked on it would swallow `requestRender`.
+   */
+  private readonly frameTicker = new BackgroundTicker();
   private disposers: Array<() => void> = [];
   private gridHelper?: THREE.GridHelper;
   private editorAmbientLight?: THREE.AmbientLight;
@@ -714,12 +724,15 @@ export class ViewportRendererService {
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('pagehide', onPageHide);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    // An agent attaching / leaving re-decides the focus pause (`AgentKeepaliveService`).
+    const disposeKeepAlive = onEditorKeepAliveChange(() => this.handleFocusPause());
     this.disposers.push(() => {
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      disposeKeepAlive();
     });
 
     this.syncNavigationMode();
@@ -854,7 +867,7 @@ export class ViewportRendererService {
   pause(): void {
     this.isPaused = true;
     if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
+      this.frameTicker.cancel(this.animationId);
       this.animationId = undefined;
     }
     this.cancelPanMomentum();
@@ -1959,7 +1972,7 @@ export class ViewportRendererService {
    */
   private parkRenderLoop(): void {
     if (this.animationId !== undefined) {
-      cancelAnimationFrame(this.animationId);
+      this.frameTicker.cancel(this.animationId);
       this.animationId = undefined;
     }
     // …but not when the reason we are parking is that nobody can see the canvas (Vibe with its
@@ -4586,7 +4599,7 @@ export class ViewportRendererService {
         return;
       }
 
-      this.animationId = requestAnimationFrame(render);
+      this.animationId = this.frameTicker.request(render);
       this.renderLoopTick();
     };
 
@@ -4642,7 +4655,8 @@ export class ViewportRendererService {
   }
 
   private shouldPauseForWindowFocus(): boolean {
-    if (!appState.ui.pauseRenderingOnUnfocus || this.isWindowFocused) {
+    // An agent keeps the editor alive: its screenshots and edits must land while the tab is away.
+    if (!appState.ui.pauseRenderingOnUnfocus || this.isWindowFocused || isEditorKeepAlive()) {
       return false;
     }
 
@@ -4655,8 +4669,9 @@ export class ViewportRendererService {
     this.disposeGestureProbe();
     // Cancel animation loop
     if (this.animationId !== undefined) {
-      cancelAnimationFrame(this.animationId);
+      this.frameTicker.cancel(this.animationId);
     }
+    this.frameTicker.dispose();
 
     // Cancel pan momentum animation
     this.cancelPanMomentum();

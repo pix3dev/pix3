@@ -1,7 +1,7 @@
 import { subscribe } from 'valtio/vanilla';
 import { inject, injectable } from '@/fw/di';
 import { appState } from '@/state';
-import { isDocumentVisible } from '@/services/core/page-activity';
+import { isDocumentVisible, isEditorKeepAlive } from '@/services/core/page-activity';
 import { FileWatchService } from '@/services/project/FileWatchService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { ProjectOwnershipService } from '@/services/project/coauthoring/ProjectOwnershipService';
@@ -176,7 +176,8 @@ export class AckService {
       this.fileWatch.watch(ACK_FILE, null, null, this.onPushedChange);
     }
     this.timer = setInterval(() => {
-      if (typeof document === 'undefined' || isDocumentVisible(document)) {
+      // Hidden tabs skip the poll, unless an agent keeps the editor alive (its acks matter then).
+      if (typeof document === 'undefined' || isDocumentVisible(document) || isEditorKeepAlive()) {
         void this.refresh();
       }
     }, ACK_POLL_MS);

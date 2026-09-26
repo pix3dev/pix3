@@ -18,7 +18,8 @@ import type { VirtualFileLoadContext } from '@/services/scripting/ScriptCompiler
 import { ApiClientError } from '@/services/cloud/ApiClient';
 import { LoggingService } from '@/services/core/LoggingService';
 import { FileWatchService } from '@/services/project/FileWatchService';
-import { isDocumentActive } from '@/services/core/page-activity';
+import { isEditorActive, onEditorKeepAliveChange } from '@/services/core/page-activity';
+import { keepaliveTimer } from '@/services/core/background-ticker';
 import { ensureRapierLoaded } from '@/core/lazy-rapier';
 import { sha256 } from '@/services/project/external-merge/hash';
 
@@ -56,15 +57,18 @@ export class ProjectScriptLoaderService {
   private readonly fileWatchService!: FileWatchService;
 
   private disposeSubscription?: () => void;
-  private debounceTimer: number | null = null;
+  /** Cancel function of the pending debounced build (`keepaliveTimer`), or null. */
+  private debounceTimer: (() => void) | null = null;
   private readonly debounceMs = 300;
   // Shared with `pix3 validate` (see `core/project-script-registration.ts` in the runtime).
   private readonly scriptDirectories = PROJECT_SCRIPT_DIRECTORIES;
   private readonly supportedSourceExtensions = ['.ts', '.js', '.css', '.glsl'] as const;
-  private isPageActive = isDocumentActive(document);
+  /** Document active, or an agent keeps the editor alive: a background build is not deferred. */
+  private isPageActive = isEditorActive(document);
   private pendingBuildWhileHidden = false;
+  private disposeKeepAlive: (() => void) | null = null;
   private readonly handlePageActivityChange = (): void => {
-    this.isPageActive = isDocumentActive(document);
+    this.isPageActive = isEditorActive(document);
     if (!this.isPageActive || !this.pendingBuildWhileHidden) {
       return;
     }
@@ -135,6 +139,7 @@ export class ProjectScriptLoaderService {
     window.addEventListener('pageshow', this.handlePageActivityChange);
     window.addEventListener('pagehide', this.handlePageActivityChange);
     document.addEventListener('visibilitychange', this.handlePageActivityChange);
+    this.disposeKeepAlive = onEditorKeepAliveChange(this.handlePageActivityChange);
 
     let lastStatus = appState.project.status;
     let lastProjectId = appState.project.id;
@@ -209,7 +214,7 @@ export class ProjectScriptLoaderService {
 
     // Clear existing debounce timer
     if (this.debounceTimer !== null) {
-      window.clearTimeout(this.debounceTimer);
+      this.debounceTimer();
       this.debounceTimer = null;
     }
 
@@ -222,7 +227,7 @@ export class ProjectScriptLoaderService {
     }
 
     // Debounce the build
-    this.debounceTimer = window.setTimeout(() => {
+    this.debounceTimer = keepaliveTimer(() => {
       this.debounceTimer = null;
       void this.runBuild();
     }, this.debounceMs);
@@ -920,9 +925,11 @@ export class ProjectScriptLoaderService {
     window.removeEventListener('pageshow', this.handlePageActivityChange);
     window.removeEventListener('pagehide', this.handlePageActivityChange);
     document.removeEventListener('visibilitychange', this.handlePageActivityChange);
+    this.disposeKeepAlive?.();
+    this.disposeKeepAlive = null;
 
     if (this.debounceTimer !== null) {
-      window.clearTimeout(this.debounceTimer);
+      this.debounceTimer();
       this.debounceTimer = null;
     }
 

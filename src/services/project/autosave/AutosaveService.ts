@@ -14,6 +14,7 @@ import {
   SaveSceneOperation,
   type SaveSceneOperationResult,
 } from '@/features/scene/SaveSceneOperation';
+import { keepaliveTimer } from '@/services/core/background-ticker';
 
 /** Quiet time after the last committed operation before a dirty scene is written (plan §5 C4). */
 export const AUTOSAVE_DEBOUNCE_MS = 1000;
@@ -69,7 +70,11 @@ export class AutosaveService {
   @inject(RecoveryJournalService)
   private readonly journal!: RecoveryJournalService;
 
-  private timer: ReturnType<typeof setTimeout> | null = null;
+  /**
+   * Cancel function of the pending debounced save (`keepaliveTimer`: worker-backed while an agent
+   * keeps the editor alive, so a background tab does not sit on an agent-visible edit), or null.
+   */
+  private timer: (() => void) | null = null;
   private flushing: Promise<void> | null = null;
   private flushAgain = false;
   private kitProjectId: string | null = null;
@@ -122,7 +127,7 @@ export class AutosaveService {
     const id = this.nextHoldId++;
     this.holds.set(id, reason);
     if (this.timer !== null) {
-      clearTimeout(this.timer);
+      this.timer();
       this.timer = null;
     }
     if (this.isEnabled() && this.ownership.isOwner()) {
@@ -147,7 +152,7 @@ export class AutosaveService {
   /** Save now (skipping the debounce) — the same rules apply. Resolves when done. */
   async flushNow(): Promise<void> {
     if (this.timer !== null) {
-      clearTimeout(this.timer);
+      this.timer();
       this.timer = null;
     }
     await this.flush();
@@ -178,7 +183,7 @@ export class AutosaveService {
 
   dispose(): void {
     if (this.timer !== null) {
-      clearTimeout(this.timer);
+      this.timer();
       this.timer = null;
     }
     for (const dispose of this.disposers) dispose();
@@ -211,12 +216,12 @@ export class AutosaveService {
       return;
     }
     if (this.timer !== null) {
-      clearTimeout(this.timer);
+      this.timer();
     }
     if (this.ownership.isOwner() && appState.project.coauthoring.autosaveStatus !== 'saving') {
       this.setStatus('dirty');
     }
-    this.timer = setTimeout(() => {
+    this.timer = keepaliveTimer(() => {
       this.timer = null;
       void this.flush();
     }, delay);
@@ -341,7 +346,7 @@ export class AutosaveService {
     }
     if (!enabled) {
       if (this.timer !== null) {
-        clearTimeout(this.timer);
+        this.timer();
         this.timer = null;
       }
       this.setStatus('off', this.offReason());

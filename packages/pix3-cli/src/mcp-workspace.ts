@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 
 import { findProjectRoot } from './manifest.ts';
+import { AGENT_PRESENCE_HEARTBEAT_MS } from './protocol.ts';
 import { CLI_VERSION } from './version.ts';
 import { WorkspaceAgentTools } from './workspace-agent/agent-tools.ts';
 import { AgentLaneClient, NoWorkspaceServerError } from './workspace-agent/lane-client.ts';
@@ -94,10 +95,20 @@ export const runMcpWorkspace = async (options: RunMcpWorkspaceOptions): Promise<
     );
   }
 
+  // Presence: while this process lives, the editor keeps its loops running in a background tab
+  // (`agent-presence` frame). Failures are silent — no server yet, or it restarted: the next beat
+  // rediscovers it through `.pix3/workspace.json`.
+  const heartbeatMs = presenceHeartbeatMs();
+  const beat = (): void => void lane.presence().catch(() => undefined);
+  const heartbeat = setInterval(beat, heartbeatMs);
+  heartbeat.unref();
+
   let closing = false;
   const shutdown = async (): Promise<void> => {
     if (closing) return;
     closing = true;
+    clearInterval(heartbeat);
+    await lane.presence(true, 1_000).catch(() => undefined);
     await server.close().catch(() => undefined);
     process.exit(0);
   };
@@ -107,5 +118,14 @@ export const runMcpWorkspace = async (options: RunMcpWorkspaceOptions): Promise<
 
   const transport = new StdioServerTransport();
   transport.onclose = () => void shutdown();
+  // Announce once the client said who it is (its name is the presence name), and right away too.
+  server.oninitialized = beat;
   await server.connect(transport);
+  beat();
+};
+
+/** `PIX3_PRESENCE_HEARTBEAT_MS` overrides the cadence (specs); anything unusable = the default. */
+const presenceHeartbeatMs = (): number => {
+  const raw = Number(process.env.PIX3_PRESENCE_HEARTBEAT_MS);
+  return Number.isFinite(raw) && raw >= 50 ? raw : AGENT_PRESENCE_HEARTBEAT_MS;
 };

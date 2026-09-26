@@ -1,5 +1,10 @@
 import { injectable } from '@/fw/di';
-import { isDocumentVisible } from '@/services/core/page-activity';
+import {
+  isDocumentVisible,
+  isEditorKeepAlive,
+  onEditorKeepAliveChange,
+} from '@/services/core/page-activity';
+import { keepaliveInterval } from '@/services/core/background-ticker';
 import { ACK_FILE, isPix3InternalPath } from '@/services/project/coauthoring/coauthoring-paths';
 
 /**
@@ -18,7 +23,9 @@ import { ACK_FILE, isPix3InternalPath } from '@/services/project/coauthoring/coa
  * change came from.
  *
  * Polling runs while the document is **visible**, focused or not (an editor beside the agent's
- * terminal must see the agent's edits), and keeps running during play: a change is detected and
+ * terminal must see the agent's edits), or — hidden too — while an agent keeps the editor alive
+ * (`AgentKeepaliveService`; the pollers then run off worker timers, which a hidden tab does not
+ * throttle). It keeps running during play: a change is detected and
  * reported, and `ExternalChangeService` marks the editor `stale` instead of reloading mid-game.
  * `.pix3/` (recovery journal, protected set, challenge files) is never reported, except
  * `.pix3/ack.json`, which `AckService` watches explicitly.
@@ -28,8 +35,8 @@ export class FileWatchService {
   /** Map of watched file paths to their file handles. */
   private readonly fileHandles = new Map<string, FileSystemFileHandle>();
 
-  /** Map of watched file paths to their polling interval IDs. */
-  private readonly watchers = new Map<string, number>();
+  /** Watched file paths → their poller (`background` = worker timers, hidden tab + keepalive). */
+  private readonly watchers = new Map<string, { cancel: () => void; background: boolean }>();
 
   /** Map of watched file paths to their last known modification times. */
   private readonly lastModifiedTimes = new Map<string, number>();
@@ -62,14 +69,22 @@ export class FileWatchService {
     window.addEventListener('pageshow', this.handlePageActivityChange);
     window.addEventListener('pagehide', this.handlePageActivityChange);
     document.addEventListener('visibilitychange', this.handlePageActivityChange);
+    this.disposeKeepAlive = onEditorKeepAliveChange(this.handlePageActivityChange);
   }
 
+  private readonly disposeKeepAlive: () => void;
+
   /**
-   * True while polling timers should be running: the document is visible. Focus does not matter,
-   * and neither does play mode (changes are detected then and turned into a `stale` flag).
+   * True while polling timers should be running: the document is visible, or an agent keeps the
+   * editor alive. Focus does not matter, and neither does play mode (changes are detected then and
+   * turned into a `stale` flag).
    */
   private get shouldPoll(): boolean {
-    return this.isPageVisible;
+    return this.isPageVisible || isEditorKeepAlive();
+  }
+
+  private shouldPollInBackground(): boolean {
+    return !this.isPageVisible && isEditorKeepAlive();
   }
 
   /** Check every polled file now (the explicit `syncNow()` path). Resolves when all were read. */
@@ -84,6 +99,15 @@ export class FileWatchService {
   /** Start/stop all pollers to match {@link shouldPoll}; checks immediately on resume. */
   private updatePollingState(): void {
     if (this.shouldPoll) {
+      // A hidden tab under keepalive polls on worker timers, otherwise setInterval: re-arm the
+      // pollers whose timer kind no longer fits.
+      const background = this.shouldPollInBackground();
+      for (const [filePath, poller] of Array.from(this.watchers.entries())) {
+        if (poller.background !== background) {
+          poller.cancel();
+          this.watchers.delete(filePath);
+        }
+      }
       this.resumePolling();
       for (const [filePath, fileHandle] of this.fileHandles.entries()) {
         void this.checkFileChange(filePath, fileHandle);
@@ -259,9 +283,9 @@ export class FileWatchService {
 
     // Stop polling if no more listeners. The handle is dropped even while polling is paused
     // (hidden tab / play mode), or `resumePolling` would bring an unwatched path back.
-    const intervalId = this.watchers.get(filePath);
-    if (intervalId) {
-      window.clearInterval(intervalId);
+    const poller = this.watchers.get(filePath);
+    if (poller) {
+      poller.cancel();
       this.watchers.delete(filePath);
     }
     if (this.fileHandles.delete(filePath) && import.meta.env.MODE === 'development') {
@@ -287,16 +311,26 @@ export class FileWatchService {
       return;
     }
 
-    const intervalId = window.setInterval(() => {
+    const poll = (): void => {
       const handle = this.fileHandles.get(filePath);
       if (!handle) {
         this.unwatch(filePath);
         return;
       }
       void this.checkFileChange(filePath, handle);
-    }, this.pollInterval);
-
-    this.watchers.set(filePath, intervalId);
+    };
+    if (this.shouldPollInBackground()) {
+      this.watchers.set(filePath, {
+        cancel: keepaliveInterval(poll, this.pollInterval),
+        background: true,
+      });
+    } else {
+      const intervalId = window.setInterval(poll, this.pollInterval);
+      this.watchers.set(filePath, {
+        cancel: () => window.clearInterval(intervalId),
+        background: false,
+      });
+    }
 
     if (import.meta.env.MODE === 'development') {
       console.debug(`[FileWatchService] Started watching: ${filePath}`);
@@ -304,8 +338,8 @@ export class FileWatchService {
   }
 
   private pausePolling(): void {
-    for (const intervalId of this.watchers.values()) {
-      window.clearInterval(intervalId);
+    for (const poller of this.watchers.values()) {
+      poller.cancel();
     }
     this.watchers.clear();
   }
@@ -367,6 +401,7 @@ export class FileWatchService {
     window.removeEventListener('pageshow', this.handlePageActivityChange);
     window.removeEventListener('pagehide', this.handlePageActivityChange);
     document.removeEventListener('visibilitychange', this.handlePageActivityChange);
+    this.disposeKeepAlive();
     this.unwatchAll();
   }
 }

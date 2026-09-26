@@ -1194,4 +1194,94 @@ describe('agent lane (/ws/agent/*)', () => {
       expect.objectContaining({ path: 'design/tests/reports/0001-run.json', origin: 'editor' }),
     ]);
   });
+
+  describe('agent presence', () => {
+    it('a heartbeat attaches the agent: broadcast, hello and status carry it', async () => {
+      const { server, base, port } = await startServer();
+      const window = await authed(port);
+      const before = await agentCall(base, server, 'GET', '/ws/agent/status');
+      expect(before.json.agentPresence).toEqual({ attached: false, agent: null });
+
+      const beat = await agentCall(base, server, 'POST', '/ws/agent/presence', {
+        agent: { name: 'claude-code', session: 'mcp-1' },
+      });
+      expect(beat.status).toBe(200);
+      expect(beat.json.agentPresence).toEqual({
+        attached: true,
+        agent: { name: 'claude-code', verified: false },
+      });
+      expect(await window.next(frame => frame.type === 'agent-presence')).toEqual({
+        type: 'agent-presence',
+        attached: true,
+        agent: { name: 'claude-code', verified: false },
+      });
+
+      // A repeated heartbeat changes nothing, so it is not broadcast again.
+      await agentCall(base, server, 'POST', '/ws/agent/presence', {
+        agent: { name: 'claude-code', session: 'mcp-1' },
+      });
+      const late = await authed(port);
+      const hello = late.frames.find(frame => frame.type === 'hello');
+      expect(hello?.agentPresence).toEqual({
+        attached: true,
+        agent: { name: 'claude-code', verified: false },
+      });
+      const status = await agentCall(base, server, 'GET', '/ws/agent/status');
+      expect(status.json.agentPresence).toMatchObject({ attached: true });
+      await sleep(50);
+      expect(window.frames.filter(frame => frame.type === 'agent-presence')).toHaveLength(1);
+    });
+
+    it('expires without heartbeats, and ends at once on leaving', async () => {
+      const { server, base, port } = await startServer({ agentPresenceTtlMs: 250 });
+      const window = await authed(port);
+      const agent = { name: 'codex', session: 'mcp-2' };
+      await agentCall(base, server, 'POST', '/ws/agent/presence', { agent });
+      await window.next(frame => frame.type === 'agent-presence' && frame.attached === true);
+      // Heartbeats inside the TTL keep it attached.
+      for (let beat = 0; beat < 3; beat++) {
+        await sleep(150);
+        await agentCall(base, server, 'POST', '/ws/agent/presence', { agent });
+      }
+      expect(server.agentPresence.attached).toBe(true);
+      // Silence past the TTL detaches it.
+      const gone = await window.next(
+        frame => frame.type === 'agent-presence' && frame.attached === false,
+        1_000
+      );
+      expect(gone).toEqual({ type: 'agent-presence', attached: false, agent: null });
+
+      await agentCall(base, server, 'POST', '/ws/agent/presence', { agent });
+      await window.next(frame => frame.type === 'agent-presence' && frame.attached === true);
+      const left = await agentCall(base, server, 'POST', '/ws/agent/presence', {
+        agent,
+        leaving: true,
+      });
+      expect(left.json.agentPresence).toEqual({ attached: false, agent: null });
+      await window.next(frame => frame.type === 'agent-presence' && frame.attached === false, 100);
+    });
+
+    it('stays attached while any of two MCP processes lives; the presence route needs the control secret', async () => {
+      const { server, base } = await startServer();
+      await agentCall(base, server, 'POST', '/ws/agent/presence', {
+        agent: { name: 'a', session: 's-a' },
+      });
+      await agentCall(base, server, 'POST', '/ws/agent/presence', {
+        agent: { name: 'b', session: 's-b' },
+      });
+      await agentCall(base, server, 'POST', '/ws/agent/presence', {
+        agent: { name: 'b', session: 's-b' },
+        leaving: true,
+      });
+      expect(server.agentPresence).toEqual({
+        attached: true,
+        agent: { name: 'a', verified: false },
+      });
+
+      const bearer = await post(`${base}/ws/agent/presence`, {
+        agent: { name: 'x', session: 'x' },
+      });
+      expect(bearer.status).toBe(401);
+    });
+  });
 });

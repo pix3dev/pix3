@@ -1,6 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { FileWatchService } from '@/services/project/FileWatchService';
 import { appState } from '@/state';
+import { setTickWorkerFactory } from '@/services/core/background-ticker';
+import { FakeTickWorker } from '@/services/core/background-ticker.test-helpers';
+import { setEditorKeepAlive } from '@/services/core/page-activity';
 
 describe('FileWatchService background polling', () => {
   beforeEach(() => {
@@ -220,6 +223,72 @@ describe('FileWatchService push mode (workspace)', () => {
     service.notifyExternalChange('a.pix3scene', { sha256: 'x' });
 
     expect(listener).not.toHaveBeenCalled();
+    service.dispose();
+  });
+});
+
+describe('FileWatchService under agent keepalive', () => {
+  let worker: FakeTickWorker;
+
+  beforeEach(() => {
+    worker = new FakeTickWorker();
+    setTickWorkerFactory(() => worker);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+  });
+
+  afterEach(() => {
+    setEditorKeepAlive(false);
+    setTickWorkerFactory(null);
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    vi.restoreAllMocks();
+  });
+
+  it('polls a hidden tab on worker timers while keepalive is on, and stops when it goes off', async () => {
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const getFile = vi.fn().mockResolvedValue({ lastModified: 10 });
+    const service = new FileWatchService();
+    service.watch(
+      'res://scene.pix3scene',
+      { getFile } as unknown as FileSystemFileHandle,
+      10,
+      vi.fn()
+    );
+    expect(worker.timers.size).toBe(0);
+
+    setEditorKeepAlive(true);
+    // Turning keepalive on checks at once, then polls from the worker.
+    await Promise.resolve();
+    const afterResume = getFile.mock.calls.length;
+    expect(afterResume).toBeGreaterThan(0);
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+    expect([...worker.timers.values()]).toEqual([1000]);
+    worker.fireAll();
+    worker.fireAll();
+    expect(getFile.mock.calls.length).toBe(afterResume + 2);
+
+    setEditorKeepAlive(false);
+    expect(worker.fireAll()).toBe(0);
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+    service.dispose();
+  });
+
+  it('a visible tab keeps its setInterval poller when keepalive turns on', () => {
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const service = new FileWatchService();
+    service.watch(
+      'res://scene.pix3scene',
+      {
+        getFile: vi.fn().mockResolvedValue({ lastModified: 10 }),
+      } as unknown as FileSystemFileHandle,
+      10,
+      vi.fn()
+    );
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    setEditorKeepAlive(true);
+    expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+    expect(worker.timers.size).toBe(0);
     service.dispose();
   });
 });

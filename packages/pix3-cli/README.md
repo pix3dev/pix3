@@ -357,7 +357,8 @@ socket (`1003`).
 
 | Frame | When |
 | --- | --- |
-| `{ "type": "hello", "workspaceId", "serverSession", "protocol": 1, "cliVersion", "revision", "seq", "root", "projectId": string \| null, "projectName", "lease": "held" \| "free", "leaseGraceMs": 10000 }` | Right after a valid `auth`. `root` is the server's absolute path, `projectName` is `metadata.projectName` (else the folder name), `projectId` is `metadata.projectId`, `leaseGraceMs` is the lease grace (below). |
+| `{ "type": "hello", "workspaceId", "serverSession", "protocol": 1, "cliVersion", "revision", "seq", "root", "projectId": string \| null, "projectName", "lease": "held" \| "free", "leaseGraceMs": 10000, "agentPresence": { "attached", "agent" } }` | Right after a valid `auth`. `root` is the server's absolute path, `projectName` is `metadata.projectName` (else the folder name), `projectId` is `metadata.projectId`, `leaseGraceMs` is the lease grace (below), `agentPresence` the current agent presence (next row). |
+| `{ "type": "agent-presence", "attached": boolean, "agent": { "name": string \| null, "verified": false } \| null }` | Whenever the agent presence changes: a `pix3 mcp --workspace` process announced itself, left, or went silent for 30 s (see `POST /ws/agent/presence`). `agent` is the most recently heard process; its name is self-declared. The editor keeps its background loops running while `attached` (keepalive). |
 | `{ "type": "change", "seq", "revision", "events": [ChangeEvent, …] }` | External changes, debounced ~100 ms (at most ~1 s under a steady stream). `revision` is the revision after the batch. |
 | `{ "type": "ping" }` | Every 10 s. A socket silent (no frame at all) for 30 s is terminated. |
 | `{ "type": "lease", "state": "granted", "leaseId", "resumed": boolean }` | Lease granted (`resumed: true` = same lease after a reconnect). |
@@ -415,7 +416,8 @@ The browser's bearer token is refused (`401 unauthorized`), and so is any reques
 
 | Route | Answer |
 | --- | --- |
-| `GET /ws/agent/status` | `/ws/status` fields plus `holder: "connected" \| "grace" \| null`, `projectName`, `projectId`. |
+| `GET /ws/agent/status` | `/ws/status` fields plus `holder: "connected" \| "grace" \| null`, `projectName`, `projectId`, `agentPresence: { attached, agent }`. |
+| `POST /ws/agent/presence` `{ agent: { name, session }, leaving? }` | Heartbeat of a `pix3 mcp --workspace` process: `pix3 mcp` sends it on start, once its MCP client has introduced itself, every 10 s, and with `leaving: true` on shutdown. One presence per `session`; it expires 30 s after its last heartbeat (an agent-lane `call` also counts as one). Answers `{ agentPresence }`; every change goes out as an `agent-presence` frame. |
 | `GET /ws/agent/tools` | `{ tools: [{name, description, inputSchema}], serverSession }` — the window's own tool definitions for the v1 allowlist (it answers an internal `tools_manifest` call within 5 s). `409 no_editor` without a window. |
 | `POST /ws/agent/call` `{ name, input, timeoutMs?, agent? }` | Parks the call for the lease holder and answers when it replies: `200 { result }` (the window's result as is, error results included). `timeoutMs` is clamped to 1–120 s (default 120 s). `409 no_editor` at once when no window holds the lease (message: open `<root>` in Pix3 — File → Connect to Workspace…); `504 no_editor_reply` when it does not answer in time; `409 lease_lost` when the lease ended under the call (on a takeover the call goes to the new holder instead); `429 too_many_calls`. `agent` → the `call` frame's `agent`. |
 | `POST /ws/agent/hash` `{ paths }` | Same as `POST /ws/hash`. |
@@ -430,6 +432,13 @@ ancestor of the cwd with `pix3project.yaml`) through `.pix3/workspace.json` and 
 `GET /ws/agent/status` + the control secret. When none runs, every tool answers
 `no_workspace_server` and stderr says ``Workspace server is not running. Run `pix3 serve` in
 <root>``; the next call looks again, so the agent never restarts its MCP server.
+
+**Presence.** While it runs, the process announces itself to that server
+(`POST /ws/agent/presence`, every 10 s and on start/stop; failures are silent and the next beat
+rediscovers a restarted server). That is what tells the editor an agent is attached, so it keeps
+the game, the viewport, file polling and reconnects running in a hidden or unfocused tab instead
+of pausing them for battery (`AgentKeepaliveService`; the user can switch this off in Settings →
+General). `PIX3_PRESENCE_HEARTBEAT_MS` overrides the cadence (tests).
 
 **Tools (v1, exactly):** `project_status`, `play_start`, `play_stop`, `play_restart`,
 `play_status`, `game_run`, `game_input`, `game_observe`, `read_errors`, `read_logs`,

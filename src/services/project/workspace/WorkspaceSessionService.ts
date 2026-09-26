@@ -276,6 +276,15 @@ export class WorkspaceSessionService {
         void this.handleChangeFrame(frame);
       },
       onLease: frame => this.handleLease(frame),
+      onAgentPresence: presence => {
+        if (this.events !== events) {
+          return;
+        }
+        this.patchState({
+          agentAttached: presence.attached,
+          agentName: presence.attached ? (presence.agent?.name ?? null) : null,
+        });
+      },
       onCall: frame => {
         const handler = this.callHandler;
         if (!handler || this.events !== events) {

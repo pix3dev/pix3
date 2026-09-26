@@ -29,7 +29,8 @@ import { UpdateEditorSettingsOperation } from '@/features/editor/UpdateEditorSet
 import { SetGamePopoutWindowOpenOperation } from '@/features/scripts/SetGamePopoutWindowOpenOperation';
 import { SetPlayModeOperation } from '@/features/scripts/SetPlayModeOperation';
 import { SetPlayPausedOperation } from '@/features/scripts/SetPlayPausedOperation';
-import { isDocumentActive } from '@/services/core/page-activity';
+import { isEditorActive, onEditorKeepAliveChange } from '@/services/core/page-activity';
+import { BackgroundTicker } from '@/services/core/background-ticker';
 import { PeekService } from '@/services/viewport/PeekService';
 
 type GameHostKind = 'tab' | 'popout';
@@ -99,6 +100,12 @@ export class GamePlaySessionService {
    */
   private networkService?: NetworkService;
   private focusCleanup?: () => void;
+  /**
+   * Frame source of every runner: rAF, or worker ticks in a hidden tab while an agent keeps the
+   * editor alive (a hidden tab has no rAF — `play_restart` for an agent used to crawl there).
+   */
+  private readonly frameTicker = new BackgroundTicker();
+  private disposeKeepAlive?: () => void;
   private focusPauseSuppressed = false;
   /**
    * A pause the *host* asked for (automation's `pauseOnOutcome`, a future Pause
@@ -164,11 +171,15 @@ export class GamePlaySessionService {
       this.queueSync();
       this.updatePopoutPresentation();
     });
+    // An agent attaching / leaving re-decides the focus pause (it never overrides a host pause).
+    this.disposeKeepAlive = onEditorKeepAliveChange(() => this.handleFocusPause());
   }
 
   dispose(): void {
     this.disposeUiSubscription?.();
     this.disposeUiSubscription = undefined;
+    this.disposeKeepAlive?.();
+    this.disposeKeepAlive = undefined;
     this.cancelPendingTabHostRelease();
     this.detachRuntime();
     this.networkService?.dispose();
@@ -393,7 +404,8 @@ export class GamePlaySessionService {
    * window focus (dispatchEvent doesn't need it), but a blurred window pauses
    * the runner — so nothing would consume the events. Suppression re-evaluates
    * immediately in both directions; callers MUST pair it with a `finally`.
-   * Note it cannot help a fully hidden tab: rAF stops there regardless.
+   * In a fully hidden tab rAF stops regardless; there only agent keepalive helps (the runner's
+   * frames then come from {@link BackgroundTicker}'s worker).
    */
   setFocusPauseSuppressed(suppressed: boolean): void {
     this.focusPauseSuppressed = suppressed;
@@ -583,6 +595,7 @@ export class GamePlaySessionService {
       }
     );
 
+    runner.setFrameScheduler(this.frameTicker);
     this.renderer = renderer;
     this.runner = runner;
     if (!this.networkService) {
@@ -778,7 +791,8 @@ export class GamePlaySessionService {
     }
 
     const documentRef = host.windowRef.document;
-    const isVisible = isDocumentActive(documentRef);
+    // Active document, or an agent keeps the editor alive (`AgentKeepaliveService`).
+    const isVisible = isEditorActive(documentRef);
     // Two independent reasons to be paused; either one holds the game. The host
     // request comes first so a requested pause is not lifted by a focus event.
     const shouldPause =

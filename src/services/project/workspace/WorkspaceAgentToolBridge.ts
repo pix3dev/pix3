@@ -7,6 +7,8 @@ import { AutosaveService } from '@/services/project/autosave/AutosaveService';
 import { MergeLogService } from '@/services/project/coauthoring/MergeLogService';
 import { toProjectPath } from '@/services/project/coauthoring/coauthoring-paths';
 import { ProjectSyncService } from '@/services/project/ProjectSyncService';
+import { keepaliveTimer } from '@/services/core/background-ticker';
+import { AgentKeepaliveService } from '@/services/project/workspace/AgentKeepaliveService';
 import {
   WorkspaceSessionService,
   type WorkspaceCallContext,
@@ -231,7 +233,14 @@ export function toCallResult(value: unknown): WorkspaceCallResult {
   return { content, ...(failed ? { isError: true } : {}) };
 }
 
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+/**
+ * A call is in flight whenever this polls, so keepalive is on: in a hidden tab the wait runs off
+ * worker timers instead of the throttled (≥ 1 s, later 1 min) main-thread ones.
+ */
+const sleep = (ms: number): Promise<void> =>
+  new Promise(resolve => {
+    keepaliveTimer(resolve, ms);
+  });
 
 @injectable()
 export class WorkspaceAgentToolBridge {
@@ -252,6 +261,9 @@ export class WorkspaceAgentToolBridge {
 
   @inject(MergeLogService)
   private readonly mergeLog!: MergeLogService;
+
+  @inject(AgentKeepaliveService)
+  private readonly keepalive!: AgentKeepaliveService;
 
   /** The tool table pulls most of the editor behind it: loaded on the first call. */
   @injectLazy(() => import('@/services/agent/AgentToolRegistry').then(m => m.AgentToolRegistry))
@@ -297,6 +309,7 @@ export class WorkspaceAgentToolBridge {
   /** Register with the workspace session and follow play mode / lease changes. */
   initialize(): void {
     if (this.disposers.length > 0) return;
+    this.keepalive.initialize();
     this.session.setCallHandler((frame, context) => this.handleCall(frame, context));
     this.disposers.push(() => this.session.setCallHandler(null));
     this.disposers.push(
@@ -396,6 +409,8 @@ export class WorkspaceAgentToolBridge {
     if (done) return Promise.resolve(done);
     const running = this.inflight.get(frame.id);
     if (running) return running;
+    // Before anything runs: the play/viewport loops must not be paused for this call.
+    this.keepalive.noteCallStarted(frame.id);
     const promise = this.serve(frame, context).then(
       result => this.finish(frame.id, result),
       (error: unknown) =>
@@ -407,6 +422,7 @@ export class WorkspaceAgentToolBridge {
 
   private finish(id: string, result: WorkspaceCallResult): WorkspaceCallResult {
     this.inflight.delete(id);
+    this.keepalive.noteCallFinished(id);
     this.completed.set(id, result);
     if (this.completed.size > COMPLETED_MEMORY) {
       const oldest = this.completed.keys().next().value;
@@ -494,8 +510,12 @@ export class WorkspaceAgentToolBridge {
       if (!wait.ok) return runtimeNotRunning(wait);
       startupMs = wait.startupMs;
     }
-    if (START_TOOLS.has(name) && !result.isError && this.lastBarrierLoaded) {
-      appState.project.coauthoring.playRevision = { ...this.lastBarrierLoaded };
+    if (START_TOOLS.has(name) && !result.isError) {
+      // Keeps the game stepping in a background tab until it stops, calls or no calls.
+      this.keepalive.notePlayStartedByAgent();
+      if (this.lastBarrierLoaded) {
+        appState.project.coauthoring.playRevision = { ...this.lastBarrierLoaded };
+      }
     }
     if (startupMs !== null) {
       result = withPix3Meta(result, { startupMs });

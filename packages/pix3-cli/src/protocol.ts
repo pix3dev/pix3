@@ -72,3 +72,12 @@ export const WS_LEASE_GRACE_MS = 10_000;
 
 /** Quiet time before a burst of file-system events is turned into one `change` frame. */
 export const WATCH_DEBOUNCE_MS = 100;
+
+/**
+ * `pix3 mcp --workspace` re-announces itself with `POST /ws/agent/presence` this often while it
+ * runs, so the editor can keep its background loops alive for the agent (`agent-presence` frame).
+ */
+export const AGENT_PRESENCE_HEARTBEAT_MS = 10_000;
+
+/** A presence with no heartbeat for this long is gone (the MCP process died without saying so). */
+export const AGENT_PRESENCE_TTL_MS = 30_000;

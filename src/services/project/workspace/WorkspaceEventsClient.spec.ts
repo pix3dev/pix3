@@ -9,6 +9,9 @@ import {
   type WorkspaceSocketLike,
 } from '@/services/project/workspace/WorkspaceEventsClient';
 import type { WorkspaceHelloFrame } from '@/services/project/workspace/workspace-protocol';
+import { setTickWorkerFactory } from '@/services/core/background-ticker';
+import { FakeTickWorker } from '@/services/core/background-ticker.test-helpers';
+import { setEditorKeepAlive } from '@/services/core/page-activity';
 
 class FakeSocket implements WorkspaceSocketLike {
   readyState = 0;
@@ -358,6 +361,61 @@ describe('WorkspaceEventsClient', () => {
       socket.receive({ type: 'lease', state: 'busy', inGrace: false });
       vi.advanceTimersByTime(60_000);
       expect(acquires()).toBe(2);
+    });
+  });
+
+  describe('agent keepalive and presence', () => {
+    let worker: FakeTickWorker;
+
+    beforeEach(() => {
+      worker = new FakeTickWorker();
+      setTickWorkerFactory(() => worker);
+    });
+
+    afterEach(() => {
+      setEditorKeepAlive(false);
+      setTickWorkerFactory(null);
+    });
+
+    it('reconnects on the worker ticker under keepalive (no throttled main-thread timer)', () => {
+      setEditorKeepAlive(true);
+      const first = connect();
+      first.receive(hello());
+      first.drop(1006);
+      expect(sockets).toHaveLength(1);
+      // The backoff delay was armed on the worker, not with setTimeout.
+      expect([...worker.timers.values()]).toContain(100);
+      vi.advanceTimersByTime(60_000);
+      expect(sockets).toHaveLength(1);
+      worker.fireAll();
+      expect(sockets).toHaveLength(2);
+    });
+
+    it('uses plain timers without keepalive (the idle battery case is unchanged)', () => {
+      const first = connect();
+      first.receive(hello());
+      first.drop(1006);
+      expect(worker.commands).toEqual([]);
+      vi.advanceTimersByTime(100);
+      expect(sockets).toHaveLength(2);
+    });
+
+    it('reports agent presence from hello and from agent-presence frames', () => {
+      const onAgentPresence = vi.fn();
+      const socket = connect({ onAgentPresence });
+      socket.receive(
+        hello({ agentPresence: { attached: true, agent: { name: 'codex', verified: false } } })
+      );
+      expect(onAgentPresence).toHaveBeenLastCalledWith({
+        attached: true,
+        agent: { name: 'codex', verified: false },
+      });
+      socket.receive({ type: 'agent-presence', attached: false, agent: null });
+      expect(onAgentPresence).toHaveBeenLastCalledWith({ attached: false, agent: null });
+      // An older server's hello says nothing: no presence callback for it.
+      onAgentPresence.mockClear();
+      socket.receive(hello());
+      expect(onAgentPresence).not.toHaveBeenCalled();
     });
   });
 });

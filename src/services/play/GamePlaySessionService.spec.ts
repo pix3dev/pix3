@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { appState } from '@/state';
 import { GamePlaySessionService } from './GamePlaySessionService';
+import { setEditorKeepAlive } from '@/services/core/page-activity';
 
 /**
  * The pause decision, and only it (§ "focus-pause rule"). Two independent inputs
@@ -90,6 +91,34 @@ function makeSession(options: { focused?: boolean } = {}): {
 describe('GamePlaySessionService — pause decision', () => {
   beforeEach(() => {
     appState.ui.pauseRenderingOnUnfocus = true;
+  });
+
+  it('keeps the game running without focus while an agent keeps the editor alive', () => {
+    const { runner, setFocused, fireFocusEvent } = makeSession();
+    try {
+      setEditorKeepAlive(true);
+      setFocused(false);
+      fireFocusEvent();
+      expect(runner.paused).toBe(false);
+
+      // No agent any more: the battery rule applies again.
+      setEditorKeepAlive(false);
+      fireFocusEvent();
+      expect(runner.paused).toBe(true);
+    } finally {
+      setEditorKeepAlive(false);
+    }
+  });
+
+  it('keepalive never lifts a pause the host asked for', () => {
+    const { service, runner } = makeSession();
+    try {
+      setEditorKeepAlive(true);
+      service.setPauseRequested(true);
+      expect(runner.paused).toBe(true);
+    } finally {
+      setEditorKeepAlive(false);
+    }
   });
 
   it('pauses on focus loss and resumes on focus return', () => {

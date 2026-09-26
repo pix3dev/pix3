@@ -93,4 +93,47 @@ describe('pix3-agent-channel-indicator', () => {
     await el.updateComplete;
     expect(el.querySelector('.status-agent-channel')).toBeNull();
   });
+
+  it('shows an attached agent before its first call, and says when keepalive is on', async () => {
+    const container = ServiceContainer.getInstance();
+    const stub = new BridgeStub();
+    stub.state = {
+      ...stub.state,
+      seen: false,
+      agentName: null,
+      activity: 'idle',
+      activeTool: null,
+      permission: 'unset',
+      prompt: null,
+    };
+    container.addService(
+      container.getOrCreateToken(WorkspaceAgentToolBridge),
+      class {
+        constructor() {
+          return stub;
+        }
+      },
+      'singleton'
+    );
+    appState.project.backend = 'workspace';
+    appState.project.status = 'ready';
+    appState.project.workspace.agentAttached = true;
+    appState.project.workspace.agentName = 'codex';
+    appState.project.coauthoring.agentKeepalive = true;
+
+    const el = document.createElement('pix3-agent-channel-indicator') as Element;
+    document.body.appendChild(el);
+    await el.updateComplete;
+
+    const pill = el.querySelector<HTMLButtonElement>('.status-agent-channel');
+    expect(pill?.textContent?.trim()).toBe('Agent: connected · keepalive');
+    expect(pill?.title).toContain('codex (self-declared, not verified)');
+    expect(pill?.title).toContain('keeps running in the background');
+
+    appState.project.coauthoring.agentKeepalive = false;
+    appState.project.workspace.agentAttached = false;
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await el.updateComplete;
+    expect(el.querySelector('.status-agent-channel')).toBeNull();
+  });
 });

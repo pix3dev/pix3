@@ -1,7 +1,9 @@
+import { keepaliveTimer } from '@/services/core/background-ticker';
 import {
   WorkspaceError,
   toEventsUrl,
   type WorkspaceCallFrame,
+  type WorkspaceAgentPresence,
   type WorkspaceCallResult,
   type WorkspaceChangeFrame,
   type WorkspaceHelloFrame,
@@ -33,6 +35,8 @@ export interface WorkspaceEventsHandlers {
   onHello?(hello: WorkspaceHelloFrame, info: WorkspaceHelloInfo): void;
   onChange?(frame: WorkspaceChangeFrame): void;
   onLease?(frame: WorkspaceLeaseFrame): void;
+  /** Agent presence: from every `hello` that carries it and every `agent-presence` frame. */
+  onAgentPresence?(presence: WorkspaceAgentPresence): void;
   /**
    * The socket came back: events may have been missed while it was down (nothing is replayed),
    * so the caller must re-scan `/ws/manifest`.
@@ -146,8 +150,11 @@ export class WorkspaceEventsClient {
   private handlers: WorkspaceEventsHandlers = {};
   private stopped = true;
   private attempt = 0;
-  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
-  private silenceTimer: ReturnType<typeof setTimeout> | null = null;
+  // Cancel functions of `keepaliveTimer`s: plain timers normally, worker timers (not throttled in a
+  // hidden tab) while an agent keeps the editor alive — a restart of `pix3 serve` must not leave a
+  // background tab waiting a throttled minute to reconnect.
+  private reconnectTimer: (() => void) | null = null;
+  private silenceTimer: (() => void) | null = null;
   private helloCount = 0;
   private lastRevision: string | null = null;
   private lastServerSession: string | null = null;
@@ -156,7 +163,7 @@ export class WorkspaceEventsClient {
   private readonly leaseStore: WorkspaceLeaseStore;
   private workspaceId: string | null = null;
   private leaseGraceMs: number | null = null;
-  private leaseRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private leaseRetryTimer: (() => void) | null = null;
 
   constructor(options: WorkspaceEventsClientOptions = {}) {
     this.leaseStore = options.leaseStore ?? sessionLeaseStore;
@@ -303,6 +310,9 @@ export class WorkspaceEventsClient {
       case 'lease':
         this.handleLeaseFrame(frame);
         return;
+      case 'agent-presence':
+        this.handlers.onAgentPresence?.({ attached: frame.attached === true, agent: frame.agent });
+        return;
       case 'call':
         this.handleCall(socket, frame);
         return;
@@ -340,7 +350,7 @@ export class WorkspaceEventsClient {
       this.leaseGraceMs !== null
         ? this.leaseGraceMs + LEASE_RETRY_MARGIN_MS
         : FALLBACK_LEASE_RETRY_MS;
-    this.leaseRetryTimer = setTimeout(() => {
+    this.leaseRetryTimer = keepaliveTimer(() => {
       this.leaseRetryTimer = null;
       this.acquireLease();
     }, delay);
@@ -348,7 +358,7 @@ export class WorkspaceEventsClient {
 
   private clearLeaseRetry(): void {
     if (this.leaseRetryTimer !== null) {
-      clearTimeout(this.leaseRetryTimer);
+      this.leaseRetryTimer();
       this.leaseRetryTimer = null;
     }
   }
@@ -392,6 +402,9 @@ export class WorkspaceEventsClient {
     this.lastServerSession = hello.serverSession;
     this.handlers.onConnectionState?.('open');
     this.handlers.onHello?.(hello, { reconnected });
+    if (hello.agentPresence) {
+      this.handlers.onAgentPresence?.(hello.agentPresence);
+    }
     if (needsRescan) {
       this.handlers.onRescanNeeded?.(hello);
     }
@@ -511,7 +524,7 @@ export class WorkspaceEventsClient {
     this.pendingRetryAfterMs = null;
     this.attempt += 1;
     this.handlers.onConnectionState?.('reconnecting');
-    this.reconnectTimer = setTimeout(() => {
+    this.reconnectTimer = keepaliveTimer(() => {
       this.reconnectTimer = null;
       this.open('reconnecting');
     }, delay);
@@ -519,7 +532,7 @@ export class WorkspaceEventsClient {
 
   private armSilenceTimer(): void {
     this.clearSilenceTimer();
-    this.silenceTimer = setTimeout(() => {
+    this.silenceTimer = keepaliveTimer(() => {
       this.silenceTimer = null;
       const socket = this.socket;
       if (!socket) {
@@ -540,7 +553,7 @@ export class WorkspaceEventsClient {
 
   private clearSilenceTimer(): void {
     if (this.silenceTimer !== null) {
-      clearTimeout(this.silenceTimer);
+      this.silenceTimer();
       this.silenceTimer = null;
     }
   }
@@ -549,7 +562,7 @@ export class WorkspaceEventsClient {
     this.clearSilenceTimer();
     this.clearLeaseRetry();
     if (this.reconnectTimer !== null) {
-      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer();
       this.reconnectTimer = null;
     }
   }

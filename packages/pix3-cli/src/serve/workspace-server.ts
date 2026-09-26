@@ -45,6 +45,7 @@ import {
   type ChangeLogEntry,
   type ChangeOrigin,
 } from './agent-lane.ts';
+import { AgentPresence, type AgentPresenceSnapshot } from './agent-presence.ts';
 import { WorkspaceAuth } from './auth.ts';
 import { contentTypeFor } from './content-type.ts';
 import { EventHub } from './event-hub.ts';
@@ -101,6 +102,8 @@ export interface WorkspaceServerOptions {
   /** Failed auth attempts allowed per window before every attempt gets 429. */
   readonly authFailureLimit?: number;
   readonly authFailureWindowMs?: number;
+  /** Agent presence expiry after the last heartbeat (default `AGENT_PRESENCE_TTL_MS`; tests shorten it). */
+  readonly agentPresenceTtlMs?: number;
   /** Called once after the server has fully closed (the CLI releases its lock here). */
   readonly onClosed?: () => void;
 }
@@ -183,6 +186,18 @@ const hashHandle = async (handle: FileHandle): Promise<string> => {
   return hash.digest('hex');
 };
 
+/** `{name, session}` as a `pix3 mcp` process declares itself (never verified), or null. */
+const parseAgentIdentity = (
+  raw: unknown
+): { name: string | null; session: string | null } | null => {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const agent = raw as Record<string, unknown>;
+  return {
+    name: typeof agent.name === 'string' ? agent.name.slice(0, 120) : null,
+    session: typeof agent.session === 'string' ? agent.session.slice(0, 80) : null,
+  };
+};
+
 export class WorkspaceServer {
   readonly serverSession = randomUUID();
   readonly root: string;
@@ -215,6 +230,8 @@ export class WorkspaceServer {
   private ackTimer: NodeJS.Timeout | null = null;
   /** Path changes of the revision set by `seq`, for `GET /ws/agent/changes?since=`. */
   private readonly changeLog = new ChangeLog();
+  /** Live `pix3 mcp --workspace` processes (heartbeats on `POST /ws/agent/presence`). */
+  private readonly presence: AgentPresence;
 
   constructor(options: WorkspaceServerOptions) {
     this.options = options;
@@ -237,6 +254,23 @@ export class WorkspaceServer {
       leaseGraceMs: options.leaseGraceMs,
     });
     this.watcher = new TreeWatcher(options.root, path => this.markDirty(path), this.log);
+    this.presence = new AgentPresence(snapshot => {
+      this.log(
+        snapshot.attached
+          ? `agent attached (${snapshot.agent?.name ?? 'unnamed'})`
+          : 'agent detached'
+      );
+      this.hub.broadcast(this.presenceFrame(snapshot));
+    }, options.agentPresenceTtlMs);
+  }
+
+  /** Whether a `pix3 mcp --workspace` process is alive for this root, and which. */
+  get agentPresence(): AgentPresenceSnapshot {
+    return this.presence.snapshot();
+  }
+
+  private presenceFrame(snapshot: AgentPresenceSnapshot): Record<string, unknown> {
+    return { type: 'agent-presence', attached: snapshot.attached, agent: snapshot.agent };
   }
 
   get port(): number | null {
@@ -323,6 +357,7 @@ export class WorkspaceServer {
     if (this.ackTimer) clearTimeout(this.ackTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.stateTimer) clearInterval(this.stateTimer);
+    this.presence.close();
     this.watcher.close();
     this.hub.close();
     const server = this.server;
@@ -586,6 +621,7 @@ export class WorkspaceServer {
       projectName: readProjectName(this.root),
       lease: this.hub.leaseState,
       leaseGraceMs: this.options.leaseGraceMs ?? WS_LEASE_GRACE_MS,
+      agentPresence: this.presence.snapshot(),
     };
   }
 
@@ -771,7 +807,17 @@ export class WorkspaceServer {
         holder: this.hub.holderState,
         projectName: readProjectName(this.root),
         projectId: readProjectId(this.root),
+        agentPresence: this.presence.snapshot(),
       });
+      return;
+    }
+    if (method === 'POST' && path === '/ws/agent/presence') {
+      const body = await readJson(req);
+      const identity = parseAgentIdentity(body.agent);
+      const session = identity?.session ?? 'default';
+      if (body.leaving === true) this.presence.leave(session);
+      else this.presence.touch(session, identity?.name ?? null);
+      ok({ agentPresence: this.presence.snapshot() });
       return;
     }
     if (method === 'GET' && path === '/ws/agent/tools') {
@@ -802,22 +848,17 @@ export class WorkspaceServer {
       const requested = typeof body.timeoutMs === 'number' ? body.timeoutMs : AGENT_CALL_MAX_MS;
       const timeoutMs = Math.max(1_000, Math.min(AGENT_CALL_MAX_MS, requested));
       this.requireEditor();
-      const agent =
-        body.agent && typeof body.agent === 'object' && !Array.isArray(body.agent)
-          ? (body.agent as Record<string, unknown>)
-          : null;
+      const agent = parseAgentIdentity(body.agent);
+      // A call is proof of life too: an MCP process older than the heartbeat still counts.
+      if (agent?.session) this.presence.touch(agent.session, agent.name);
       const result = await this.enqueueCall(
         body.name,
         body.input ?? {},
         timeoutMs,
         agent
           ? {
-              agent: {
-                name: typeof agent.name === 'string' ? agent.name.slice(0, 120) : null,
-                session: typeof agent.session === 'string' ? agent.session.slice(0, 80) : null,
-                // Self-declared by the MCP process; nothing here verifies it.
-                verified: false,
-              },
+              // Self-declared by the MCP process; nothing here verifies it.
+              agent: { name: agent.name, session: agent.session, verified: false },
             }
           : undefined
       );

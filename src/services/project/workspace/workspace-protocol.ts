@@ -60,6 +60,20 @@ export interface WorkspaceHelloFrame {
   readonly lease: 'held' | 'free';
   /** How long the server keeps a disconnected holder's lease (older servers omit it). */
   readonly leaseGraceMs?: number;
+  /** Whether a `pix3 mcp --workspace` process is alive right now (older servers omit it). */
+  readonly agentPresence?: WorkspaceAgentPresence;
+}
+
+/** Presence of the live agent channel's MCP process (heartbeats to the server's agent lane). */
+export interface WorkspaceAgentPresence {
+  readonly attached: boolean;
+  /** Self-declared by the MCP process, never verified. */
+  readonly agent: { readonly name: string | null; readonly verified: false } | null;
+}
+
+/** Pushed whenever the presence changes (an MCP process started, stopped, or went silent). */
+export interface WorkspaceAgentPresenceFrame extends WorkspaceAgentPresence {
+  readonly type: 'agent-presence';
 }
 
 export interface WorkspaceChangeEvent {
@@ -137,6 +151,7 @@ export type WorkspaceServerFrame =
   | WorkspaceLeaseFrame
   | WorkspaceCallFrame
   | WorkspaceErrorFrame
+  | WorkspaceAgentPresenceFrame
   | { readonly type: 'ping' }
   | { readonly type: 'pong' };
 

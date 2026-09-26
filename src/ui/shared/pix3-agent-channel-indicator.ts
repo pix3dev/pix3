@@ -13,7 +13,9 @@ import './pix3-agent-channel-indicator.ts.css';
  * Status-bar pill of the live agent channel (`pix3 mcp --workspace` → `pix3 serve` → this window):
  * "Agent: idle / syncing / running game_run / off", a revoke button while generation is allowed,
  * and the non-blocking "allow generation for this session" prompt (plan §1.2 "Граница доверия").
- * Shown only for a workspace project once an agent call has arrived in this server session.
+ * Shown for a workspace project once an agent call has arrived in this server session, or while
+ * a `pix3 mcp` process is attached (server presence). " · keepalive" says the editor is kept running
+ * in the background for the agent (`AgentKeepaliveService`).
  */
 @customElement('pix3-agent-channel-indicator')
 export class AgentChannelIndicator extends ComponentBase {
@@ -25,6 +27,9 @@ export class AgentChannelIndicator extends ComponentBase {
 
   @state() private channel: AgentChannelState | null = null;
   @state() private isWorkspace = false;
+  @state() private attached = false;
+  @state() private keepalive = false;
+  @state() private presenceName: string | null = null;
 
   private disposeBridge?: () => void;
   private disposeProject?: () => void;
@@ -35,10 +40,8 @@ export class AgentChannelIndicator extends ComponentBase {
     this.disposeBridge = this.bridge.subscribe(() => {
       this.channel = this.bridge.getState();
     });
-    this.isWorkspace = this.computeIsWorkspace();
-    this.disposeProject = subscribe(appState.project, () => {
-      this.isWorkspace = this.computeIsWorkspace();
-    });
+    this.syncProject();
+    this.disposeProject = subscribe(appState.project, () => this.syncProject());
   }
 
   disconnectedCallback(): void {
@@ -49,22 +52,31 @@ export class AgentChannelIndicator extends ComponentBase {
     super.disconnectedCallback();
   }
 
-  private computeIsWorkspace(): boolean {
-    return appState.project.backend === 'workspace' && appState.project.status === 'ready';
+  private syncProject(): void {
+    const project = appState.project;
+    this.isWorkspace = project.backend === 'workspace' && project.status === 'ready';
+    this.attached = project.workspace.agentAttached;
+    this.presenceName = project.workspace.agentName;
+    this.keepalive = project.coauthoring.agentKeepalive;
   }
 
   protected render() {
     const channel = this.channel;
-    if (!channel || !this.isWorkspace || !channel.seen) {
+    if (!channel || !this.isWorkspace || (!channel.seen && !this.attached)) {
       return html``;
     }
-    const who = channel.agentName
-      ? `${channel.agentName} (self-declared, not verified)`
-      : 'an agent';
+    const name = channel.agentName ?? this.presenceName;
+    const who = name ? `${name} (self-declared, not verified)` : 'an agent';
+    const keepalive = this.keepalive ? ' · keepalive' : '';
+    const keepaliveNote = this.keepalive
+      ? '\nThe editor keeps running in the background while the agent works (Settings → General).'
+      : '';
     let tone = 'is-ok';
     let icon = 'terminal';
-    let label = 'Agent: idle';
-    let title = `pix3 mcp for ${who} is connected through pix3 serve.\nClick to disconnect it.`;
+    let label = `Agent: ${this.attached ? 'connected' : 'idle'}${keepalive}`;
+    let title =
+      `pix3 mcp for ${who} is connected through pix3 serve.${keepaliveNote}` +
+      '\nClick to disconnect it.';
     if (!channel.enabled) {
       tone = 'is-off';
       icon = 'slash';
@@ -77,8 +89,8 @@ export class AgentChannelIndicator extends ComponentBase {
       title = `${who} is syncing the editor with the disk before a run.\nClick to disconnect.`;
     } else if (channel.activity === 'running') {
       tone = 'is-pending';
-      label = `Agent: ${channel.activeTool ?? 'running'}`;
-      title = `${who} is running ${channel.activeTool ?? 'a tool'}.\nClick to disconnect.`;
+      label = `Agent: ${channel.activeTool ?? 'running'}${keepalive}`;
+      title = `${who} is running ${channel.activeTool ?? 'a tool'}.${keepaliveNote}\nClick to disconnect.`;
     }
     return html`
       <button

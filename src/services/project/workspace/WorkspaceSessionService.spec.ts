@@ -307,4 +307,21 @@ describe('WorkspaceSessionService', () => {
     await vi.waitFor(() => expect(session.isConnected()).toBe(false));
     expect(appState.project.workspace.status).toBe('disconnected');
   });
+
+  it('mirrors agent presence (hello, then agent-presence frames) into the workspace state', async () => {
+    helloExtra = {
+      agentPresence: { attached: true, agent: { name: 'claude-code', verified: false } },
+    };
+    await session.connect('http://localhost:8490', 't');
+    expect(appState.project.workspace).toMatchObject({
+      agentAttached: true,
+      agentName: 'claude-code',
+    });
+
+    sockets[0].receive({ type: 'agent-presence', attached: false, agent: null });
+    expect(appState.project.workspace).toMatchObject({ agentAttached: false, agentName: null });
+
+    session.disconnect();
+    expect(appState.project.workspace.agentAttached).toBe(false);
+  });
 });

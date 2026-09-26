@@ -143,6 +143,19 @@ export class AgentLaneClient {
     return body.result as ToolCallResult;
   }
 
+  /**
+   * Heartbeat of this MCP process (`POST /ws/agent/presence`): the server tells the editor an
+   * agent is attached, so the editor keeps its background loops running. `leaving` on shutdown.
+   */
+  async presence(leaving = false, timeoutMs = PROBE_TIMEOUT_MS): Promise<void> {
+    await this.request(
+      'POST',
+      '/ws/agent/presence',
+      { agent: this.identity(), ...(leaving ? { leaving: true } : {}) },
+      timeoutMs
+    );
+  }
+
   async hash(
     paths: readonly string[]
   ): Promise<{ hashes: Record<string, string | null>; seq: number }> {

@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NodeBase, Script, type SceneGraph, type SceneManager } from '@pix3/runtime';
 import { ScriptExecutionService } from '@/services/play/ScriptExecutionService';
 import { appState, resetAppState } from '@/state';
+import { setTickWorkerFactory } from '@/services/core/background-ticker';
+import { FakeTickWorker } from '@/services/core/background-ticker.test-helpers';
+import { setEditorKeepAlive } from '@/services/core/page-activity';
 
 class LifecycleScript extends Script {
   detachCalls = 0;
@@ -155,5 +158,58 @@ describe('ScriptExecutionService lifecycle teardown', () => {
     service.start();
 
     expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+  });
+
+  describe('agent keepalive', () => {
+    let worker: FakeTickWorker;
+
+    beforeEach(() => {
+      worker = new FakeTickWorker();
+      setTickWorkerFactory(() => worker);
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        value: 'hidden',
+      });
+      vi.spyOn(document, 'hasFocus').mockReturnValue(false);
+    });
+
+    afterEach(() => {
+      setEditorKeepAlive(false);
+      setTickWorkerFactory(null);
+      vi.restoreAllMocks();
+    });
+
+    it('keeps the play loop stepping from worker ticks in a hidden tab while keepalive is on', () => {
+      setEditorKeepAlive(true);
+      const { scene } = createSceneFixture();
+      const tick = vi.spyOn(scene.rootNodes[0], 'tick');
+      const service = createService(scene);
+
+      service.start();
+      expect(requestAnimationFrame).not.toHaveBeenCalled();
+      for (let i = 0; i < 3; i++) worker.fireAll();
+      expect(tick).toHaveBeenCalledTimes(3);
+      service.dispose();
+    });
+
+    it('stops on hidden once keepalive goes off, exactly as without an agent', () => {
+      setEditorKeepAlive(true);
+      const { scene } = createSceneFixture();
+      const tick = vi.spyOn(scene.rootNodes[0], 'tick');
+      const service = createService(scene);
+      service.start();
+      worker.fireAll();
+      expect(tick).toHaveBeenCalledTimes(1);
+
+      setEditorKeepAlive(false);
+      expect(worker.fireAll()).toBe(0);
+      expect(tick).toHaveBeenCalledTimes(1);
+
+      // …and an agent attaching again resumes it.
+      setEditorKeepAlive(true);
+      worker.fireAll();
+      expect(tick).toHaveBeenCalledTimes(2);
+      service.dispose();
+    });
   });
 });
