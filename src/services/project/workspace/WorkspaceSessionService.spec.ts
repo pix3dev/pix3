@@ -5,6 +5,7 @@ import { FileWatchService } from '@/services/project/FileWatchService';
 import { WorkspaceClient } from '@/services/project/workspace/WorkspaceClient';
 import {
   WorkspaceEventsClient,
+  sessionLeaseStore,
   type WorkspaceSocketLike,
 } from '@/services/project/workspace/WorkspaceEventsClient';
 import { WorkspaceSessionService } from '@/services/project/workspace/WorkspaceSessionService';
@@ -22,9 +23,10 @@ class FakeSocket implements WorkspaceSocketLike {
     const frame = this.sent.at(-1);
     // Minimal server: hello after auth, the configured lease answer after acquire.
     if (frame?.type === 'auth') {
-      queueMicrotask(() => this.receive(HELLO));
+      queueMicrotask(() => this.receive({ ...HELLO, ...helloExtra }));
     } else if (frame?.type === 'lease' && frame.action === 'acquire') {
-      queueMicrotask(() => this.receive(leaseAnswer));
+      const answer = leaseAnswers.shift() ?? leaseAnswer;
+      queueMicrotask(() => this.receive(answer));
     } else if (frame?.type === 'lease' && frame.action === 'takeover') {
       queueMicrotask(() =>
         this.receive({ type: 'lease', state: 'granted', leaseId: 'l2', resumed: false })
@@ -54,6 +56,10 @@ const HELLO = {
   projectName: 'Game',
   lease: 'free',
 };
+
+/** Answers to the next `acquire`s, in order; `leaseAnswer` once this runs out. */
+let leaseAnswers: Array<Record<string, unknown>> = [];
+let helloExtra: Record<string, unknown> = {};
 
 let leaseAnswer: Record<string, unknown> = {
   type: 'lease',
@@ -88,6 +94,9 @@ describe('WorkspaceSessionService', () => {
 
   beforeEach(() => {
     resetAppState();
+    sessionStorage.clear();
+    leaseAnswers = [];
+    helloExtra = {};
     leaseAnswer = { type: 'lease', state: 'granted', leaseId: 'l1', resumed: false };
     statusBody = { ...STATUS };
     manifestFiles = [
@@ -179,6 +188,66 @@ describe('WorkspaceSessionService', () => {
     await vi.waitFor(() => expect(appState.project.workspace.lease).toBe('held'));
     expect(sockets[0].sent.at(-1)).toEqual({ type: 'lease', action: 'takeover' });
     expect(session.canWrite()).toBe(true);
+  });
+
+  it('after a reload the same tab sends its stored leaseId, resumes and stays the owner', async () => {
+    // What the tab stored before F5 (sessionStorage survives the reload of the same tab).
+    sessionLeaseStore.set('ws-1', { leaseId: 'l-before-f5', serverSession: 'session-1' });
+    leaseAnswer = { type: 'lease', state: 'granted', leaseId: 'l-before-f5', resumed: true };
+
+    await session.connect('http://localhost:8490', 't');
+
+    expect(sockets[0].sent[1]).toEqual({
+      type: 'lease',
+      action: 'acquire',
+      leaseId: 'l-before-f5',
+    });
+    expect(appState.project.workspace).toMatchObject({ lease: 'held', leaseInGrace: false });
+    expect(session.canWrite()).toBe(true);
+    expect(sessionLeaseStore.get('ws-1')?.leaseId).toBe('l-before-f5');
+  });
+
+  it('busy while the old holder is in grace → read-only, then granted by the retry', async () => {
+    helloExtra = { leaseGraceMs: 10 };
+    leaseAnswers = [{ type: 'lease', state: 'busy', inGrace: true }];
+    leaseAnswer = { type: 'lease', state: 'granted', leaseId: 'l-new', resumed: false };
+
+    await session.connect('http://localhost:8490', 't');
+    expect(appState.project.workspace).toMatchObject({ lease: 'busy', leaseInGrace: true });
+    expect(session.canWrite()).toBe(false);
+
+    // Retry after grace + margin (510 ms here), with no user action.
+    await vi.waitFor(() => expect(appState.project.workspace.lease).toBe('held'), {
+      timeout: 2_000,
+    });
+    expect(session.canWrite()).toBe(true);
+    expect(
+      sockets[0].sent.filter(frame => frame.type === 'lease' && frame.action === 'acquire')
+    ).toHaveLength(2);
+    expect(sessionLeaseStore.get('ws-1')?.leaseId).toBe('l-new');
+  });
+
+  it('forwards a pushed .pix3/ack.json change to its watcher, but no other .pix3 path', async () => {
+    await session.connect('http://localhost:8490', 't');
+    const onAck = vi.fn();
+    const onProtected = vi.fn();
+    fileWatch.watch('.pix3/ack.json', null, null, onAck);
+    fileWatch.watch('.pix3/protected.json', null, null, onProtected);
+    const signalBefore = appState.project.fileRefreshSignal;
+
+    await session.handleChangeFrame({
+      type: 'change',
+      seq: 1,
+      revision: 'rev-1',
+      events: [
+        { op: 'modify', path: '.pix3/ack.json', kind: 'file', sha256: 'sha-ack' },
+        { op: 'modify', path: '.pix3/protected.json', kind: 'file', sha256: 'sha-p' },
+      ],
+    });
+
+    expect(onAck).toHaveBeenCalledTimes(1);
+    expect(onProtected).not.toHaveBeenCalled();
+    expect(appState.project.fileRefreshSignal).toBe(signalBefore);
   });
 
   it('pushes external changes to watchers and ignores the hash this editor already has', async () => {

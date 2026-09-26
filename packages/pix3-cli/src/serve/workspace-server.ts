@@ -25,6 +25,7 @@ import {
   LINK_HOST,
   WATCH_DEBOUNCE_MS,
   WORKSPACE_PROTOCOL,
+  WS_LEASE_GRACE_MS,
   WS_PING_INTERVAL_MS,
 } from '../protocol.ts';
 import {
@@ -40,6 +41,7 @@ import { WorkspaceAuth } from './auth.ts';
 import { contentTypeFor } from './content-type.ts';
 import { EventHub } from './event-hub.ts';
 import {
+  BROADCAST_INTERNAL_FILE,
   parentOf,
   parseWirePath,
   resolveInsideRoot,
@@ -53,6 +55,7 @@ import {
   HashCache,
   isExcludedPath,
   mtimeOf,
+  scanInternal,
   scanInto,
   statKeyOf,
   type ChangeEvent,
@@ -191,6 +194,12 @@ export class WorkspaceServer {
   private pingTimer: NodeJS.Timeout | null = null;
   private stateTimer: NodeJS.Timeout | null = null;
   private closed = false;
+  /**
+   * sha256 of `.pix3/ack.json` as last seen (`null` = absent). `.pix3/` is outside the table, so
+   * this is how a change of that one file becomes a `change` event (and an own write does not).
+   */
+  private ackHash: string | null = null;
+  private ackTimer: NodeJS.Timeout | null = null;
 
   constructor(options: WorkspaceServerOptions) {
     this.options = options;
@@ -237,6 +246,7 @@ export class WorkspaceServer {
       applySubtree(this.table, [''], fresh);
       this.revisionMemo = null;
       this.syncWatcher();
+      this.ackHash = await this.currentHashOf(BROADCAST_INTERNAL_FILE, this.ackAbsolute());
     });
     const ports = this.options.ports ?? DEFAULT_WORKSPACE_PORTS;
     let lastError: unknown = null;
@@ -295,6 +305,7 @@ export class WorkspaceServer {
     if (this.closed) return;
     this.closed = true;
     if (this.debounceTimer) clearTimeout(this.debounceTimer);
+    if (this.ackTimer) clearTimeout(this.ackTimer);
     if (this.pingTimer) clearInterval(this.pingTimer);
     if (this.stateTimer) clearInterval(this.stateTimer);
     this.watcher.close();
@@ -353,7 +364,8 @@ export class WorkspaceServer {
   private syncWatcher(): void {
     const dirs: string[] = [];
     for (const [path, entry] of this.table) if (entry.kind === 'dir') dirs.push(path);
-    this.watcher.sync(dirs);
+    // `.pix3` itself (non-recursive) — only for `ack.json`; see `noteInternalChange`.
+    this.watcher.sync(dirs, [RESERVED_ROOT_DIR]);
   }
 
   /** Re-scan `prefixes` into the table. Returns what changed (the caller decides whether to tell). */
@@ -374,6 +386,10 @@ export class WorkspaceServer {
 
   private markDirty(path: string): void {
     if (this.closed) return;
+    if (path === BROADCAST_INTERNAL_FILE || path === RESERVED_ROOT_DIR) {
+      this.noteInternalChange();
+      return;
+    }
     if (path && isExcludedPath(path)) return;
     if (this.dirty.size === 0) this.firstDirtyAt = Date.now();
     this.dirty.add(path);
@@ -407,8 +423,54 @@ export class WorkspaceServer {
     }
   }
 
+  private ackAbsolute(): string {
+    return join(this.root, ...BROADCAST_INTERNAL_FILE.split('/'));
+  }
+
+  /**
+   * `.pix3/` never produces events, except `ack.json` (the agent's read confirmations): a change
+   * of its bytes by someone other than this server is sent as a one-event `change` frame. The
+   * editor also polls the file, so this is a latency improvement, not something it relies on.
+   */
+  private noteInternalChange(): void {
+    if (this.ackTimer) clearTimeout(this.ackTimer);
+    this.ackTimer = setTimeout(() => {
+      this.ackTimer = null;
+      void this.serial(async () => {
+        if (this.closed) return;
+        const hash = await this.currentHashOf(BROADCAST_INTERNAL_FILE, this.ackAbsolute());
+        const previous = this.ackHash;
+        if (hash === previous) return;
+        this.ackHash = hash;
+        const event: ChangeEvent =
+          hash === null
+            ? { op: 'delete', path: BROADCAST_INTERNAL_FILE, kind: 'file' }
+            : {
+                op: previous === null ? 'create' : 'modify',
+                path: BROADCAST_INTERNAL_FILE,
+                kind: 'file',
+                sha256: hash,
+              };
+        this.broadcastChange([event]);
+      }).catch(error => {
+        this.log(`ack check failed: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    }, this.options.debounceMs ?? WATCH_DEBOUNCE_MS);
+  }
+
+  /** After an own mutation that may have touched `.pix3/ack.json`: learn its bytes silently. */
+  private async refreshAckHash(...paths: string[]): Promise<void> {
+    const touches = paths.some(
+      path => BROADCAST_INTERNAL_FILE === path || BROADCAST_INTERNAL_FILE.startsWith(`${path}/`)
+    );
+    if (touches) {
+      this.ackHash = await this.currentHashOf(BROADCAST_INTERNAL_FILE, this.ackAbsolute());
+    }
+  }
+
   /** Record an own write in the table without an event (so the watcher's echo finds nothing new). */
   private recordOwnFile(wirePath: string, stats: BigIntStats, sha256: string): void {
+    if (wirePath === BROADCAST_INTERNAL_FILE) this.ackHash = sha256;
     if (isExcludedPath(wirePath)) return;
     const entry: FileEntry = {
       kind: 'file',
@@ -486,6 +548,7 @@ export class WorkspaceServer {
       projectId: readProjectId(this.root),
       projectName: readProjectName(this.root),
       lease: this.hub.leaseState,
+      leaseGraceMs: this.options.leaseGraceMs ?? WS_LEASE_GRACE_MS,
     };
   }
 
@@ -636,7 +699,10 @@ export class WorkspaceServer {
     return this.serial(async () => {
       // A full scan, not the watcher's view: the manifest is what reconciles missed events.
       this.broadcastChange(await this.rescan(['']));
-      const files = [...this.table.entries()]
+      // `.pix3/**` minus the server's own entries: listed so the editor can find its bookkeeping
+      // (recovery journal, protected set, merge log), but never part of `revision` or events.
+      const internal = await scanInternal(this.root, this.cache);
+      const files = [...this.table.entries(), ...internal.entries()]
         .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
         .map(([path, entry]) => ({
           path,
@@ -1032,6 +1098,7 @@ export class WorkspaceServer {
       await unlink(resolved.absolute);
     }
     await this.rescan([wirePath]);
+    await this.refreshAckHash(wirePath);
     return {
       status: 200,
       body: { path: wirePath, kind: resolved.kind === 'dir' ? 'dir' : 'file', seq: this.nextSeq() },
@@ -1063,6 +1130,7 @@ export class WorkspaceServer {
     }
     await rename(source.absolute, target.absolute);
     await this.rescan([from, this.topmostNew(to)]);
+    await this.refreshAckHash(from, to);
     const moved = this.table.get(to);
     return {
       status: 200,

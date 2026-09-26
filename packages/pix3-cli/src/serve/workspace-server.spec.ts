@@ -337,8 +337,11 @@ describe('manifest', () => {
       mtime: number;
       sha256?: string;
     }>;
+    // `.pix3/**` is listed (minus the server's own entries) but is not part of `revision`.
     const paths = files.map(file => file.path);
     expect(paths).toEqual([
+      '.pix3',
+      '.pix3/.gitignore',
       'assets',
       'assets/dist',
       'design',
@@ -357,7 +360,7 @@ describe('manifest', () => {
     expect(typeof scene?.mtime).toBe('number');
     expect(files.find(file => file.path === 'scenes')?.sha256).toBeUndefined();
     const lines = files
-      .filter(file => file.kind === 'file')
+      .filter(file => file.kind === 'file' && !file.path.startsWith('.pix3/'))
       .map(file => `${file.path}:${file.sha256}`)
       .sort();
     expect(reply.json.revision).toBe(sha(lines.join('\n')));
@@ -365,6 +368,119 @@ describe('manifest', () => {
       workspaceId: server.workspaceId,
       serverSession: server.serverSession,
     });
+  });
+});
+
+describe('.pix3/ — the editor bookkeeping', () => {
+  type ManifestFile = { path: string; kind: string; sha256?: string };
+  const manifestOf = async (base: string): Promise<{ files: ManifestFile[]; revision: string }> => {
+    const reply = await call(`${base}/ws/manifest`);
+    return { files: reply.json.files as ManifestFile[], revision: reply.json.revision as string };
+  };
+
+  it('round-trips .pix3/protected.json through PUT/GET, outside the revision', async () => {
+    const { base, server } = await startServer();
+    const before = server.revision();
+    const body = '{"version":1,"entries":[]}\n';
+    const written = await put(base, '.pix3/protected.json', body);
+    expect(written.status).toBe(200);
+    expect(written.json.sha256).toBe(sha(body));
+    const got = await call(`${base}/ws/file?path=.pix3/protected.json`);
+    expect(got.status).toBe(200);
+    expect(got.text).toBe(body);
+    expect(got.headers.get('etag')).toBe(`"${sha(body)}"`);
+    // Conditional writes work there too.
+    const stale = await put(base, '.pix3/protected.json', 'x', { 'if-match': `"${sha('no')}"` });
+    expect(stale.status).toBe(409);
+    expect(server.revision()).toBe(before);
+    const manifest = await manifestOf(base);
+    expect(manifest.revision).toBe(before);
+    expect(manifest.files.find(file => file.path === '.pix3/protected.json')).toMatchObject({
+      kind: 'file',
+      sha256: sha(body),
+    });
+    const hashes = await post(`${base}/ws/hash`, { paths: ['.pix3/protected.json'] });
+    expect(hashes.json.hashes).toEqual({ '.pix3/protected.json': sha(body) });
+  });
+
+  it('keeps the server-private entries 403 reserved_path, for reads and every mutation', async () => {
+    write('.pix3/link/claim', 'c');
+    const { base } = await startServer();
+    for (const path of [
+      '.pix3',
+      '.pix3/workspace.json',
+      '.PIX3/Workspace.json',
+      '.pix3/serve.lock',
+      '.pix3/tmp/put-x',
+      '.pix3/link/claim',
+    ]) {
+      const read1 = await call(`${base}/ws/file?path=${encodeURIComponent(path)}`);
+      expect([path, read1.status, read1.json.error]).toEqual([path, 403, 'reserved_path']);
+      expect((await put(base, path, 'x')).status).toBe(403);
+      expect((await post(`${base}/ws/delete`, { path, recursive: true })).status).toBe(403);
+      expect((await post(`${base}/ws/hash`, { paths: [path] })).status).toBe(403);
+    }
+    expect((await post(`${base}/ws/mkdir`, { path: '.pix3/tmp/sub' })).status).toBe(403);
+    await put(base, '.pix3/recovery/a.txt', 'a');
+    expect(
+      (await post(`${base}/ws/move`, { from: '.pix3/recovery/a.txt', to: '.pix3/tmp/a.txt' }))
+        .status
+    ).toBe(403);
+    expect(
+      (await post(`${base}/ws/move`, { from: '.pix3/workspace.json', to: 'stolen.json' })).status
+    ).toBe(403);
+    expect(existsSync(statePath(root))).toBe(true);
+    const manifest = await manifestOf(base);
+    const paths = manifest.files.map(file => file.path);
+    expect(paths.filter(path => path.startsWith('.pix3'))).toEqual([
+      '.pix3',
+      '.pix3/.gitignore',
+      '.pix3/recovery',
+      '.pix3/recovery/a.txt',
+    ]);
+  });
+
+  it('lists .pix3/recovery/ after writes and deletes (the journal prunes by listing)', async () => {
+    const { base } = await startServer();
+    await put(base, '.pix3/recovery/scenes%2Fmain.pix3scene/1-aaaa.pix3scene', 'v1');
+    await put(base, '.pix3/recovery/scenes%2Fmain.pix3scene/2-bbbb.pix3scene', 'v2');
+    let paths = (await manifestOf(base)).files.map(file => file.path);
+    expect(paths).toContain('.pix3/recovery/scenes%2Fmain.pix3scene');
+    expect(paths).toContain('.pix3/recovery/scenes%2Fmain.pix3scene/1-aaaa.pix3scene');
+    expect(paths).toContain('.pix3/recovery/scenes%2Fmain.pix3scene/2-bbbb.pix3scene');
+    expect(
+      (
+        await post(`${base}/ws/delete`, {
+          path: '.pix3/recovery/scenes%2Fmain.pix3scene/1-aaaa.pix3scene',
+        })
+      ).status
+    ).toBe(200);
+    paths = (await manifestOf(base)).files.map(file => file.path);
+    expect(paths).not.toContain('.pix3/recovery/scenes%2Fmain.pix3scene/1-aaaa.pix3scene');
+    expect(paths).toContain('.pix3/recovery/scenes%2Fmain.pix3scene/2-bbbb.pix3scene');
+    expect(readdirSync(join(root, '.pix3', 'tmp'))).toEqual([]);
+  });
+
+  it('broadcasts no events for .pix3/, except an external change of .pix3/ack.json', async () => {
+    const { base, port, server } = await startServer();
+    const before = server.revision();
+    const conn = await authed(port);
+    write('.pix3/recovery/x.pix3scene', 'external journal');
+    write('.pix3/merge-log.jsonl', '{}\n');
+    await put(base, '.pix3/protected.json', '{}');
+    await put(base, '.pix3/ack.json', '{"acks":[]}\n'); // own write: no echo
+    await sleep(300);
+    expect(conn.frames.filter(frame => frame.type === 'change')).toEqual([]);
+    const acks = '{"acks":[{"path":"scenes/main.pix3scene"}]}\n';
+    // What `pix3 ack` does: temp file + rename.
+    write('.pix3/ack.json.123.tmp', acks);
+    renameSync(join(root, '.pix3/ack.json.123.tmp'), join(root, '.pix3/ack.json'));
+    const change = await conn.next(frame => frame.type === 'change');
+    expect(change.events).toEqual([
+      { op: 'modify', path: '.pix3/ack.json', kind: 'file', sha256: sha(acks) },
+    ]);
+    expect(change.revision).toBe(before);
+    expect(server.revision()).toBe(before);
   });
 });
 
@@ -777,6 +893,44 @@ describe('lease', () => {
     await sleep(400);
     b.send({ type: 'lease', action: 'acquire' });
     expect(await b.next(frame => frame.type === 'lease')).toMatchObject({
+      state: 'granted',
+      resumed: false,
+    });
+  });
+
+  it('says how long the grace is in hello', async () => {
+    const { port } = await startServer({ leaseGraceMs: 1234 });
+    const conn = await connect(port);
+    conn.send({ type: 'auth', token });
+    expect(await conn.next(frame => frame.type === 'hello')).toMatchObject({ leaseGraceMs: 1234 });
+  });
+
+  it('holder socket closes → after grace a new socket’s acquire is granted', async () => {
+    const { port } = await startServer({ leaseGraceMs: 200 });
+    const a = await authed(port);
+    a.send({ type: 'lease', action: 'acquire' });
+    const granted = await a.next(frame => frame.type === 'lease');
+    // A tab reload: the socket goes away without a release (no close frame even).
+    a.ws.terminate();
+    await a.closed;
+    const b = await authed(port);
+    b.send({ type: 'lease', action: 'acquire', leaseId: 'someone-elses-id' });
+    expect(await b.next(frame => frame.type === 'lease')).toMatchObject({
+      state: 'busy',
+      inGrace: true,
+    });
+    await sleep(350);
+    // Nobody polled in between: the grace timer alone freed the lease.
+    b.send({ type: 'lease', action: 'acquire', leaseId: granted.leaseId });
+    const again = await b.next(frame => frame.type === 'lease');
+    expect(again).toMatchObject({ state: 'granted', resumed: false });
+    expect(again.leaseId).not.toBe(granted.leaseId);
+    // A fresh socket (the reloaded tab) after the grace, with its stale id, also gets it.
+    b.send({ type: 'lease', action: 'release' });
+    await b.next(frame => frame.type === 'lease' && frame.state === 'released');
+    const c = await authed(port);
+    c.send({ type: 'lease', action: 'acquire', leaseId: granted.leaseId });
+    expect(await c.next(frame => frame.type === 'lease')).toMatchObject({
       state: 'granted',
       resumed: false,
     });

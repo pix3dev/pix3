@@ -28,9 +28,12 @@ export class TreeWatcher {
     this.log = log;
   }
 
-  /** Watch exactly `''` (the root) plus `dirs`. */
-  sync(dirs: Iterable<string>): void {
-    const wanted = new Set<string>(['']);
+  /**
+   * Watch exactly `''` (the root) plus `dirs` (minus excluded ones) plus `extra` (taken as is —
+   * the server watches `.pix3` itself for `ack.json`).
+   */
+  sync(dirs: Iterable<string>, extra: Iterable<string> = []): void {
+    const wanted = new Set<string>(['', ...extra]);
     for (const dir of dirs) if (!isExcludedPath(dir)) wanted.add(dir);
     for (const [dir, watcher] of this.watchers) {
       if (!wanted.has(dir)) {

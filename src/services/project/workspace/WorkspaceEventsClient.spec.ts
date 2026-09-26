@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   WorkspaceEventsClient,
+  sessionLeaseStore,
+  type StoredWorkspaceLease,
   type WorkspaceEventsHandlers,
+  type WorkspaceLeaseStore,
   type WorkspaceSocketLike,
 } from '@/services/project/workspace/WorkspaceEventsClient';
 import type { WorkspaceHelloFrame } from '@/services/project/workspace/workspace-protocol';
@@ -62,17 +65,22 @@ describe('WorkspaceEventsClient', () => {
   let sockets: FakeSocket[];
   let client: WorkspaceEventsClient;
 
-  beforeEach(() => {
-    vi.useFakeTimers();
-    sockets = [];
-    client = new WorkspaceEventsClient({
+  const makeClient = (leaseStore?: WorkspaceLeaseStore): WorkspaceEventsClient =>
+    new WorkspaceEventsClient({
       createSocket: url => {
         const socket = new FakeSocket(url);
         sockets.push(socket);
         return socket;
       },
       backoffMs: [100, 200],
+      ...(leaseStore ? { leaseStore } : {}),
     });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sessionStorage.clear();
+    sockets = [];
+    client = makeClient();
   });
 
   afterEach(() => {
@@ -198,5 +206,110 @@ describe('WorkspaceEventsClient', () => {
     expect(socket.sent.at(-1)).toEqual({ type: 'lease', action: 'release' });
     expect(socket.closed).toBe(true);
     expect(sockets).toHaveLength(1);
+  });
+
+  describe('lease across a tab reload', () => {
+    const memoryStore = (): WorkspaceLeaseStore & { map: Map<string, StoredWorkspaceLease> } => {
+      const map = new Map<string, StoredWorkspaceLease>();
+      return {
+        map,
+        get: id => map.get(id) ?? null,
+        set: (id, lease) => void map.set(id, lease),
+        clear: id => void map.delete(id),
+      };
+    };
+
+    it('persists the granted leaseId per workspace in sessionStorage and sends it after a reload', () => {
+      const socket = connect();
+      socket.receive(hello());
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'lease-7', resumed: false });
+      expect(sessionLeaseStore.get('ws-1')).toEqual({
+        leaseId: 'lease-7',
+        serverSession: 'session-1',
+      });
+
+      // F5: the page (and this client) is gone without a close(); a new one starts from scratch.
+      const reloaded = makeClient();
+      reloaded.connect('http://localhost:8490', 'p3ws_secret', {});
+      const next = sockets.at(-1)!;
+      next.open();
+      next.receive(hello());
+      expect(next.sent[1]).toEqual({ type: 'lease', action: 'acquire', leaseId: 'lease-7' });
+      next.receive({ type: 'lease', state: 'granted', leaseId: 'lease-7', resumed: true });
+      expect(reloaded.getLeaseId()).toBe('lease-7');
+      reloaded.close();
+    });
+
+    it('ignores a stored lease of another server run, and of another workspace', () => {
+      const store = memoryStore();
+      store.set('ws-1', { leaseId: 'old', serverSession: 'session-0' });
+      store.set('ws-2', { leaseId: 'other-ws', serverSession: 'session-1' });
+      client = makeClient(store);
+      const socket = connect();
+      socket.receive(hello());
+      expect(socket.sent[1]).toEqual({ type: 'lease', action: 'acquire' });
+      expect(store.map.has('ws-1')).toBe(false);
+      expect(store.map.get('ws-2')?.leaseId).toBe('other-ws');
+    });
+
+    it('forgets the stored lease on lost, released and a deliberate close', () => {
+      const store = memoryStore();
+      client = makeClient(store);
+      const socket = connect();
+      socket.receive(hello());
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'a', resumed: false });
+      socket.receive({ type: 'lease', state: 'lost', reason: 'taken_over', leaseId: 'a' });
+      expect(store.map.has('ws-1')).toBe(false);
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'b', resumed: false });
+      socket.receive({ type: 'lease', state: 'released' });
+      expect(store.map.has('ws-1')).toBe(false);
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'c', resumed: false });
+      expect(store.map.get('ws-1')?.leaseId).toBe('c');
+      client.close();
+      expect(store.map.has('ws-1')).toBe(false);
+    });
+
+    it('retries acquire after busy-in-grace (grace from hello) until granted', () => {
+      const onLease = vi.fn();
+      const socket = connect({ onLease });
+      socket.receive(hello({ leaseGraceMs: 10_000 }));
+      socket.receive({ type: 'lease', state: 'busy', inGrace: true });
+      const acquires = (): number =>
+        socket.sent.filter(frame => frame.type === 'lease' && frame.action === 'acquire').length;
+      expect(acquires()).toBe(1);
+
+      vi.advanceTimersByTime(10_499);
+      expect(acquires()).toBe(1);
+      vi.advanceTimersByTime(1);
+      expect(acquires()).toBe(2);
+
+      // Still in grace (timing): ask again after another grace.
+      socket.receive({ type: 'lease', state: 'busy', inGrace: true });
+      vi.advanceTimersByTime(10_500);
+      expect(acquires()).toBe(3);
+
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'fresh', resumed: false });
+      vi.advanceTimersByTime(60_000);
+      expect(acquires()).toBe(3);
+      expect(client.getLeaseId()).toBe('fresh');
+      expect(onLease).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'granted' }));
+    });
+
+    it('falls back to 11 s without leaseGraceMs, and stops at a non-grace busy', () => {
+      const socket = connect();
+      socket.receive(hello());
+      socket.receive({ type: 'lease', state: 'busy', inGrace: true });
+      const acquires = (): number =>
+        socket.sent.filter(frame => frame.type === 'lease' && frame.action === 'acquire').length;
+      vi.advanceTimersByTime(10_999);
+      expect(acquires()).toBe(1);
+      vi.advanceTimersByTime(1);
+      expect(acquires()).toBe(2);
+
+      // Another window connected and took it: that is final until the user takes over.
+      socket.receive({ type: 'lease', state: 'busy', inGrace: false });
+      vi.advanceTimersByTime(60_000);
+      expect(acquires()).toBe(2);
+    });
   });
 });

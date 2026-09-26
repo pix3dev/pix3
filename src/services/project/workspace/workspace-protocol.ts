@@ -58,6 +58,8 @@ export interface WorkspaceHelloFrame {
   readonly projectId: string | null;
   readonly projectName: string;
   readonly lease: 'held' | 'free';
+  /** How long the server keeps a disconnected holder's lease (older servers omit it). */
+  readonly leaseGraceMs?: number;
 }
 
 export interface WorkspaceChangeEvent {

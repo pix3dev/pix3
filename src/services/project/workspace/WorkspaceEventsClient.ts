@@ -41,7 +41,60 @@ export interface WorkspaceEventsHandlers {
   onConnectionState?(state: WorkspaceEventsConnectionState, error?: WorkspaceError): void;
 }
 
+/** A lease this tab held, remembered so the same tab can resume it after a reload. */
+export interface StoredWorkspaceLease {
+  readonly leaseId: string;
+  /** The server run that issued it; a restarted server has a fresh lease table. */
+  readonly serverSession: string;
+}
+
+/** Per-workspace lease memory. The default lives in `sessionStorage`: per tab, survives F5. */
+export interface WorkspaceLeaseStore {
+  get(workspaceId: string): StoredWorkspaceLease | null;
+  set(workspaceId: string, lease: StoredWorkspaceLease): void;
+  clear(workspaceId: string): void;
+}
+
+const LEASE_STORAGE_PREFIX = 'pix3.workspace.lease.';
+
+/**
+ * `sessionStorage` is per tab and survives a reload of that tab, which is exactly the scope of a
+ * lease: the reloaded tab resumes it, a second tab does not share it (a duplicated tab copies the
+ * value, but the server only resumes a lease whose holder is disconnected, so it just gets `busy`).
+ * Every access is guarded: storage can be missing or throw (private mode, blocked site data).
+ */
+export const sessionLeaseStore: WorkspaceLeaseStore = {
+  get(workspaceId) {
+    try {
+      const raw = globalThis.sessionStorage?.getItem(LEASE_STORAGE_PREFIX + workspaceId);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as Partial<StoredWorkspaceLease>;
+      return typeof parsed.leaseId === 'string' && typeof parsed.serverSession === 'string'
+        ? { leaseId: parsed.leaseId, serverSession: parsed.serverSession }
+        : null;
+    } catch {
+      return null;
+    }
+  },
+  set(workspaceId, lease) {
+    try {
+      globalThis.sessionStorage?.setItem(LEASE_STORAGE_PREFIX + workspaceId, JSON.stringify(lease));
+    } catch {
+      // Not persisted: a reload then waits out the grace instead of resuming.
+    }
+  },
+  clear(workspaceId) {
+    try {
+      globalThis.sessionStorage?.removeItem(LEASE_STORAGE_PREFIX + workspaceId);
+    } catch {
+      // ignore
+    }
+  },
+};
+
 export interface WorkspaceEventsClientOptions {
+  /** Where the held `leaseId` is remembered per workspace (default: {@link sessionLeaseStore}). */
+  readonly leaseStore?: WorkspaceLeaseStore;
   readonly createSocket?: WorkspaceSocketFactory;
   /** Reconnect delays in ms; the last one repeats. */
   readonly backoffMs?: readonly number[];
@@ -52,6 +105,10 @@ export interface WorkspaceEventsClientOptions {
 const OPEN = 1;
 const DEFAULT_BACKOFF_MS = [500, 1_000, 2_000, 4_000, 8_000, 15_000];
 const DEFAULT_SILENCE_TIMEOUT_MS = 30_000;
+/** Retry delay after `busy {inGrace}` when the server's `hello` does not say how long grace is. */
+const FALLBACK_LEASE_RETRY_MS = 11_000;
+/** Added to the server's grace so the retry lands after the expiry, not on it. */
+const LEASE_RETRY_MARGIN_MS = 500;
 
 /** Close codes of `/ws/events` (README "Close codes"). */
 const CLOSE_UNAUTHORIZED = 4401;
@@ -66,6 +123,11 @@ const CLOSE_RATE_LIMITED = 4429;
  * server's rate limit. After a reconnect the lease is re-acquired with the previous `leaseId`
  * (resumes it inside the server's grace period) and {@link WorkspaceEventsHandlers.onRescanNeeded}
  * fires so the caller re-scans the manifest.
+ *
+ * The `leaseId` is also kept in a {@link WorkspaceLeaseStore} (per tab, `sessionStorage`), so a
+ * reloaded tab resumes its own lease. When the answer is `busy {inGrace: true}` (the holder's
+ * socket is gone but its grace runs), `acquire` is sent again once the grace is over, and again
+ * after that, until the lease is granted or someone connected holds it (`busy {inGrace: false}`).
  */
 export class WorkspaceEventsClient {
   private readonly createSocket: WorkspaceSocketFactory;
@@ -85,8 +147,13 @@ export class WorkspaceEventsClient {
   private lastServerSession: string | null = null;
   private leaseId: string | null = null;
   private pendingRetryAfterMs: number | null = null;
+  private readonly leaseStore: WorkspaceLeaseStore;
+  private workspaceId: string | null = null;
+  private leaseGraceMs: number | null = null;
+  private leaseRetryTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: WorkspaceEventsClientOptions = {}) {
+    this.leaseStore = options.leaseStore ?? sessionLeaseStore;
     this.createSocket =
       options.createSocket ?? ((url: string) => new WebSocket(url) as WorkspaceSocketLike);
     this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
@@ -104,6 +171,8 @@ export class WorkspaceEventsClient {
     this.lastRevision = null;
     this.lastServerSession = null;
     this.leaseId = null;
+    this.workspaceId = null;
+    this.leaseGraceMs = null;
     this.open('connecting');
   }
 
@@ -114,6 +183,10 @@ export class WorkspaceEventsClient {
     this.clearTimers();
     const socket = this.socket;
     this.socket = null;
+    if (wasRunning) {
+      // Given up on purpose (disconnect / another project): nothing to resume later.
+      this.forgetStoredLease();
+    }
     if (socket) {
       if (this.leaseId && socket.readyState === OPEN) {
         this.sendOn(socket, { type: 'lease', action: 'release' });
@@ -190,6 +263,8 @@ export class WorkspaceEventsClient {
       }
       this.socket = null;
       this.clearSilenceTimer();
+      // The next hello re-sends `acquire` anyway.
+      this.clearLeaseRetry();
       this.handleClose(event.code, event.reason);
     };
   }
@@ -220,12 +295,7 @@ export class WorkspaceEventsClient {
         this.handlers.onChange?.(frame);
         return;
       case 'lease':
-        if (frame.state === 'granted') {
-          this.leaseId = frame.leaseId;
-        } else if (frame.state === 'lost' || frame.state === 'released') {
-          this.leaseId = null;
-        }
-        this.handlers.onLease?.(frame);
+        this.handleLeaseFrame(frame);
         return;
       case 'call':
         this.handleCall(socket, frame);
@@ -238,6 +308,51 @@ export class WorkspaceEventsClient {
     }
   }
 
+  private handleLeaseFrame(frame: WorkspaceLeaseFrame): void {
+    this.clearLeaseRetry();
+    if (frame.state === 'granted') {
+      this.leaseId = frame.leaseId;
+      if (this.workspaceId && this.lastServerSession) {
+        this.leaseStore.set(this.workspaceId, {
+          leaseId: frame.leaseId,
+          serverSession: this.lastServerSession,
+        });
+      }
+    } else if (frame.state === 'lost' || frame.state === 'released') {
+      this.leaseId = null;
+      this.forgetStoredLease();
+    } else if (frame.state === 'busy' && frame.inGrace) {
+      // The holder is disconnected: its lease frees itself when the grace ends (the server does
+      // not announce that), so ask again then.
+      this.scheduleLeaseRetry();
+    }
+    this.handlers.onLease?.(frame);
+  }
+
+  private scheduleLeaseRetry(): void {
+    const delay =
+      this.leaseGraceMs !== null
+        ? this.leaseGraceMs + LEASE_RETRY_MARGIN_MS
+        : FALLBACK_LEASE_RETRY_MS;
+    this.leaseRetryTimer = setTimeout(() => {
+      this.leaseRetryTimer = null;
+      this.acquireLease();
+    }, delay);
+  }
+
+  private clearLeaseRetry(): void {
+    if (this.leaseRetryTimer !== null) {
+      clearTimeout(this.leaseRetryTimer);
+      this.leaseRetryTimer = null;
+    }
+  }
+
+  private forgetStoredLease(): void {
+    if (this.workspaceId) {
+      this.leaseStore.clear(this.workspaceId);
+    }
+  }
+
   private handleHello(socket: WorkspaceSocketLike, hello: WorkspaceHelloFrame): void {
     const reconnected = this.helloCount > 0;
     // Always re-scan after a reconnect. Comparing revisions would not save anything: this
@@ -247,6 +362,22 @@ export class WorkspaceEventsClient {
       // A restarted server has a fresh lease table: a leaseId from the old session means nothing.
       if (this.lastServerSession !== null) {
         this.leaseId = null;
+      }
+    }
+    if (this.workspaceId !== null && this.workspaceId !== hello.workspaceId) {
+      // The address now serves another workspace: our lease belongs to the old one.
+      this.leaseId = null;
+    }
+    this.workspaceId = hello.workspaceId;
+    this.leaseGraceMs =
+      typeof hello.leaseGraceMs === 'number' && hello.leaseGraceMs >= 0 ? hello.leaseGraceMs : null;
+    if (this.leaseId === null) {
+      // First hello of this page (e.g. after F5): the lease this tab held before, if any.
+      const stored = this.leaseStore.get(hello.workspaceId);
+      if (stored && stored.serverSession === hello.serverSession) {
+        this.leaseId = stored.leaseId;
+      } else if (stored) {
+        this.leaseStore.clear(hello.workspaceId);
       }
     }
     this.helloCount += 1;
@@ -369,6 +500,7 @@ export class WorkspaceEventsClient {
       }
       // Half-open tunnel: the server stopped talking. Drop it and reconnect.
       this.socket = null;
+      this.clearLeaseRetry();
       detach(socket);
       try {
         socket.close(4000, 'silent');
@@ -388,6 +520,7 @@ export class WorkspaceEventsClient {
 
   private clearTimers(): void {
     this.clearSilenceTimer();
+    this.clearLeaseRetry();
     if (this.reconnectTimer !== null) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;

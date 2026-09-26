@@ -63,8 +63,15 @@ Protocol version: **`WORKSPACE_PROTOCOL = 1`** (`src/protocol.ts`), reported as 
     mints a new `workspaceId` and token instead of trusting the copied file.
   - `serve.lock` — pid of the server owning the root.
   - `tmp/` — staging for atomic writes.
-- The whole `.pix3/` directory is unreachable through the API (`403 reserved_path`) and never
-  part of the manifest or events.
+  - `link/` — challenge files of the FSA link server.
+- **Server-private** = `.pix3` itself, `.pix3/workspace.json`, `.pix3/serve.lock`, `.pix3/tmp/**`
+  and `.pix3/link/**` (names compared case-insensitively): unreachable through every route
+  (`403 reserved_path`) and never listed.
+- **Everything else under `.pix3/`** is the editor's co-authoring bookkeeping
+  (`protected.json`, `merge-log.jsonl`, `recovery/**`, `ack.json`, …) and is readable and
+  writable like any other path. It is **never part of the revision set**: it does not move
+  `revision` and produces no `change` events — with one exception, `.pix3/ack.json` (see
+  `ChangeEvent` below). `/ws/manifest` lists it (see there).
 
 ### Common rules (every HTTP route)
 
@@ -85,7 +92,8 @@ Protocol version: **`WORKSPACE_PROTOCOL = 1`** (`src/protocol.ts`), reported as 
 - **Errors** are JSON: `{ "error": "<code>", "message": "<text>", ...extra }`.
 - **Paths** are POSIX, relative to the root, case preserved: `scenes/main.pix3scene`. Refused
   with `400 bad_path`: empty, absolute (`/…`), backslashes, a drive prefix (`C:`), NUL, empty
-  segments (leading/trailing/double `/`), `.` or `..` segments. `.pix3/…` → `403 reserved_path`.
+  segments (leading/trailing/double `/`), `.` or `..` segments. A server-private path (see
+  above) → `403 reserved_path`.
   `?path=` is percent-decoded **exactly once** (a literal `%2e%2e` after that one decoding is a
   file name, not `..`); JSON bodies are not decoded. **No operation passes through a symlink**:
   a symlink anywhere on the path, parents of a path being created included, →
@@ -124,6 +132,11 @@ anything the watcher missed — differences it finds are broadcast as a `change`
 
 `files` is sorted by path; `mtime` is integer epoch milliseconds; `sha256` is present on every
 file and absent on directories. Not an atomic snapshot of a folder others keep writing to.
+
+`files` is the revision set **plus** the non-private part of `.pix3/` (`.pix3` itself as a `dir`,
+then e.g. `.pix3/protected.json`, `.pix3/recovery/…`), so a client can list and find its
+bookkeeping the same way it would in a local folder. `revision` is computed from the revision set
+only: a client recomputing it from `files` must leave out every path under `.pix3/`.
 
 #### `GET /ws/file?path=<p>` (and `HEAD`)
 
@@ -225,7 +238,7 @@ socket (`1003`).
 
 | Frame | When |
 | --- | --- |
-| `{ "type": "hello", "workspaceId", "serverSession", "protocol": 1, "cliVersion", "revision", "seq", "root", "projectId": string \| null, "projectName", "lease": "held" \| "free" }` | Right after a valid `auth`. `root` is the server's absolute path, `projectName` is `metadata.projectName` (else the folder name), `projectId` is `metadata.projectId`. |
+| `{ "type": "hello", "workspaceId", "serverSession", "protocol": 1, "cliVersion", "revision", "seq", "root", "projectId": string \| null, "projectName", "lease": "held" \| "free", "leaseGraceMs": 10000 }` | Right after a valid `auth`. `root` is the server's absolute path, `projectName` is `metadata.projectName` (else the folder name), `projectId` is `metadata.projectId`, `leaseGraceMs` is the lease grace (below). |
 | `{ "type": "change", "seq", "revision", "events": [ChangeEvent, …] }` | External changes, debounced ~100 ms (at most ~1 s under a steady stream). `revision` is the revision after the batch. |
 | `{ "type": "ping" }` | Every 10 s. A socket silent (no frame at all) for 30 s is terminated. |
 | `{ "type": "lease", "state": "granted", "leaseId", "resumed": boolean }` | Lease granted (`resumed: true` = same lease after a reconnect). |
@@ -244,6 +257,9 @@ socket (`1003`).
 `sha256` on file `create`/`modify`/`rename`; `from` only on `rename` (a delete + create of the same
 content in one batch, when unambiguous). Events are sorted by `path`. A file touched without a
 content change produces no event. Changes made **through this API** never appear as events.
+Nothing under `.pix3/` produces events, except an outside change of `.pix3/ack.json` (what
+`pix3 read` / `pix3 ack` write): it comes as its own frame with one `create` / `modify` /
+`delete` event for that path, and the frame's `revision` is unchanged. Clients may also poll it.
 Events are hints, not a guarantee of seeing every write — the barrier re-checks with
 `/ws/manifest` or `/ws/hash`.
 
@@ -254,7 +270,12 @@ frame, `1001` server shutting down.
 holder's socket closes, the lease is kept for a **10 s grace**: the same window reconnecting
 sends `acquire` with its `leaseId` and gets `resumed: true` (calls it had been handed are sent
 again); anyone else gets `busy` with `inGrace: true`. After the grace, the lease is free and
-pending calls fail. On `takeover`, the old holder gets `lost/taken_over` and calls it had not
+pending calls fail. The server does **not** announce that expiry: a client answered
+`busy {inGrace: true}` should send `acquire` again after `leaseGraceMs` (the editor adds 500 ms,
+and falls back to 11 s for a server that omits the field), repeating until `granted` or a
+`busy {inGrace: false}`. The editor keeps its `leaseId` per workspace in `sessionStorage`, so a
+reloaded tab resumes its own lease; another tab never shares it. On `takeover`, the old holder
+gets `lost/taken_over` and calls it had not
 answered go to the new holder. On `release`, pending calls fail. The HTTP routes do not check the
 lease (v1): a window without it is expected to stay read-only.
 

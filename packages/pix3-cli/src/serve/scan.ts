@@ -3,14 +3,15 @@ import { createReadStream, type BigIntStats } from 'node:fs';
 import { lstat, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 
-import { RESERVED_ROOT_DIR } from './paths.ts';
+import { isServerPrivatePath, RESERVED_ROOT_DIR } from './paths.ts';
 
 /**
  * The revision set of plan §5 D and the file table the workspace server keeps of it.
  *
  * "Everything that ships" is decided the way `ProjectBuildService.collectShippableProjectFiles`
  * decides it: walk the whole root, skip directories named in `NON_SHIPPABLE_DIRECTORIES` at any
- * depth — plus `.pix3/` at the root, which is this server's own state. Scenes, prefabs, scripts,
+ * depth — plus `.pix3/` at the root (server state and the editor's bookkeeping; the manifest lists
+ * the editor-reachable part of it separately, see `scanInternal`). Scenes, prefabs, scripts,
  * assets of every type, `design/tests/`, `locales/` and `pix3project.yaml` all fall inside that
  * walk; nothing is filtered by extension. Symlinks are neither listed nor followed.
  */
@@ -52,6 +53,22 @@ export const isExcludedPath = (wirePath: string): boolean => {
 
 const isExcludedDirectory = (wirePath: string, name: string): boolean =>
   wirePath === RESERVED_ROOT_DIR || NON_SHIPPABLE_DIRECTORIES.has(name);
+
+/**
+ * Inside `.pix3/` (the internal scan): everything the file API lets the editor reach, i.e. all but
+ * the server-private entries and sibling temp files. `.pix3` itself is listed as a directory.
+ */
+const isExcludedInternalPath = (wirePath: string): boolean =>
+  (wirePath !== RESERVED_ROOT_DIR && isServerPrivatePath(wirePath)) ||
+  SIBLING_TEMP_PATTERN.test(wirePath.slice(wirePath.lastIndexOf('/') + 1));
+
+export interface ScanOptions {
+  /**
+   * Scan `.pix3/` (the editor's bookkeeping) instead of the revision set. Such entries are listed
+   * by `/ws/manifest` but never enter the file table, `revision` or `change` events.
+   */
+  readonly internal?: boolean;
+}
 
 export interface FileEntry {
   readonly kind: 'file' | 'dir';
@@ -120,10 +137,12 @@ export const scanInto = async (
   root: string,
   wirePath: string,
   cache: HashCache,
-  out: FileTable
+  out: FileTable,
+  options: ScanOptions = {}
 ): Promise<void> => {
   const absolute = wirePath ? join(root, ...wirePath.split('/')) : root;
-  if (wirePath && isExcludedPath(wirePath)) return;
+  const internal = options.internal === true;
+  if (internal ? isExcludedInternalPath(wirePath) : wirePath && isExcludedPath(wirePath)) return;
   let stats: BigIntStats;
   try {
     stats = await lstat(absolute, { bigint: true });
@@ -152,7 +171,7 @@ export const scanInto = async (
   }
   if (!stats.isDirectory()) return;
   const name = wirePath.slice(wirePath.lastIndexOf('/') + 1);
-  if (wirePath && isExcludedDirectory(wirePath, name)) return;
+  if (!internal && wirePath && isExcludedDirectory(wirePath, name)) return;
   if (wirePath) {
     out.set(wirePath, { kind: 'dir', size: 0, mtime: mtimeOf(stats), statKey: statKeyOf(stats) });
   }
@@ -166,8 +185,15 @@ export const scanInto = async (
   }
   names.sort();
   for (const child of names) {
-    await scanInto(root, wirePath ? `${wirePath}/${child}` : child, cache, out);
+    await scanInto(root, wirePath ? `${wirePath}/${child}` : child, cache, out, options);
   }
+};
+
+/** The editor-reachable part of `.pix3/` (see {@link ScanOptions.internal}). */
+export const scanInternal = async (root: string, cache: HashCache): Promise<FileTable> => {
+  const table: FileTable = new Map();
+  await scanInto(root, RESERVED_ROOT_DIR, cache, table, { internal: true });
+  return table;
 };
 
 export const scanTree = async (root: string, cache: HashCache): Promise<FileTable> => {

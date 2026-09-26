@@ -6,7 +6,7 @@ import {
   type WorkspaceConnectionState,
 } from '@/state';
 import { FileWatchService } from '@/services/project/FileWatchService';
-import { isPix3InternalPath } from '@/services/project/coauthoring/coauthoring-paths';
+import { ACK_FILE, isPix3InternalPath } from '@/services/project/coauthoring/coauthoring-paths';
 import { WorkspaceClient } from '@/services/project/workspace/WorkspaceClient';
 import {
   WorkspaceEventsClient,
@@ -411,7 +411,11 @@ export class WorkspaceSessionService {
 
     for (const event of events) {
       if (isPix3InternalPath(event.path) && (!event.from || isPix3InternalPath(event.from))) {
-        // Editor bookkeeping (journal, protected set, merge log): not project content.
+        // Editor bookkeeping (journal, protected set, merge log): not project content. The one
+        // exception is the agent's acks, which `AckService` watches (the server pushes them).
+        if (event.path === ACK_FILE && event.kind === 'file' && event.op !== 'delete') {
+          this.fileWatch.notifyExternalChange(event.path, { sha256: event.sha256 ?? null });
+        }
         continue;
       }
       directories.add(parentDirectory(event.path));

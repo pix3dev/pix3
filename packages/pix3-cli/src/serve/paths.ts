@@ -13,8 +13,38 @@ import { HttpError } from '../server/http.ts';
  * file name, never a second chance to spell `..`.
  */
 
-/** Directory under the root that holds the server's own state; never readable or writable. */
+/**
+ * Directory under the root that holds the server's own state AND the editor's co-authoring
+ * bookkeeping (`protected.json`, `merge-log.jsonl`, `recovery/`, `ack.json`, ...). It is never
+ * part of the revision set; through the API only its server-private entries are refused.
+ */
 export const RESERVED_ROOT_DIR = '.pix3';
+
+/**
+ * Entries directly under `.pix3/` that belong to the server (compared case-insensitively, so a
+ * case-insensitive disk cannot be used to spell them differently). Anything below `tmp/` and
+ * `link/` is private too.
+ */
+const SERVER_PRIVATE_ENTRIES: ReadonlySet<string> = new Set([
+  'workspace.json',
+  'serve.lock',
+  'tmp',
+  'link',
+]);
+
+/** The one internal file whose changes are broadcast as `change` events (the agent's acks). */
+export const BROADCAST_INTERNAL_FILE = '.pix3/ack.json';
+
+/**
+ * True for paths the file API refuses with `403 reserved_path`: `.pix3` itself (so it can be
+ * neither deleted nor moved) and the server-private entries under it.
+ */
+export const isServerPrivatePath = (wirePath: string): boolean => {
+  const segments = wirePath.split('/');
+  if (segments[0].toLowerCase() !== RESERVED_ROOT_DIR) return false;
+  if (segments.length === 1) return true;
+  return SERVER_PRIVATE_ENTRIES.has(segments[1].toLowerCase());
+};
 
 const MAX_PATH_LENGTH = 4096;
 
@@ -36,8 +66,13 @@ export const parseWirePath = (raw: unknown, field = 'path'): string => {
     if (segment === '.' || segment === '..')
       throw bad(`\`${field}\` must not contain "." or "..".`);
   }
-  if (segments[0] === RESERVED_ROOT_DIR) {
-    throw new HttpError(403, 'reserved_path', `\`${RESERVED_ROOT_DIR}/\` belongs to the server.`);
+  if (isServerPrivatePath(raw)) {
+    throw new HttpError(
+      403,
+      'reserved_path',
+      `\`${RESERVED_ROOT_DIR}\` itself and \`${RESERVED_ROOT_DIR}/workspace.json\`, \`serve.lock\`, ` +
+        '`tmp/` and `link/` belong to the server.'
+    );
   }
   return raw;
 };
