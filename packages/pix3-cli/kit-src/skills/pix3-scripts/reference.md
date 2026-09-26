@@ -5,7 +5,8 @@ Generated from the engine's own documentation and code. Grep a heading instead o
 whole. Tool names the in-editor agent uses appear in places: `add_component` /
 `set_component_property` = edit the scene YAML's `components:`; `list_component_types` = the
 "`core:` components" section at the end of this file; `engine_search` / `engine_read` do not
-exist for you — the runtime's declarations are in `.pix3/types/@pix3/runtime/`.
+exist for you — the runtime's declarations are in `.pix3/types/@pix3/runtime/` (or in
+`node_modules/@pix3/runtime` when the project has its own `tsconfig.json`). Source paths quoted here (`src/…`, `packages/…`) are files of the Pix3 engine repository, not of this project.
 
 ## The surface a `Script` sees
 

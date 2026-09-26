@@ -194,6 +194,20 @@ describe('merge log', () => {
     expect(human).toContain('pix3 read scenes/main.pix3scene');
   }, 60_000);
 
+  it('prints an ignored read confirmation as a note, not as a merge-log line', async () => {
+    const root = newRecipe();
+    writeFileSync(
+      join(root, '.pix3', 'merge-log.jsonl'),
+      `${JSON.stringify({ at: new Date().toISOString(), file: 'scenes/main.pix3scene', event: 'ack-unknown', hash: 'abc' })}\n`
+    );
+    const human = formatCheckHuman(await check(root, false), new Date());
+    expect(human).toMatch(
+      /^note: .*scenes\/main\.pix3scene {2}read confirmation for a version the editor has not recorded — ignored$/m
+    );
+    expect(human).not.toContain('merge-log (newest');
+    expect(human).not.toContain('never saw');
+  }, 60_000);
+
   it('describes a rejected version', () => {
     expect(
       describeMergeLogEntry(
@@ -213,7 +227,9 @@ describe('merge log', () => {
 });
 
 describe('a project with its own tsconfig.json', () => {
-  const ownProject = (runtimeVersion: string | null): string => {
+  /** `runtimeVersion`: a version = that @pix3/runtime installed; null = node_modules without it;
+   * undefined = no node_modules at all. */
+  const ownProject = (runtimeVersion?: string | null): string => {
     const root = join(scratch, `own${++counter}`);
     mkdirSync(join(root, 'src', 'scripts'), { recursive: true });
     writeFileSync(
@@ -235,6 +251,7 @@ describe('a project with its own tsconfig.json', () => {
       })
     );
     writeFileSync(join(root, 'src', 'scripts', 'plain.ts'), 'export const answer: number = 42;\n');
+    if (runtimeVersion !== undefined) mkdirSync(join(root, 'node_modules'), { recursive: true });
     if (runtimeVersion) {
       const pkg = join(root, 'node_modules', '@pix3', 'runtime');
       mkdirSync(pkg, { recursive: true });
@@ -262,9 +279,44 @@ describe('a project with its own tsconfig.json', () => {
     expect(report.kit.version).toBeNull();
   }, 60_000);
 
-  it('W_RUNTIME_NOT_INSTALLED without node_modules/@pix3/runtime', async () => {
+  it('W_RUNTIME_NOT_INSTALLED with node_modules but without @pix3/runtime', async () => {
     const report = await check(ownProject(null), false);
-    expect(report.diagnostics.map(d => d.code)).toContain('W_RUNTIME_NOT_INSTALLED');
+    const codes = report.diagnostics.map(d => d.code);
+    expect(codes).toContain('W_RUNTIME_NOT_INSTALLED');
+    expect(codes).not.toContain('E_DEPENDENCIES_MISSING');
+  }, 60_000);
+
+  it('one E_DEPENDENCIES_MISSING (fix: npm install) and no tsc cascade without node_modules', async () => {
+    const root = ownProject();
+    writeFileSync(join(root, 'package.json'), JSON.stringify({ name: 'own', private: true }));
+    // Every one of these imports would be its own "Cannot find module" E_TYPE if tsc ran.
+    writeFileSync(
+      join(root, 'src', 'scripts', 'Uses.ts'),
+      "import { Script } from '@pix3/runtime';\nimport { Vector3 } from 'three';\nimport { x } from 'lodash-es';\nexport class Uses extends Script {}\nexport const v = new Vector3(x, 0, 0);\n"
+    );
+    mkdirSync(join(root, 'src', 'assets', 'scenes'), { recursive: true });
+    writeFileSync(
+      join(root, 'src', 'assets', 'scenes', 'main.pix3scene'),
+      'version: 1.0.0\nroot:\n  - id: root\n    type: Group2D\n    name: Root\n'
+    );
+    const report = await check(root, false);
+    const errors = report.diagnostics.filter(d => d.severity === 'error');
+    expect(errors).toEqual([
+      expect.objectContaining({
+        code: 'E_DEPENDENCIES_MISSING',
+        file: 'package.json',
+        fix: 'npm install',
+      }),
+    ]);
+    expect(report.diagnostics.some(d => d.code === 'E_TYPE')).toBe(false);
+    expect(report.diagnostics.some(d => d.code === 'W_RUNTIME_NOT_INSTALLED')).toBe(false);
+    expect(report.typecheck).toMatchObject({ ok: false, errors: 1, typescript: null });
+    expect(report.typecheck.skipped).toContain('npm install');
+    // validate still ran
+    expect(report.files.map(f => f.file)).toContain('src/assets/scenes/main.pix3scene');
+    expect(formatCheckHuman(report, new Date())).toContain(
+      'typecheck skipped: dependencies not installed'
+    );
   }, 60_000);
 });
 

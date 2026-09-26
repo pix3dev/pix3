@@ -141,6 +141,34 @@ export const writeAgentKitMetadata = (
   return true;
 };
 
+/** Which instruction file wins on what, when a project has its own `AGENTS.md`. */
+export const PRECEDENCE_SENTENCE =
+  "The project's own AGENTS.md wins on process (planning first, config placement); the Pix3 kit wins on Pix3 facts (YAML, runtime API, pix3 check).";
+
+/** The line the project's own `AGENTS.md` should carry so agents that read only it find ours. */
+export const AGENTS_LINK_LINE = `See ${AGENTS_ALT_FILE} for the Pix3 engine rules.`;
+
+/**
+ * The kit's AGENTS.md as it lands in `AGENTS.pix3.md` beside a project's own `AGENTS.md`: the same
+ * text with a header that says so — the TODO `pix3 kit` prints scrolls away, this stays. Inserted
+ * after the first line (the kit's version comment) so the file still starts the same way.
+ */
+export const withAltAgentsHeader = (contents: string): string => {
+  const header = [
+    '',
+    `> **This project has its own \`${AGENTS_FILE}\`; this file is the Pix3 kit beside it.** ${PRECEDENCE_SENTENCE}`,
+    `> If \`${AGENTS_FILE}\` does not mention this file yet, add the line "${AGENTS_LINK_LINE}" to it (agents that read only \`${AGENTS_FILE}\` will not find this one otherwise).`,
+    '',
+  ].join('\n');
+  const newline = contents.indexOf('\n');
+  return newline < 0
+    ? `${contents}\n${header}\n`
+    : `${contents.slice(0, newline + 1)}${header}\n${contents.slice(newline + 1)}`;
+};
+
+const mentionsAltAgents = (path: string): boolean =>
+  (readText(path) ?? '').includes(AGENTS_ALT_FILE);
+
 const claudeContent = (agentsTarget: string): string =>
   agentsTarget === AGENTS_FILE ? '@AGENTS.md\n' : `@AGENTS.md\n@${AGENTS_ALT_FILE}\n`;
 
@@ -198,10 +226,12 @@ export const installKit = (
   for (const file of source.manifest.files) {
     const contents = readFileSync(join(source.filesDir, file), 'utf8');
     if (file === AGENTS_FILE) {
-      place(agentsTarget, contents);
-      if (agentsTarget === AGENTS_ALT_FILE && !previous?.files[AGENTS_ALT_FILE]) {
+      const alt = agentsTarget === AGENTS_ALT_FILE;
+      place(agentsTarget, alt ? withAltAgentsHeader(contents) : contents);
+      // Every run until it is done, not only the first: the line is the human's to add.
+      if (alt && !mentionsAltAgents(agentsPath)) {
         instructions.push(
-          `This project already has its own ${AGENTS_FILE}: the Pix3 kit is in ${AGENTS_ALT_FILE}. Add a line "See AGENTS.pix3.md for the Pix3 engine rules." to ${AGENTS_FILE}.`
+          `This project already has its own ${AGENTS_FILE}: the Pix3 kit is in ${AGENTS_ALT_FILE}. ${PRECEDENCE_SENTENCE} Add a line "${AGENTS_LINK_LINE}" to ${AGENTS_FILE}.`
         );
       }
       continue;

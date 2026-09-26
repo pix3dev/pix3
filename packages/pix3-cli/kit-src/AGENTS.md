@@ -20,16 +20,29 @@ Change it; do not rebuild it.
 
 ## Layout
 
+The layout is **whatever this project has** — do not assume folders. Three rules hold everywhere:
+
+- **Scenes**: find them with a glob `**/*.pix3scene` outside `node_modules/` (and `.pix3/`).
+  `defaultExportScenePath` in `pix3project.yaml` names the build's entry scene.
+- **`res://` is always relative to the project root** (the folder with `pix3project.yaml`), so
+  `res://src/assets/textures/x.png` is as normal as `res://sprites/x.png`. Copy the style the
+  scene you are editing already uses.
+- **Scripts** live under `scripts/**` or `src/scripts/**` (the only two roots the editor and
+  `pix3 check` scan). `export class X extends Script` → `type: user:X`.
+
+`pix3project.yaml` is the manifest (do not edit unless asked); `.pix3/` is editor + CLI
+bookkeeping (recovery journal, merge log, script types) — never edit it.
+
+Example — the layout a **recipe** project (`pix3 new`) ships; other projects differ:
+
 | Path | What |
 | --- | --- |
-| `scenes/*.pix3scene` | Scenes. `defaultExportScenePath` in `pix3project.yaml` is the build's entry |
+| `scenes/*.pix3scene` | Scenes |
 | `scenes/ui/*.pix3scene` | Full-screen overlays (result card, modal), one file each, instanced hidden |
 | `scenes/prefabs/*.pix3scene` | Prefabs: a scene file with exactly ONE root node (a top-level `prefabs/` works too) |
-| `scripts/*.ts` (or `src/scripts/*.ts`) | Script components. `export class X extends Script` → `type: user:X` |
-| `sprites/`, `audio/`, `fonts/`, `models/` … | Assets, referenced as `res://sprites/x.png` (path from the project root) |
+| `scripts/*.ts` | Script components |
+| `sprites/`, `audio/`, `fonts/`, `models/` … | Assets, referenced as `res://sprites/x.png` |
 | `design/` | Recipe contract, GDD, tests. `design/tests/` is written by the editor's harness |
-| `pix3project.yaml` | Project manifest. Do not edit unless asked |
-| `.pix3/` | Editor + CLI bookkeeping (recovery journal, merge log, script types). Never edit |
 
 ## The five rules
 
@@ -83,6 +96,10 @@ root:
         properties: { visible: false }
 ```
 
+- The sample assumes a 1080×1920 portrait 2D root; yours may not have one. Read
+  `viewportBaseSize` and `projectType` in `pix3project.yaml` first; a `3d` project may have loose
+  top-level 2D nodes (HUD) with no 2D root at all. Place new HUD relative to the HUD nodes that
+  already exist (same parent, same anchoring), not to an assumed screen size.
 - 2D space: design pixels, origin at the screen centre, **X right, Y up**. `position` is the
   node's centre. Tree order is paint order: later/deeper draws on top.
 - **Quote every colour**: `color: "#141a2e"`. Unquoted, `#` starts a YAML comment.
@@ -112,11 +129,32 @@ export class Combo extends Script {
 
 - One mechanic = one new script of 70–140 lines. Extend a recipe's scripts only where
   `design/recipe.md` names an extension point; do not restructure them.
-- Talk between scripts through signals on nodes: `node.emit('touch-scored', 1)` /
-  `node.connect('touch-scored', this, fn)`. Never rename the recipe's signals or node ids.
+- Talk between scripts the way the project already does. Recipes use signals on nodes:
+  `node.emit('touch-scored', 1)` / `node.connect('touch-scored', this, fn)` — never rename the
+  recipe's signals or node ids. An existing game may use its own event bus or store instead
+  (next section).
 - Transforms are mutated, never assigned: `node.position.set(x, y, 0)`, `node.rotation.z = rad`.
 - Types come from `@pix3/runtime`: `pix3 check` type-checks against the bundled declarations in
   `.pix3/types/` (or against your own `node_modules` when the project has its own `tsconfig.json`).
+
+## Hosting an existing (non-recipe) game
+
+A game that was not made from a recipe has its own architecture; plug into it, do not add a
+second one.
+
+- **Find its event bus / state store** before writing a script:
+  `grep -rn "CustomEvent\|dispatchEvent\|addEventListener\|subscribe(\|EventTarget\|emit(" src scripts`.
+  Window `CustomEvent`s, an `EventTarget` singleton, or a store with `subscribe()` are all
+  normal; node signals are only one option. Listen to what the game already emits.
+- **Clean up by hand.** `Script.onDetach` auto-disconnects only **node signals connected on
+  the script's own node**. Window listeners, store subscriptions, timers, and signals connected
+  on other nodes must be removed in `onDetach` (keep the handler in a field; call the
+  unsubscribe the store returned) — otherwise every play/stop in the editor leaves one more
+  live listener behind.
+- **Two instruction files.** The project's own `AGENTS.md` wins on **process** (planning first,
+  where config and tests go, commit rules); this kit wins on **Pix3 facts** (the YAML format,
+  the runtime API, `pix3 check`).
+- The project's own `package.json` means `npm install` before `pix3 check` can type-check.
 
 ## The CLI and the live channel
 

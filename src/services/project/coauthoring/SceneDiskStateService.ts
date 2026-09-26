@@ -62,6 +62,7 @@ export class SceneDiskStateService {
   private readonly held = new Set<string>();
   private readonly editorVersions = new Map<string, EditorVersionEntry>();
   private readonly listeners = new Set<() => void>();
+  private readonly acceptedListeners = new Set<(path: string, hash: string) => void>();
 
   /**
    * Hash `content` (pass the RAW bytes read from disk; a string is hashed as UTF-8) and remember it
@@ -76,9 +77,34 @@ export class SceneDiskStateService {
     this.recordReadHash(path, hash);
     const text = acceptedText ?? (typeof content === 'string' ? content : undefined);
     if (text !== undefined) {
-      this.setEditorVersion(path, text, hash);
+      this.acceptVersion(path, text, hash);
     }
     return hash;
+  }
+
+  /**
+   * The editor ACCEPTED the version on disk with byte hash `hash` — its graph is now exactly that
+   * text (a scene load, or a reload that applied the file as is). `text` becomes `E`, and
+   * {@link onVersionAccepted} listeners hear about it (the protected set records it as a version
+   * the editor knows, so an agent's read confirmation of the loaded bytes is not "unknown").
+   * Not for the editor's own writes: those carry their own `genAtWrite` (`recordWrite`).
+   */
+  acceptVersion(path: string, text: string, hash: string): void {
+    this.setEditorVersion(path, text, hash);
+    const key = toProjectPath(path);
+    for (const listener of Array.from(this.acceptedListeners)) {
+      try {
+        listener(key, hash);
+      } catch (error) {
+        console.error('[SceneDiskStateService] Accepted-version listener error', error);
+      }
+    }
+  }
+
+  /** Listener runs with `(projectPath, hash)` whenever a disk version is accepted as is. */
+  onVersionAccepted(listener: (path: string, hash: string) => void): () => void {
+    this.acceptedListeners.add(listener);
+    return () => this.acceptedListeners.delete(listener);
   }
 
   /** Remember `text` (with byte hash `hash`) as `E` of `path`. */
@@ -212,6 +238,7 @@ export class SceneDiskStateService {
     this.held.clear();
     this.editorVersions.clear();
     this.listeners.clear();
+    this.acceptedListeners.clear();
   }
 
   private syncState(): void {

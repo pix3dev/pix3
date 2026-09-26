@@ -28,13 +28,18 @@ mergeLog, kit, … }`:
 - `files` — every scene validated and every script type-checked, with the **sha256 of its raw
   bytes**. These are the hashes `expect` and `pix3 ack --sha256` take.
 - `diagnostics` — one list: `{ severity, code, file, line?, nodeId?, path?, message, fix? }`.
-- `typecheck` — `{ ok, errors, tsconfig, mode, files, typescript }`; tsc errors are `E_TYPE`
-  diagnostics in the list above.
+- `typecheck` — `{ ok, errors, tsconfig, mode, files, typescript, skipped }`; tsc errors are
+  `E_TYPE` diagnostics in the list above; `skipped` says why tsc did not run at all.
 - `mergeLog` — the newest `.pix3/merge-log.jsonl` entries (section 2).
 - `kit` — `{ version, cliVersion, upToDate }`: `pix3 kit --update` when it is stale.
 
 The first `check` on a machine may install TypeScript once into `~/.pix3/typescript/` (it
 prints the `npm install` it runs; `--offline` refuses and prints the command instead).
+
+**A project with its own `package.json` needs `npm install` before `pix3 check` can
+type-check.** Such a project has its own `tsconfig.json` and type-checks against its own
+`node_modules`; without them `check` reports one `E_DEPENDENCIES_MISSING` (fix: `npm install`)
+and skips tsc — the scenes are still validated. Run `npm install` once, then `check` again.
 
 Codes and what they usually mean:
 
@@ -50,6 +55,7 @@ Codes and what they usually mean:
 | `E_EMOJI_AS_ART` | A `label`/`text` that is only emoji — use a sprite or `ColorRect2D` |
 | `E_TYPE` | A TypeScript error in a script (`TS2339: Property … does not exist …`) |
 | `E_TYPECHECK_UNAVAILABLE` | TypeScript could not be installed — run the printed command |
+| `E_DEPENDENCIES_MISSING` | A project with its own `tsconfig.json` and no `node_modules` — `npm install`; tsc was skipped |
 | `W_RUNTIME_VERSION_MISMATCH` / `W_RUNTIME_NOT_INSTALLED` | A project with its own `tsconfig.json` type-checks against its own `node_modules/@pix3/runtime` — `npm install` it at the CLI's version |
 | `W_KIT_OUTDATED` | This kit is older than the CLI — `pix3 kit --update` |
 
@@ -72,7 +78,12 @@ When you see one:
    it now sticks. If unsure, ask the human (that is your one question this turn).
 
 Without step 1 the editor keeps restoring the human's value on every write you make, even if
-you write the same number the human chose. (`pix3 ack <file> --sha256 <hash>` confirms a
+you write the same number the human chose.
+
+`check` prints `note: … read confirmation for a version the editor has not recorded — ignored`
+as a note, not a merge-log line: your `pix3 read` named bytes the editor has no record of
+having loaded or written (e.g. a version that was on disk only between two of its polls).
+Nothing was lost and nothing is protected by it; no action unless a KEPT line follows. (`pix3 ack <file> --sha256 <hash>` confirms a
 version whose hash you took from `pix3 check --json` without printing it again.)
 
 ## 3. Live channel — run the game yourself

@@ -138,7 +138,7 @@ export class ReloadSceneOperation implements Operation<OperationInvokeResult> {
         const accept = this.params.acceptAsEditorVersion !== false;
         if (this.params.diskHash) {
           diskState.recordReadHash(filePath, this.params.diskHash);
-          if (accept) diskState.setEditorVersion(filePath, sceneText, this.params.diskHash);
+          if (accept) diskState.acceptVersion(filePath, sceneText, this.params.diskHash);
         } else {
           await diskState.recordRead(
             filePath,

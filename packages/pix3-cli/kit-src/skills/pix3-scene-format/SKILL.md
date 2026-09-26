@@ -84,7 +84,10 @@ transform:
 ```
 
 2D space: origin at the centre of the screen/parent, **X right, Y up**. The recipes use a
-1080 x 1920 portrait design (top edge y = 960, bottom y = -960). Scripts see the rotation in
+1080 x 1920 portrait design (top edge y = 960, bottom y = -960); other projects read
+`viewportBaseSize` / `projectType` in `pix3project.yaml` — a `3d` project may have loose
+top-level 2D nodes (a HUD) and no 2D root at all, so position new HUD relative to the HUD
+nodes that are already there. Scripts see the rotation in
 radians (`node.rotation.z`). `{ x: 0, y: 690 }` is also accepted for a vector, and so is a flat
 `position:` beside `transform` (read-compat), but write the `transform:` block the editor saves.
 
@@ -117,10 +120,11 @@ are ignored — `pix3 validate` says so); on an **instance** node they are the o
 
 - **Colour**: a quoted hex string, `color: "#141a2e"`. Always quote — an unquoted `#` starts
   a YAML comment and the value becomes empty.
-- **Asset path**: `res://` + path from the project root: `res://sprites/ph-target.png`,
-  `res://scenes/prefabs/hazard.pix3scene`. Assets live in one folder per type at the root
-  (`sprites/`, `audio/`, `fonts/`, `models/`, `spine/`, `scripts/`, `scenes/`). Never an
-  `assets/` wrapper folder in a new project.
+- **Asset path**: `res://` + path from the project root (the folder with `pix3project.yaml`),
+  whatever the layout: `res://sprites/ph-target.png` in a recipe, `res://src/assets/textures/x.png`
+  in a project that keeps assets under `src/`. Follow the folders the project already has; a
+  new project from `pix3 new` uses one folder per type at the root (`sprites/`, `audio/`,
+  `fonts/`, `models/`, `spine/`, `scripts/`, `scenes/`).
 - **Texture slot**: `texture: { type: 'texture', url: 'res://sprites/x.png' }` (same shape for
   `textureNormal`, `textureFill`, …). The saver always writes this form; a bare
   `texturePath: 'res://…'` string is only read for compatibility.

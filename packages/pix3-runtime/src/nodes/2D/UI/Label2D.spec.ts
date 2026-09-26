@@ -93,6 +93,28 @@ describe('Label2D script assignments (reactive schema properties)', () => {
     expect(label.isTyping).toBe(true);
   });
 
+  it('repaints when a script assigns label, labelColor or glowStrength (no setText needed)', () => {
+    // Pinned because the agent kit states it: style fields redraw on plain assignment.
+    const label = createLabel({ width: 200, height: 60 });
+    const internals = internalsOf(label);
+    const repaints = (mutate: () => void): boolean => {
+      const before = internals.labelTexture?.version ?? -1;
+      const textureBefore = internals.labelTexture;
+      mutate();
+      return (
+        internals.labelTexture !== textureBefore || (internals.labelTexture?.version ?? -1) > before
+      );
+    };
+
+    expect(repaints(() => (label.label = 'Combo x2'))).toBe(true);
+    expect(label.getDisplayText()).toBe('Combo x2');
+    expect(repaints(() => (label.labelColor = '#ff3355'))).toBe(true);
+    expect(repaints(() => (label.glowStrength = 2))).toBe(true);
+    // The script path runs the schema setter, so it clamps like the inspector does.
+    label.glowStrength = 99;
+    expect(label.glowStrength).toBe(4);
+  });
+
   it('installs reactive accessors for the Label2D box fields and leaves label accessors alone', () => {
     const names = reactiveSchemaPropertyNames(createLabel());
     for (const expected of [

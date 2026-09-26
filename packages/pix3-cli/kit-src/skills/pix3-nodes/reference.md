@@ -5,6 +5,7 @@ Every node type the loader knows, with its properties. **Grep `### <NodeName>`**
 instead of reading this file. Keys are YAML keys under `properties:`; `position` / `rotation` /
 `scale` go in the `transform:` block, `flow.*` in the `flow:` block, and the anchor keys in
 `layout:` (see `pix3-scene-format`). Where a row says "not saved", the key does nothing in a file.
+Source paths quoted here (`src/…`, `packages/…`) are files of the Pix3 engine repository, not of this project.
 
 ## Quick reference
 

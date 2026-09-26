@@ -5,12 +5,14 @@ import { SceneManager, type SceneGraph } from '@pix3/runtime';
 import { OperationService, type OperationEvent } from '@/services/core/OperationService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { ProjectOwnershipService } from '@/services/project/coauthoring/ProjectOwnershipService';
+import { SceneDiskStateService } from '@/services/project/coauthoring/SceneDiskStateService';
 import {
   PROTECTED_SET_FILE,
   toProjectPath,
 } from '@/services/project/coauthoring/coauthoring-paths';
 import {
   emptyProtectedSet,
+  genAtWrite,
   parseProtectedSet,
   recordEditorWrite,
   recordHumanOperation,
@@ -79,6 +81,9 @@ export class ProtectedSetService {
   @inject(ProjectOwnershipService)
   private readonly ownership!: ProjectOwnershipService;
 
+  @inject(SceneDiskStateService)
+  private readonly diskState!: SceneDiskStateService;
+
   private sets = new Map<string, ProtectedSetData>();
   private readonly baselines = new Map<string, Baseline>();
   private loadedProjectId: string | null = null;
@@ -87,6 +92,7 @@ export class ProtectedSetService {
   private dirty = false;
   private sceneSource: ProtectedSetSceneSource | null = null;
   private disposers: Array<() => void> = [];
+  private acceptedUnsubscribe: (() => void) | null = null;
   private readonly listeners = new Set<(path: string) => void>();
 
   initialize(): void {
@@ -94,6 +100,7 @@ export class ProtectedSetService {
       return;
     }
     this.disposers.push(this.operations.addListener(event => this.handleOperationEvent(event)));
+    this.trackAcceptedVersions();
     this.disposers.push(
       subscribe(appState.project, () => {
         this.syncProject();
@@ -150,6 +157,37 @@ export class ProtectedSetService {
     const current = this.get(key);
     this.sets.set(key, recordEditorWrite(current, hash, genAtWrite ?? current.gen));
     this.changed(key);
+  }
+
+  /**
+   * Record every version the editor accepts from disk as is (scene load, plain reload — see
+   * `SceneDiskStateService.acceptVersion`) as a known version at the current gen. Without it only
+   * saves and merges were recorded, so `pix3 read` of a scene the editor had merely LOADED — the
+   * exact bytes on screen — came back as `ack-unknown`. Called by {@link initialize}; public for
+   * specs that wire the service by hand. Idempotent.
+   */
+  trackAcceptedVersions(): void {
+    if (this.acceptedUnsubscribe) return;
+    this.acceptedUnsubscribe = this.diskState.onVersionAccepted((path, hash) => {
+      void this.recordAcceptedVersion(path, hash);
+    });
+    this.disposers.push(() => {
+      this.acceptedUnsubscribe?.();
+      this.acceptedUnsubscribe = null;
+    });
+  }
+
+  /** Visible for tests: resolves once the accepted version is in the set. */
+  async recordAcceptedVersion(path: string, hash: string): Promise<void> {
+    // A load can run before the project subscription fired: start (or reuse) this project's
+    // `.pix3/protected.json` load first, so the record is not replaced by it.
+    this.syncProject();
+    await this.ready;
+    if (!this.isRecordingBackend()) return;
+    const current = this.get(path);
+    // Already known at this gen (the merge's fast path records the same reload itself).
+    if (genAtWrite(current, hash) === current.gen) return;
+    this.recordEditorWrite(path, hash, current.gen);
   }
 
   /** Listener runs with the path whose set changed. */

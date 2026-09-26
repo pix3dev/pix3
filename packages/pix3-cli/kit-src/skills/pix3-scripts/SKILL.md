@@ -8,8 +8,8 @@ description: How to write a Pix3 game script (scripts/*.ts, `export class X exte
 # Writing a script
 
 Everything here is exported from `@pix3/runtime`; use it directly instead of searching for
-it. Import only from `@pix3/runtime`, `three`, and sibling files in `scripts/` (relative
-paths — all `scripts/` files are bundled together). `pix3 check` type-checks every script
+it. Import only from `@pix3/runtime`, `three`, and other files under the scripts root
+(`scripts/` or `src/scripts/`, relative paths — they are bundled together). `pix3 check` type-checks every script
 against the runtime's declarations (`.pix3/types/`, or your `node_modules` when the project
 has its own `tsconfig.json`); your editor sees the same types through the root `tsconfig.json`.
 
@@ -20,11 +20,13 @@ writing a script for the same effect.
 ## Shape (copy this)
 
 ```ts
-import { Script, type PropertySchema } from '@pix3/runtime';
+import { Script, type NodeBase, type PropertySchema } from '@pix3/runtime';
 
 export class Combo extends Script {
   private count = 0;
   private sinceLastHit = Infinity;
+  private source: NodeBase | null = null;
+  private readonly onScoredSignal = (...args: unknown[]): void => this.onScored(Number(args[0]) || 0);
 
   constructor(id: string, type: string) {
     super(id, type);
@@ -66,12 +68,12 @@ export class Combo extends Script {
   }
 
   onStart(): void {
-    const source = this.findNode(String(this.config.sourceNode ?? ''));
-    if (!source) {
+    this.source = this.findNode(String(this.config.sourceNode ?? ''));
+    if (!this.source) {
       console.warn(`[Combo] Source node "${this.config.sourceNode}" not found.`);
       return;
     }
-    source.connect('touch-scored', this, (...args: unknown[]) => this.onScored(Number(args[0]) || 0));
+    this.source.connect('touch-scored', this, this.onScoredSignal);
   }
 
   onUpdate(dt: number): void {
@@ -80,7 +82,11 @@ export class Combo extends Script {
   }
 
   onDetach(): void {
-    super.onDetach(); // disconnects this script's signal handlers
+    // super.onDetach() only disconnects handlers on THIS script's own node; a handler connected
+    // on another node stays until you disconnect it.
+    this.source?.disconnect('touch-scored', this, this.onScoredSignal);
+    this.source = null;
+    super.onDetach();
   }
 
   private onScored(_amount: number): void {
@@ -132,6 +138,11 @@ before children's.
 - 2D node props as fields: `width`, `height`, `opacity`, `zIndex`, `blendMode`.
   `Label2D.setText(text)`; `Bar2D.maxValue`, `Bar2D.setValue(v)`; `Slider2D.value`,
   `Checkbox2D.checked`. Check types with `instanceof Label2D` (import the class).
+- **Assigning a display property redraws immediately** — no `setText` / `updateLabel` call
+  needed: `label.label = 'x2'`, `label.labelColor = '#ff3355'`, `label.labelFontSize`,
+  `label.glowStrength = 2` (clamped 0..4), `glowColor`, `outlineWidth`, `width`, `height` all
+  repaint on assignment, exactly as an inspector edit does. `setText(text)` is the same as
+  `label = text` plus clearing a bound `labelKey` (localization) and restarting the typewriter.
 - Create at runtime with the YAML property names, then parent it:
   `const r = new ColorRect2D({ id: 'flash', width: 100, height: 100, color: '#ffffff' }); parent.adoptChild(r);`
   (also `Sprite2D`, `Label2D({ id, label, labelFontSize, labelColor })`, `Group2D`).
@@ -139,7 +150,11 @@ before children's.
 ## Signals
 
 - `node.emit('name', ...args)`, `node.connect('name', this, handler)`,
-  `node.disconnect('name', this, handler)`. `Script.onDetach` auto-disconnects.
+  `node.disconnect('name', this, handler)`. `super.onDetach()` auto-disconnects only the
+  handlers this script connected **on its own node** (`this.node.connect(…, this, …)`). A
+  handler connected on another node, window listeners, store subscriptions and timers are
+  yours to remove in `onDetach` — keep the handler in a field so the same function is passed
+  to `disconnect` (see the shape above and "Hosting an existing game").
 - UI controls (`Button2D`, `Slider2D`, `Checkbox2D`, `Joystick2D`, …) emit `pressed` (touch
   went down inside), `released`, `click` (down and up inside — a completed tap),
   `pointerdown`, `pointerup`; `Checkbox2D` also `toggled`; `Label2D` emits
@@ -155,23 +170,32 @@ before children's.
   `getRootNodes()`, `getViewportInfo()`, `isPortrait()`.
 - Pointer in 2D world space: `scene.getPointer2DWorldPosition()` → `Vector2 | null`
   (primary finger), or `(pointerId)`.
-- Spawn: `const n = await scene.instantiate('res://scenes/prefabs/x.pix3scene', { parent })`
-  (prefab = a scene file with one root; `scenes/prefabs/` or `prefabs/`). Despawn:
-  `n.queueFree()`.
-- Scene change: `await scene.changeScene('res://scenes/menu.pix3scene', { transition: 'fade', durationSec: 0.3 })`.
-- Time: `scene.time.hitstop(ms)` (only on a contact START, never per frame),
-  `scene.time.slowMotion(scale, { durationMs, blendMs })`.
-- Juice — call it together with the mechanic: `scene.juice.shake(target, {…})`,
-  `punchScale(target, {…})`, `popIn(target, {…})`, `flash({…})`,
-  `burst(anchor, { count: 14, speed: 260, lifeSec: 0.5, color, sizePx: 10 })`,
-  `floatText('+25', { at, color, fontSizePx: 28, driftPx: 60, durationSec: 0.8 })`,
-  `trail(node, { lifeSec: 0.35, widthPx: 14, color })`. `target` = node | query | `'camera2d'`;
-  `anchor` = node | query | `{ x, y }`.
-- Tweens: `scene.tween.to(node, { x, y, scale, rotation, opacity, width, height }, { durationSec: 0.3, ease: 'cubicOut', delaySec, yoyo, repeat, onComplete })`
-  → `{ cancel(), finished }`; `fadeIn(node, sec)`, `fadeOut(node, sec, { hide: true })`,
-  `crossFade(a, b, sec)`. Prefer these over hand-lerping.
-- Audio with no asset: `scene.audio.sfx('tap' | 'score' | 'bounce' | 'explosion' | 'powerup' | 'win' | 'lose' | 'laser' | 'tick')`;
-  a file: `await scene.audio.play('res://audio/hit.ogg', { bus: 'sfx' })`.
+- Spawn: `const n = await scene.instantiate('res://scenes/prefabs/x.pix3scene', { parent, instanceId })`
+  (`parent` = node | query; prefab = a scene file with one root). Despawn: `n.queueFree()`.
+- Scene change: `await scene.changeScene('res://scenes/menu.pix3scene', { transition: 'fade' | 'none', durationSec: 0.3, onLoaded })`
+  (`durationSec` is each of fade-out and fade-in).
+- Time: `scene.time.hitstop(ms)` — no options; only on a contact START, never per frame.
+  `scene.time.slowMotion(scale, { durationMs, blendMs })` — both real-time ms; no `durationMs`
+  = until `scene.time.reset()`.
+- Juice — call it together with the mechanic. Every option is optional; defaults shown. Note
+  the three transform effects take `duration` (seconds), **not** `durationSec`:
+  - `scene.juice.shake(target, { amplitude: 8, frequency: 24, duration: 0.35, decay: 1.5 })` —
+    `amplitude` in the node's units (px in 2D), `duration: 0` = until stopped.
+  - `punchScale(target, { amount: 0.3, duration: 0.35, vibrato: 3 })` — `amount` 0.3 = +30%.
+  - `popIn(target, { from: 0, duration: 0.4, easing: 'backOut' })` — `from` = start scale factor.
+  - `flash({ color: '#ffffff', intensity: 1, durationSec: 0.2 })` — full-screen, no target.
+  - `burst(anchor, { count: 14, speed: 260, spread: 2π, direction: π/2, lifeSec: 0.5, color | colors, sizePx: 10, gravityY: -600, fadeOut: true, additive: true, zIndex })` (angles in radians).
+  - `floatText('+25', { at, color: '#ffffff', fontSizePx: 28, fontFamily: 'Arial', driftPx: 60, durationSec: 0.8, glow, glowStrength: 1.5, zIndex })`.
+  - `trail(node, { lifeSec: 0.35, widthPx: 14, color | colors, additive: true, zIndex, maxPoints: 48 })` → `trail.stop()`.
+
+  `target` = node | query | `'camera'` | `'camera2d'`; `anchor` = node | query | `{ x, y }`.
+- Tweens: `scene.tween.to(node, { x, y, position: { x, y }, scale, rotation, opacity, width, height }, { durationSec: 0.3, ease: 'cubicOut', delaySec: 0, yoyo: false, repeat: 0, onUpdate, onComplete })`
+  → `{ cancel(), finished, isRunning }` (`rotation` in radians, `repeat: -1` = forever, `ease` =
+  any easing name: `linear`, `quadOut`, `cubicInOut`, `backOut`, `elasticOut`, …);
+  `fadeIn(node, sec)` and `crossFade(a, b, sec)` — no options; `fadeOut(node, sec, { hide: true })`;
+  `killAll(target?)`. Default `sec` = 0.3. Prefer these over hand-lerping.
+- Audio with no asset: `scene.audio.sfx('tap' | 'score' | 'bounce' | 'explosion' | 'powerup' | 'win' | 'lose' | 'laser' | 'tick', { volume: 1, pitch: 1 })`;
+  a file: `await scene.audio.play('res://audio/hit.ogg', { bus: 'sfx' | 'music' | 'master', volume, loop, playbackRate, pan, pitchVariation: 0, volumeVariation: 0 })`.
 - Overlap queries without physics response: `scene.collision2d.overlapPoint(x, y, group?)`,
   `overlapCircle(x, y, r, group?)`, `overlapRect(cx, cy, w, h, group?)`, `raycast(…)` over
   nodes carrying `core:Hitbox2D` (the tapper/arena recipes use this).
@@ -193,6 +217,36 @@ before children's.
 - Keys held: `input.getButton('Key_ArrowLeft')`, `getButton('Key_D')` — `Key_` + the
   `KeyboardEvent.code` (this is what the recipes' controllers use). In `input.keyEvents`
   compare `event.code` (`'KeyW'`, `'ArrowUp'`, `'Space'`) — case-sensitive.
+
+## Hosting an existing game (not a recipe)
+
+- **Use the game's own channel.** Before wiring a script, find how the game talks:
+  `grep -rn "CustomEvent\|dispatchEvent\|addEventListener\|subscribe(\|EventTarget\|emit(" src scripts`.
+  Window `CustomEvent`s, an `EventTarget` bus or a store with `subscribe()` are common; node
+  signals are only one option. Import the game's bus/store module with a relative path from
+  your script.
+- **`onDetach` cleans up signals on the script's own node only.** Everything else you register
+  must be undone by hand, or each play/stop in the editor leaks one more listener:
+
+  ```ts
+  private readonly onScore = (e: Event): void => { /* (e as CustomEvent).detail */ };
+  private unsubscribe: (() => void) | null = null;
+  private timer: ReturnType<typeof setInterval> | null = null;
+
+  onStart(): void {
+    window.addEventListener('score-changed', this.onScore);
+    this.unsubscribe = store.subscribe(() => { /* … */ }); // the game's own store; keep what it returns
+  }
+
+  onDetach(): void {
+    window.removeEventListener('score-changed', this.onScore);
+    this.unsubscribe?.();
+    if (this.timer !== null) clearInterval(this.timer);
+    super.onDetach();
+  }
+  ```
+- The project's own `AGENTS.md` wins on process (planning first, where config goes); this kit
+  wins on Pix3 facts (YAML, runtime API, `pix3 check`).
 
 ## Traps (compile clean, break at runtime)
 

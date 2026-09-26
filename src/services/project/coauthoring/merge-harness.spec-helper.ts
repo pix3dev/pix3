@@ -262,8 +262,9 @@ export async function createMergeHarness(options: HarnessOptions = {}): Promise<
   journal.setFallbackStore(new MemoryRecoveryFallbackStore());
   let clock = Date.parse('2026-09-26T10:00:00Z');
   journal.setClock(() => (clock += 1000));
-  const protectedSets = wire(new ProtectedSetService(), { storage, ownership });
+  const protectedSets = wire(new ProtectedSetService(), { storage, ownership, diskState });
   protectedSets.setSceneSource(sceneManager);
+  protectedSets.trackAcceptedVersions();
   const fileWatch = {
     setLastKnownHash: vi.fn(),
     setLastKnownModifiedTime: vi.fn(),
@@ -358,6 +359,8 @@ export async function createMergeHarness(options: HarnessOptions = {}): Promise<
   const graph = await sceneManager.parseScene(loaded.text, { filePath: SCENE_RES });
   sceneManager.setActiveSceneGraph(SCENE_ID, graph);
   await diskState.recordRead(SCENE_PATH, loaded.bytes, loaded.text);
+  // The loaded version reaches P through `onVersionAccepted` (async: it waits for protected.json).
+  await new Promise(resolve => setTimeout(resolve, 0));
 
   const node = (id: string) => sceneManager.getSceneGraph(SCENE_ID)?.nodeMap.get(id) ?? null;
   const diskDoc = () => parse(storage.files.get(SCENE_PATH) ?? '') as Record<string, unknown>;

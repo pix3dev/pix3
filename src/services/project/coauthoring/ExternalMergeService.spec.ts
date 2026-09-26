@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appState, resetAppState } from '@/state';
-import { entryKey } from '@/services/project/external-merge/protected-set';
+import { entryKey, genAtWrite } from '@/services/project/external-merge/protected-set';
 import { ACK_FILE } from './coauthoring-paths';
 import { CHANGED_NODES_HIGHLIGHT_MS } from './ExternalMergeService';
 import { ProtectedSetService } from './ProtectedSetService';
@@ -274,6 +274,50 @@ describe('ExternalMergeService — acks (one-shot) and the merge log', () => {
     const events = h.mergeLines().map(l => l.event);
     expect(events).toContain('ack-applied');
     expect(events).toContain('ack-unknown');
+  });
+
+  it('an ack of the version the editor LOADED is known (ack-applied, never ack-unknown)', async () => {
+    const h = await createMergeHarness();
+    const loadedHash = await h.diskHash(); // `pix3 read` of the file as the editor opened it
+    expect(genAtWrite(h.protectedSets.get(SCENE_PATH), loadedHash)).toBe(0);
+    h.storage.files.set(
+      ACK_FILE,
+      JSON.stringify({ acks: [{ path: SCENE_PATH, sha256: loadedHash, at: 'now' }] })
+    );
+    h.agentWrites(agentScene({ ax: 80 }));
+    await h.merge.handleBatch([SCENE_PATH]);
+
+    expect(h.positionOfA()).toEqual([80, 20]);
+    const events = h.mergeLines().map(l => l.event);
+    expect(events).toContain('ack-applied');
+    expect(events).not.toContain('ack-unknown');
+  });
+
+  it('an ack of the loaded version does not release a human edit made after the load', async () => {
+    const h = await createMergeHarness();
+    const loadedHash = await h.diskHash();
+    await h.humanMoveA(100); // gen 1, newer than the loaded version (gen 0)
+    h.storage.files.set(
+      ACK_FILE,
+      JSON.stringify({ acks: [{ path: SCENE_PATH, sha256: loadedHash, at: 'now' }] })
+    );
+    h.agentWrites(agentScene({ ax: 80 }));
+    await h.merge.handleBatch([SCENE_PATH]);
+
+    expect(h.positionOfA()).toEqual([100, 20]);
+    expect(h.protectedSets.get(SCENE_PATH).entries.map(e => entryKey(e.nodeId, e.path))).toContain(
+      POSITION
+    );
+    expect(h.mergeLines().find(l => l.event === 'ack-applied')).toMatchObject({ released: [] });
+  });
+
+  it('a reload that accepts the disk version records it too (a later ack of it is known)', async () => {
+    const h = await createMergeHarness();
+    h.agentWrites(agentScene({ ax: 55 }));
+    await h.merge.handleBatch([SCENE_PATH]); // fast path: reload from A
+    const reloadedHash = await h.diskHash();
+    const set = h.protectedSets.get(SCENE_PATH);
+    expect(genAtWrite(set, reloadedHash)).toBe(set.gen);
   });
 
   it('keeps the merge log a ring of 500 lines', async () => {

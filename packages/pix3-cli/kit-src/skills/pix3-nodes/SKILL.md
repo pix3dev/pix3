@@ -49,8 +49,8 @@ Shader `effects` exist only on `Sprite2D`, `AnimatedSprite2D` and `Button2D`.
 
 ## Group2D
 
-Sized container; draws nothing. Use it as the scene root (`width: 1080, height: 1920`,
-`layout` stretch/stretch) and for any panel whose children anchor or flow against it.
+Sized container; draws nothing. Use it as the scene root (sized to `viewportBaseSize` from
+`pix3project.yaml` — `width: 1080, height: 1920` in the recipes — `layout` stretch/stretch) and for any panel whose children anchor or flow against it.
 
 | Key | Type | Default |
 | --- | --- | --- |

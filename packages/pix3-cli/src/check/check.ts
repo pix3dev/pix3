@@ -49,6 +49,11 @@ export const CHECK_USAGE = `Usage: pix3 check [--json] [--no-hydrate] [--offline
 /** Codes `check` adds to validate's (`src/validate/diagnostics.ts`). */
 export const CHECK_CODES = {
   E_TYPE: { severity: 'error', summary: 'a TypeScript error in a project script' },
+  E_DEPENDENCIES_MISSING: {
+    severity: 'error',
+    summary:
+      'the project has its own tsconfig.json but no node_modules: run npm install (the type-check was skipped)',
+  },
   E_TYPECHECK_UNAVAILABLE: {
     severity: 'error',
     summary: 'TypeScript could not be found or installed, so the scripts were not type-checked',
@@ -59,7 +64,8 @@ export const CHECK_CODES = {
   },
   W_RUNTIME_NOT_INSTALLED: {
     severity: 'warning',
-    summary: 'the project has its own tsconfig.json but no node_modules/@pix3/runtime',
+    summary:
+      'the project has its own tsconfig.json and node_modules, but no node_modules/@pix3/runtime',
   },
   W_KIT_OUTDATED: {
     severity: 'warning',
@@ -89,13 +95,18 @@ export interface CheckReport {
   readonly notes: readonly string[];
   readonly typecheck: {
     readonly ok: boolean;
-    /** Number of `E_TYPE` / `E_TYPECHECK_UNAVAILABLE` diagnostics (they are in `diagnostics`). */
+    /**
+     * Number of `E_TYPE` / `E_TYPECHECK_UNAVAILABLE` / `E_DEPENDENCIES_MISSING` diagnostics (they
+     * are in `diagnostics`).
+     */
     readonly errors: number;
     readonly tsconfig: string | null;
     /** `project` = the project's own tsconfig; `pix3-types` = `.pix3/tsconfig.check.json`. */
     readonly mode: 'project' | 'pix3-types';
     readonly files: number;
     readonly typescript: { readonly version: string; readonly source: string } | null;
+    /** Why tsc did not run at all (null when it ran, or was attempted and failed). */
+    readonly skipped: string | null;
   };
   /** The newest {@link MERGE_LOG_TAIL} lines of `.pix3/merge-log.jsonl`, oldest first. */
   readonly mergeLog: readonly Record<string, unknown>[];
@@ -185,6 +196,17 @@ export const readKitVersion = (projectRoot: string): string | null => {
   }
 };
 
+/** Whether a `node_modules` folder is reachable from the project (walking up), as Node resolves. */
+export const hasNodeModules = (projectRoot: string): boolean => {
+  let dir = resolve(projectRoot);
+  for (;;) {
+    if (existsSync(join(dir, 'node_modules'))) return true;
+    const parent = dirname(dir);
+    if (parent === dir) return false;
+    dir = parent;
+  }
+};
+
 /** Version of the `@pix3/runtime` a project resolves from `node_modules` (walking up), or null. */
 export const installedRuntimeVersion = (projectRoot: string): string | null => {
   let dir = resolve(projectRoot);
@@ -240,6 +262,9 @@ const age = (at: unknown, now: Date): string => {
   return `${Math.round(seconds / 86400)} d ago`;
 };
 
+/** Merge-log events the human output prints as notes: nothing for the agent to do. */
+const INFORMATIONAL_EVENTS: ReadonlySet<unknown> = new Set(['ack-unknown']);
+
 /** One line per merge-log entry, in words an agent acts on. */
 export const describeMergeLogEntry = (entry: Record<string, unknown>, now: Date): string => {
   const file = typeof entry.file === 'string' ? entry.file : '(project)';
@@ -276,7 +301,7 @@ export const describeMergeLogEntry = (entry: Record<string, unknown>, now: Date)
     case 'ack-applied':
       return `${prefix}your read confirmation was applied (released ${Array.isArray(entry.released) ? entry.released.length : 0} protected value(s))`;
     case 'ack-unknown':
-      return `${prefix}a read confirmation named a version the editor never saw (ignored)`;
+      return `${prefix}read confirmation for a version the editor has not recorded — ignored`;
     case 'accept-agent':
       return `${prefix}the human accepted your version`;
     case 'keep-mine':
@@ -314,14 +339,21 @@ export const formatCheckHuman = (report: CheckReport, now: Date): string => {
   }
   if (hidden > 0) out += `… ${hidden} more (pix3 check --json lists them all)\n`;
   for (const note of report.notes) out += `note: ${note}\n`;
-  if (report.mergeLog.length > 0) {
-    out += `merge-log (newest ${report.mergeLog.length}, .pix3/merge-log.jsonl):\n`;
-    for (const entry of report.mergeLog) out += `  ${describeMergeLogEntry(entry, now)}\n`;
+  // An ignored read confirmation needs no action (the editor simply had no record of that
+  // version), so it is a note, not a line in the list an agent is told to act on.
+  const informational = report.mergeLog.filter(entry => INFORMATIONAL_EVENTS.has(entry.event));
+  const actionable = report.mergeLog.filter(entry => !INFORMATIONAL_EVENTS.has(entry.event));
+  for (const entry of informational) out += `note: ${describeMergeLogEntry(entry, now)}\n`;
+  if (actionable.length > 0) {
+    out += `merge-log (newest ${actionable.length}, .pix3/merge-log.jsonl):\n`;
+    for (const entry of actionable) out += `  ${describeMergeLogEntry(entry, now)}\n`;
   }
   const tc = report.typecheck;
   const typecheckLine = tc.typescript
     ? `typecheck ${tc.files} file(s) with TypeScript ${tc.typescript.version} (${tc.typescript.source}, ${tc.tsconfig}): ${tc.errors} error(s)`
-    : 'typecheck did not run';
+    : tc.skipped
+      ? `typecheck skipped: ${tc.skipped}`
+      : 'typecheck did not run';
   const level2 =
     report.level2.state === 'ran'
       ? `level 2 hydrated ${report.level2.filesHydrated} file(s)`
@@ -366,10 +398,23 @@ export const checkProject = async (
   // --- the type-check layout ------------------------------------------------------------------
   const ownTsconfig = hasOwnTsconfig(projectRoot);
   let tsconfig: string | null;
+  let skipped: string | null = null;
   if (ownTsconfig) {
     tsconfig = ROOT_TSCONFIG;
     const installed = installedRuntimeVersion(projectRoot);
-    if (installed === null) {
+    if (!hasNodeModules(projectRoot)) {
+      // Without node_modules every import fails, and tsc reports each one as its own "Cannot find
+      // module" — hundreds of E_TYPE lines that all mean `npm install`. Say that once instead.
+      skipped = 'dependencies not installed (run npm install)';
+      diagnostics.push(
+        diag('E_DEPENDENCIES_MISSING', {
+          file: existsSync(join(projectRoot, 'package.json')) ? 'package.json' : ROOT_TSCONFIG,
+          message:
+            'This project has its own tsconfig.json, so its scripts are type-checked against its own node_modules — and there is no node_modules. The type-check was skipped; the scenes were still validated.',
+          fix: 'npm install',
+        })
+      );
+    } else if (installed === null) {
       diagnostics.push(
         diag('W_RUNTIME_NOT_INSTALLED', {
           file: ROOT_TSCONFIG,
@@ -402,23 +447,25 @@ export const checkProject = async (
   const typecheckStarted = Date.now();
   let resolved: ResolvedTypeScript | null = null;
   let result: TypecheckResult | null = null;
-  try {
-    resolved = await resolveTypeScript({
-      projectRoot,
-      offline: options.offline,
-      log: options.log,
-      ...options.typescript,
-    });
-    result = runTypecheck(resolved.ts, projectRoot, tsconfig);
-  } catch (error) {
-    const command = error instanceof TypeScriptUnavailableError ? error.command : undefined;
-    diagnostics.push(
-      diag('E_TYPECHECK_UNAVAILABLE', {
-        file: tsconfig,
-        message: error instanceof Error ? error.message : String(error),
-        fix: command,
-      })
-    );
+  if (skipped === null) {
+    try {
+      resolved = await resolveTypeScript({
+        projectRoot,
+        offline: options.offline,
+        log: options.log,
+        ...options.typescript,
+      });
+      result = runTypecheck(resolved.ts, projectRoot, tsconfig);
+    } catch (error) {
+      const command = error instanceof TypeScriptUnavailableError ? error.command : undefined;
+      diagnostics.push(
+        diag('E_TYPECHECK_UNAVAILABLE', {
+          file: tsconfig,
+          message: error instanceof Error ? error.message : String(error),
+          fix: command,
+        })
+      );
+    }
   }
   const typecheckMs = Date.now() - typecheckStarted;
   const typeDiagnostics: CheckDiagnostic[] = (result?.errors ?? []).map(error =>
@@ -456,7 +503,10 @@ export const checkProject = async (
   const all = [...validated.diagnostics, ...[...diagnostics].sort(compare)];
   const errorCount = all.filter(d => d.severity === 'error').length;
   const typeErrors = all.filter(
-    d => d.code === 'E_TYPE' || d.code === 'E_TYPECHECK_UNAVAILABLE'
+    d =>
+      d.code === 'E_TYPE' ||
+      d.code === 'E_TYPECHECK_UNAVAILABLE' ||
+      d.code === 'E_DEPENDENCIES_MISSING'
   ).length;
   return {
     ok: errorCount === 0,
@@ -476,6 +526,7 @@ export const checkProject = async (
       mode: ownTsconfig ? 'project' : 'pix3-types',
       files: result?.files.length ?? 0,
       typescript: resolved ? { version: resolved.version, source: resolved.source } : null,
+      skipped,
     },
     mergeLog: readMergeLogTail(projectRoot),
     kit: { version: kitVersion, cliVersion: CLI_VERSION, upToDate: kitUpToDate },

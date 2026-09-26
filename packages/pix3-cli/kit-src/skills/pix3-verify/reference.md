@@ -2,7 +2,7 @@
 # What the editor does with your files
 
 The engine specification's own statements, for when something surprises you. `SKILL.md`
-beside this file is the practical version.
+beside this file is the practical version. Source paths quoted here (`src/…`, `packages/…`) are files of the Pix3 engine repository, not of this project.
 
 ## Strict profile — what `pix3 validate` checks
 

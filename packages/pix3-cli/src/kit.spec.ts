@@ -30,7 +30,9 @@ import {
   agentKitStep,
   installKit,
   KIT_PROJECT_MANIFEST,
+  PRECEDENCE_SENTENCE,
   readProjectKitManifest,
+  withAltAgentsHeader,
 } from './kit/install.ts';
 import {
   kitMcpErrorCodes,
@@ -444,12 +446,30 @@ describe('pix3 kit', () => {
     const report = installKit(root, kit, { runtimeTypes: ensureRuntimeTypes(), devMcp: false });
     expect(readFileSync(join(root, 'AGENTS.md'), 'utf8')).toBe('# Our rules\n');
     expect(readFileSync(join(root, 'CLAUDE.md'), 'utf8')).toBe('# Claude notes\n');
-    expect(readFileSync(join(root, AGENTS_ALT_FILE), 'utf8')).toBe(text('AGENTS.md'));
+    const alt = readFileSync(join(root, AGENTS_ALT_FILE), 'utf8');
+    expect(alt).toBe(withAltAgentsHeader(text('AGENTS.md')));
+    // The TODO survives in the file itself, not only in the one-time report.
+    expect(alt.split('\n')[0]).toBe(text('AGENTS.md').split('\n')[0]);
+    expect(alt).toContain(PRECEDENCE_SENTENCE);
+    expect(alt).toContain('See AGENTS.pix3.md for the Pix3 engine rules.');
     expect(readFileSync(join(root, '.gitignore'), 'utf8')).toMatch(
       /^node_modules\/\n[\s\S]*^\.pix3\/$/m
     );
     expect(report.instructions.join('\n')).toContain('AGENTS.pix3.md');
     expect(report.instructions.join('\n')).toContain('@AGENTS.pix3.md');
+    expect(report.instructions.join('\n')).toContain(PRECEDENCE_SENTENCE);
+
+    // Repeated on every run until the project's AGENTS.md links ours, then quiet.
+    const again = installKit(root, kit, { runtimeTypes: ensureRuntimeTypes(), devMcp: false });
+    expect(again.instructions.join('\n')).toContain(PRECEDENCE_SENTENCE);
+    expect(again.files.find(f => f.path === AGENTS_ALT_FILE)?.action).toBe('unchanged');
+    writeFileSync(
+      join(root, 'AGENTS.md'),
+      '# Our rules\n\nSee AGENTS.pix3.md for the Pix3 engine rules.\n'
+    );
+    const linked = installKit(root, kit, { runtimeTypes: ensureRuntimeTypes(), devMcp: false });
+    expect(linked.instructions.join('\n')).not.toContain(PRECEDENCE_SENTENCE);
+    writeFileSync(join(root, 'AGENTS.md'), '# Our rules\n');
 
     // Without a CLAUDE.md of its own, ours imports both.
     rmSync(join(root, 'CLAUDE.md'));
@@ -551,11 +571,13 @@ describe('pix3 kit', () => {
       });
       expect(checked.typecheck.mode).toBe('project');
       expect(checked.typecheck.tsconfig).toBe('tsconfig.json');
-      expect(checked.typecheck.typescript).not.toBeNull();
-      const codes = new Set(checked.diagnostics.map(d => d.code));
-      expect(codes.has('W_RUNTIME_NOT_INSTALLED') || codes.has('W_RUNTIME_VERSION_MISMATCH')).toBe(
-        true
-      );
+      // The copy has no node_modules: one E_DEPENDENCIES_MISSING instead of a tsc cascade of
+      // "Cannot find module" errors (the trial run saw ~250 of them).
+      expect(checked.typecheck.typescript).toBeNull();
+      expect(checked.typecheck.skipped).toContain('npm install');
+      const errors = checked.diagnostics.filter(d => d.severity === 'error');
+      expect(errors.filter(d => d.code === 'E_TYPE')).toEqual([]);
+      expect(errors.filter(d => d.code === 'E_DEPENDENCIES_MISSING')).toHaveLength(1);
       expect(checked.kit.upToDate).toBe(true);
     },
     120_000
