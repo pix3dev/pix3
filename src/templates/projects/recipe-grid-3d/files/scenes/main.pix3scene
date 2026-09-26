@@ -146,8 +146,8 @@ root:
           height: 26
           value: 3
           maxValue: 3
-          fillColor: "#ff6b6b"
-          backgroundColor: "#1b1f2a"
+          barColor: "#ff6b6b"
+          backBackgroundColor: "#1b1f2a"
           transform:
             position: [0, 740]
             scale: [1, 1]
