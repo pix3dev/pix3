@@ -35,6 +35,8 @@ interface Client {
   tokenHash: string | null;
   lastSeen: number;
   authTimer: NodeJS.Timeout | null;
+  /** Closed by the hub before auth (already logged). */
+  refused: boolean;
 }
 
 interface Lease {
@@ -74,16 +76,20 @@ export class EventHub {
 
   /** `upgrade` handler of the HTTP server. Same Host/Origin fence as the HTTP routes. */
   handleUpgrade(req: IncomingMessage, socket: Duplex, head: Buffer): void {
-    const reject = (status: number, text: string): void => {
+    const reject = (status: number, text: string, why: string): void => {
+      this.options.log(`events: upgrade refused ${status} (${why})`);
       socket.write(`HTTP/1.1 ${status} ${text}\r\nConnection: close\r\nContent-Length: 0\r\n\r\n`);
       socket.destroy();
     };
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
-    if (!isLoopbackHost(req.headers.host)) return reject(403, 'Forbidden');
+    if (!isLoopbackHost(req.headers.host)) {
+      return reject(403, 'Forbidden', `host ${JSON.stringify(req.headers.host ?? null)}`);
+    }
     // CORS does not cover WebSockets: without this check any web page could open one.
-    if (!isAllowedOrigin(originOf(req))) return reject(403, 'Forbidden');
-    if (url.pathname !== '/ws/events') return reject(404, 'Not Found');
-    if (this.closed) return reject(503, 'Service Unavailable');
+    const origin = originOf(req);
+    if (!isAllowedOrigin(origin)) return reject(403, 'Forbidden', `origin ${origin}`);
+    if (url.pathname !== '/ws/events') return reject(404, 'Not Found', `path ${url.pathname}`);
+    if (this.closed) return reject(503, 'Service Unavailable', 'server shutting down');
     this.wss.handleUpgrade(req, socket, head, ws => this.onSocket(ws));
   }
 
@@ -182,6 +188,7 @@ export class EventHub {
       tokenHash: null,
       lastSeen: Date.now(),
       authTimer: null,
+      refused: false,
     };
     this.clients.add(client);
     client.authTimer = setTimeout(() => {
@@ -196,6 +203,12 @@ export class EventHub {
     socket.on('error', () => socket.terminate());
   }
 
+  private authedCount(): number {
+    let count = 0;
+    for (const client of this.clients) if (client.authed) count += 1;
+    return count;
+  }
+
   private send(client: Client, frame: Frame): void {
     if (client.socket.readyState === client.socket.OPEN) client.socket.send(JSON.stringify(frame));
   }
@@ -205,6 +218,12 @@ export class EventHub {
   }
 
   private closeClient(client: Client, code: number, error: string, message: string): void {
+    if (!client.authed || error === 'revoked') {
+      // Rejections on the events socket (never the token itself): the editor's reconnect timeline
+      // is otherwise invisible from this side.
+      this.options.log(`events: auth refused ${code} ${error} (${message})`);
+      client.refused = true;
+    }
     this.error(client, error, message);
     client.socket.close(code, error);
   }
@@ -281,6 +300,7 @@ export class EventHub {
     }
     client.authed = true;
     client.tokenHash = outcome.tokenHash;
+    this.options.log(`events: socket authenticated (${this.authedCount()} open)`);
     if (client.authTimer) clearTimeout(client.authTimer);
     client.authTimer = null;
     this.send(client, this.options.hello());
@@ -312,7 +332,14 @@ export class EventHub {
         this.relay.requeueDelivered();
         this.flushCalls();
       } else {
-        this.send(client, { type: 'lease', state: 'busy', inGrace: lease.client === null });
+        const inGrace = lease.client === null;
+        const detail = !inGrace
+          ? 'another window holds it'
+          : typeof frame.leaseId === 'string'
+            ? 'holder in grace, leaseId does not match'
+            : 'holder in grace, no leaseId';
+        this.options.log(`lease acquire refused: busy (${detail})`);
+        this.send(client, { type: 'lease', state: 'busy', inGrace });
       }
       return;
     }
@@ -364,6 +391,9 @@ export class EventHub {
 
   private onSocketClosed(client: Client): void {
     if (client.authTimer) clearTimeout(client.authTimer);
+    if (!client.authed && !client.refused && !this.closed) {
+      this.options.log('events: socket closed by the client before auth');
+    }
     this.clients.delete(client);
     const lease = this.lease;
     if (!lease || lease.client !== client || this.closed) return;

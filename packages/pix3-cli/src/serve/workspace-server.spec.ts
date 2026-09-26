@@ -238,6 +238,29 @@ describe('auth', () => {
     expect((await wrong.closed).code).toBe(4401);
   });
 
+  it('logs every refusal on the events socket in one line, never the token', async () => {
+    const lines: string[] = [];
+    const { port } = await startServer({ authTimeoutMs: 150, log: line => lines.push(line) });
+    const silent = await connect(port);
+    await silent.closed;
+    const wrong = await connect(port);
+    wrong.send({ type: 'auth', token: 'p3ws_nope' });
+    await wrong.closed;
+    await expect(connect(port, 'https://attacker.example')).rejects.toThrow();
+    const ok = await authed(port);
+    ok.ws.close();
+
+    const events = lines.filter(line => line.startsWith('events:'));
+    expect(events).toEqual([
+      expect.stringMatching(/^events: auth refused 4401 auth_timeout /),
+      expect.stringMatching(/^events: auth refused 4401 unauthorized /),
+      'events: upgrade refused 403 (origin https://attacker.example)',
+      'events: socket authenticated (1 open)',
+    ]);
+    expect(lines.join('\n')).not.toContain('p3ws_nope');
+    expect(lines.join('\n')).not.toContain(token);
+  });
+
   it('says hello after the auth frame', async () => {
     const { port, server } = await startServer();
     const conn = await connect(port);

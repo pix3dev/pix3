@@ -1,4 +1,5 @@
 import { keepaliveTimer } from '@/services/core/background-ticker';
+import { isEditorKeepAlive } from '@/services/core/page-activity';
 import {
   WorkspaceError,
   toEventsUrl,
@@ -108,12 +109,27 @@ export interface WorkspaceEventsClientOptions {
   readonly createSocket?: WorkspaceSocketFactory;
   /** Reconnect delays in ms; the last one repeats. */
   readonly backoffMs?: readonly number[];
+  /**
+   * Ceiling of a reconnect delay while an agent keeps the editor alive (`isEditorKeepAlive`): the
+   * common reason for a drop then is a restart of `pix3 serve`, and the agent is waiting.
+   */
+  readonly keepaliveMaxBackoffMs?: number;
+  /**
+   * An attempt that has not produced `hello` this long after the socket was created is given up
+   * and the next one scheduled (a handshake a tunnel accepted but nobody answers; the browser's
+   * own opening-handshake timeout is minutes).
+   */
+  readonly connectTimeoutMs?: number;
   /** A socket with no frame for this long is considered dead (server pings every 10 s). */
   readonly silenceTimeoutMs?: number;
 }
 
 const OPEN = 1;
 const DEFAULT_BACKOFF_MS = [500, 1_000, 2_000, 4_000, 8_000, 15_000];
+/** Under keepalive: 500 ms, 1 s, then every 2 s — the idle schedule above, capped. */
+const DEFAULT_KEEPALIVE_MAX_BACKOFF_MS = 2_000;
+/** The server drops a socket without an auth frame after 5 s; a live one says hello in ms. */
+const DEFAULT_CONNECT_TIMEOUT_MS = 8_000;
 const DEFAULT_SILENCE_TIMEOUT_MS = 30_000;
 /** Retry delay after `busy {inGrace}` when the server's `hello` does not say how long grace is. */
 const FALLBACK_LEASE_RETRY_MS = 11_000;
@@ -142,6 +158,8 @@ const CLOSE_RATE_LIMITED = 4429;
 export class WorkspaceEventsClient {
   private readonly createSocket: WorkspaceSocketFactory;
   private readonly backoffMs: readonly number[];
+  private readonly keepaliveMaxBackoffMs: number;
+  private readonly connectTimeoutMs: number;
   private readonly silenceTimeoutMs: number;
 
   private socket: WorkspaceSocketLike | null = null;
@@ -155,6 +173,15 @@ export class WorkspaceEventsClient {
   // background tab waiting a throttled minute to reconnect.
   private reconnectTimer: (() => void) | null = null;
   private silenceTimer: (() => void) | null = null;
+  private connectTimer: (() => void) | null = null;
+  /** The reconnect attempt in progress, for the `[workspace] reconnect attempt` debug lines. */
+  private pendingAttempt: {
+    readonly n: number;
+    readonly delayMs: number;
+    readonly armedAt: number;
+    readonly keepalive: boolean;
+    firedAt: number | null;
+  } | null = null;
   private helloCount = 0;
   private lastRevision: string | null = null;
   private lastServerSession: string | null = null;
@@ -170,6 +197,8 @@ export class WorkspaceEventsClient {
     this.createSocket =
       options.createSocket ?? ((url: string) => new WebSocket(url) as WorkspaceSocketLike);
     this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
+    this.keepaliveMaxBackoffMs = options.keepaliveMaxBackoffMs ?? DEFAULT_KEEPALIVE_MAX_BACKOFF_MS;
+    this.connectTimeoutMs = options.connectTimeoutMs ?? DEFAULT_CONNECT_TIMEOUT_MS;
     this.silenceTimeoutMs = options.silenceTimeoutMs ?? DEFAULT_SILENCE_TIMEOUT_MS;
   }
 
@@ -186,6 +215,7 @@ export class WorkspaceEventsClient {
     this.leaseId = null;
     this.workspaceId = null;
     this.leaseGraceMs = null;
+    this.pendingAttempt = null;
     this.open('connecting');
   }
 
@@ -247,16 +277,19 @@ export class WorkspaceEventsClient {
       return;
     }
     this.handlers.onConnectionState?.(state);
+    if (this.pendingAttempt) this.pendingAttempt.firedAt = Date.now();
 
     let socket: WorkspaceSocketLike;
     try {
       socket = this.createSocket(toEventsUrl(this.endpoint));
     } catch (error) {
       console.warn('[WorkspaceEventsClient] Could not open the events socket', error);
+      this.reportAttempt(`could not create the socket (${String(error)})`);
       this.scheduleReconnect();
       return;
     }
     this.socket = socket;
+    this.armConnectTimer(socket);
 
     socket.onopen = () => {
       // First frame, within 5 s, or the server drops the socket.
@@ -276,8 +309,14 @@ export class WorkspaceEventsClient {
       }
       this.socket = null;
       this.clearSilenceTimer();
+      this.clearConnectTimer();
       // The next hello re-sends `acquire` anyway.
       this.clearLeaseRetry();
+      this.reportAttempt(`closed ${event.code}${event.reason ? ` ${event.reason}` : ''}`);
+      if (!this.pendingAttempt && !this.stopped) {
+        // Start of a reconnect timeline: the live socket went away.
+        console.debug(`[workspace] events socket closed ${event.code}, reconnecting`);
+      }
       this.handleClose(event.code, event.reason);
     };
   }
@@ -370,7 +409,15 @@ export class WorkspaceEventsClient {
   }
 
   private handleHello(socket: WorkspaceSocketLike, hello: WorkspaceHelloFrame): void {
+    this.clearConnectTimer();
     const reconnected = this.helloCount > 0;
+    this.reportAttempt(
+      `hello${
+        this.lastServerSession !== null && hello.serverSession !== this.lastServerSession
+          ? ' (new server session: the old leaseId is dropped, acquiring fresh)'
+          : ''
+      }`
+    );
     // Always re-scan after a reconnect. Comparing revisions would not save anything: this
     // editor's own writes move the revision without an event, so it differs almost every time.
     const needsRescan = reconnected;
@@ -459,6 +506,10 @@ export class WorkspaceEventsClient {
   }
 
   private handleErrorFrame(code: string, message?: string, retryAfter?: number): void {
+    if (this.pendingAttempt) {
+      // The close that follows is reported too; this says why.
+      console.debug(`[workspace] reconnect attempt ${this.pendingAttempt.n}: server error ${code}`);
+    }
     if (code === 'unauthorized' || code === 'auth_timeout' || code === 'revoked') {
       this.fail(
         new WorkspaceError(
@@ -519,15 +570,80 @@ export class WorkspaceEventsClient {
     if (this.stopped) {
       return;
     }
-    const base = this.backoffMs[Math.min(this.attempt, this.backoffMs.length - 1)] ?? 1_000;
-    const delay = Math.max(base, this.pendingRetryAfterMs ?? 0);
+    const keepalive = isEditorKeepAlive();
+    const delay = this.reconnectDelay(this.attempt, keepalive);
     this.pendingRetryAfterMs = null;
     this.attempt += 1;
+    this.pendingAttempt = {
+      n: this.attempt,
+      delayMs: delay,
+      armedAt: Date.now(),
+      keepalive,
+      firedAt: null,
+    };
     this.handlers.onConnectionState?.('reconnecting');
     this.reconnectTimer = keepaliveTimer(() => {
       this.reconnectTimer = null;
       this.open('reconnecting');
     }, delay);
+  }
+
+  /**
+   * Delay before reconnect attempt `attempt + 1`: the backoff schedule, capped at
+   * {@link WorkspaceEventsClientOptions.keepaliveMaxBackoffMs} under keepalive, and never shorter
+   * than a server's `retryAfter`.
+   */
+  private reconnectDelay(attempt: number, keepalive: boolean): number {
+    const scheduled = this.backoffMs[Math.min(attempt, this.backoffMs.length - 1)] ?? 1_000;
+    const base = keepalive ? Math.min(scheduled, this.keepaliveMaxBackoffMs) : scheduled;
+    return Math.max(base, this.pendingRetryAfterMs ?? 0);
+  }
+
+  /**
+   * One `console.debug` line per reconnect attempt and outcome, so a live run shows the timeline:
+   * the planned delay, how late the timer really fired (a throttled main-thread timer shows up
+   * here as seconds or a minute), which clock keepalive chose and what the attempt got.
+   */
+  private reportAttempt(result: string): void {
+    const attempt = this.pendingAttempt;
+    if (!attempt) return;
+    const now = Date.now();
+    const fired =
+      attempt.firedAt !== null
+        ? `fired after ${attempt.firedAt - attempt.armedAt} ms, ${now - attempt.firedAt} ms to outcome`
+        : 'not fired';
+    console.debug(
+      `[workspace] reconnect attempt ${attempt.n} in ${attempt.delayMs} ms → ${result} ` +
+        `(${fired}; keepalive ${attempt.keepalive ? 'on, worker clock' : 'off, main-thread timer'})`
+    );
+    if (result.startsWith('hello')) this.pendingAttempt = null;
+  }
+
+  /** Give up an attempt that has not said hello in time, and schedule the next one. */
+  private armConnectTimer(socket: WorkspaceSocketLike): void {
+    this.clearConnectTimer();
+    this.connectTimer = keepaliveTimer(() => {
+      this.connectTimer = null;
+      if (this.socket !== socket) return;
+      this.socket = null;
+      this.clearSilenceTimer();
+      this.clearLeaseRetry();
+      detach(socket);
+      try {
+        socket.close(4000, 'no hello');
+      } catch {
+        // ignore
+      }
+      this.reportAttempt(`no hello within ${this.connectTimeoutMs} ms, giving up this attempt`);
+      this.scheduleReconnect();
+    }, this.connectTimeoutMs);
+  }
+
+  private clearConnectTimer(): void {
+    if (this.connectTimer !== null) {
+      this.connectTimer();
+      this.connectTimer = null;
+    }
   }
 
   private armSilenceTimer(): void {
@@ -541,6 +657,10 @@ export class WorkspaceEventsClient {
       // Half-open tunnel: the server stopped talking. Drop it and reconnect.
       this.socket = null;
       this.clearLeaseRetry();
+      this.clearConnectTimer();
+      console.debug(
+        `[workspace] events socket silent for ${this.silenceTimeoutMs} ms, dropping it and reconnecting`
+      );
       detach(socket);
       try {
         socket.close(4000, 'silent');
@@ -560,6 +680,7 @@ export class WorkspaceEventsClient {
 
   private clearTimers(): void {
     this.clearSilenceTimer();
+    this.clearConnectTimer();
     this.clearLeaseRetry();
     if (this.reconnectTimer !== null) {
       this.reconnectTimer();

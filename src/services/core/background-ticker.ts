@@ -138,16 +138,51 @@ export const setTickWorkerFactory = (factory: TickWorkerFactory | null): void =>
 };
 
 /**
- * `setTimeout` that is not throttled in a hidden tab while keepalive is on (the choice is made
- * when the timer is armed). Returns the cancel function.
+ * `setTimeout` that is not throttled in a hidden tab while keepalive is on. Returns the cancel
+ * function.
+ *
+ * The clock follows keepalive while the timer is pending: a timer armed on the main thread while
+ * keepalive was off moves to the worker (with the time it has left) when keepalive turns on, and
+ * back when it turns off. Deciding only when the timer is armed left a delay armed in a gap of
+ * keepalive — say a 15 s reconnect — on a throttled main-thread timer that Chrome's intensive
+ * throttling stretches to a minute, even after keepalive was back.
  */
 export const keepaliveTimer = (callback: () => void, ms: number): (() => void) => {
-  if (isEditorKeepAlive()) {
-    const id = clock.set(callback, ms);
-    if (id !== null) return () => clock.clear(id);
-  }
-  const handle = setTimeout(callback, ms);
-  return () => clearTimeout(handle);
+  const deadline = now() + ms;
+  let settled = false;
+  let onWorker = false;
+  let cancelInner: () => void = () => undefined;
+  const fire = (): void => {
+    if (settled) return;
+    settled = true;
+    unsubscribe();
+    callback();
+  };
+  const arm = (delay: number): void => {
+    if (isEditorKeepAlive()) {
+      const id = clock.set(fire, delay);
+      if (id !== null) {
+        onWorker = true;
+        cancelInner = () => clock.clear(id);
+        return;
+      }
+    }
+    onWorker = false;
+    const handle = setTimeout(fire, delay);
+    cancelInner = () => clearTimeout(handle);
+  };
+  const unsubscribe = onEditorKeepAliveChange(() => {
+    if (settled || isEditorKeepAlive() === onWorker) return;
+    cancelInner();
+    arm(Math.max(0, deadline - now()));
+  });
+  arm(ms);
+  return () => {
+    if (settled) return;
+    settled = true;
+    unsubscribe();
+    cancelInner();
+  };
 };
 
 /** `setInterval` built on {@link keepaliveTimer}: each period re-decides worker vs. timer. */

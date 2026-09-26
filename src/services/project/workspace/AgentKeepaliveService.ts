@@ -16,7 +16,15 @@ import { setEditorKeepAlive } from '@/services/core/page-activity';
  *       presence attached               — the server's `agent-presence` (MCP heartbeats), also
  *                                         {@link PRESENCE_STALE_MS} after the socket dropped
  *    OR a call is in flight, or the last one finished < {@link RECENT_CALL_MS} ago
- *    OR play was started through the agent channel and is still running )
+ *    OR play was started through the agent channel and is still running
+ *    OR the events socket is reconnecting and keepalive was on when it dropped — for
+ *                                         {@link RECONNECT_KEEPALIVE_MS} at most )
+ *
+ * The last row exists for the pipeline's most common drop, a restart of `pix3 serve`: presence
+ * can only be learned over the socket, so while it is down an agent looks absent, and the
+ * recent-call window can run out mid-reconnect. Keepalive then falls off, the reconnect timers go
+ * back to throttled main-thread timers (a minute apart under Chrome's intensive throttling), and a
+ * hidden tab takes minutes to come back to an agent that is waiting for it.
  *
  * The result goes to `appState.project.coauthoring.agentKeepalive` (status-bar pill) and to
  * `page-activity`'s {@link setEditorKeepAlive}, which every battery gate reads
@@ -29,11 +37,14 @@ import { setEditorKeepAlive } from '@/services/core/page-activity';
 export const RECENT_CALL_MS = 5 * 60_000;
 /** Presence last seen on a socket that dropped still counts this long (server restart). */
 export const PRESENCE_STALE_MS = 5 * 60_000;
+/** A reconnect that started under keepalive keeps it this long (the server is being restarted). */
+export const RECONNECT_KEEPALIVE_MS = 5 * 60_000;
 
 export interface AgentKeepaliveReasons {
   readonly presence: boolean;
   readonly calls: boolean;
   readonly play: boolean;
+  readonly reconnect: boolean;
 }
 
 @injectable()
@@ -43,6 +54,8 @@ export class AgentKeepaliveService {
   private agentPlay = false;
   /** When the socket went down while presence said attached (null = connected / not attached). */
   private presenceLostAt: number | null = null;
+  /** When the socket started reconnecting while keepalive was on (null = not that case). */
+  private reconnectKeptSince: number | null = null;
   private expiryTimer: ReturnType<typeof setTimeout> | null = null;
   private disposers: Array<() => void> = [];
   private current = false;
@@ -96,7 +109,11 @@ export class AgentKeepaliveService {
       this.inflight.size > 0 ||
       (this.lastCallEndedAt !== null && now - this.lastCallEndedAt < RECENT_CALL_MS);
     const play = this.agentPlay && appState.ui.isPlaying;
-    return { presence, calls, play };
+    const reconnect =
+      workspace.status === 'reconnecting' &&
+      this.reconnectKeptSince !== null &&
+      now - this.reconnectKeptSince < RECONNECT_KEEPALIVE_MS;
+    return { presence, calls, play, reconnect };
   }
 
   subscribe(listener: () => void): () => void {
@@ -121,9 +138,15 @@ export class AgentKeepaliveService {
     } else if (this.presenceLostAt === null) {
       this.presenceLostAt = this.now();
     }
+    if (workspace.status !== 'reconnecting') {
+      this.reconnectKeptSince = null;
+    } else if (this.reconnectKeptSince === null && this.current) {
+      // `current` is still the value from before the drop: this is the first recompute since.
+      this.reconnectKeptSince = this.now();
+    }
     const reasons = this.reasons();
     const enabled = appState.ui.keepEditorRunningForAgent;
-    this.apply(enabled && (reasons.presence || reasons.calls || reasons.play));
+    this.apply(enabled && (reasons.presence || reasons.calls || reasons.play || reasons.reconnect));
     this.scheduleExpiry();
   }
 
@@ -146,6 +169,9 @@ export class AgentKeepaliveService {
       deadlines.push(this.lastCallEndedAt + RECENT_CALL_MS);
     }
     if (this.presenceLostAt !== null) deadlines.push(this.presenceLostAt + PRESENCE_STALE_MS);
+    if (this.reconnectKeptSince !== null) {
+      deadlines.push(this.reconnectKeptSince + RECONNECT_KEEPALIVE_MS);
+    }
     const next = deadlines.filter(at => at > now).sort((a, b) => a - b)[0];
     if (next === undefined) return;
     // A late wake-up (throttled background timer) only turns keepalive off late: harmless.

@@ -157,6 +157,35 @@ describe('keepaliveTimer / keepaliveInterval', () => {
     expect(cancelled).not.toHaveBeenCalled();
   });
 
+  it('moves a pending timer to the worker when keepalive turns on, with the time it has left', () => {
+    vi.useFakeTimers();
+    const callback = vi.fn();
+    keepaliveTimer(callback, 15_000);
+    expect(worker.commands).toEqual([]);
+    vi.advanceTimersByTime(5_000);
+    // Keepalive comes back while the (throttleable) main-thread timer is pending.
+    setEditorKeepAlive(true);
+    expect([...worker.timers.values()]).toEqual([10_000]);
+    expect(vi.getTimerCount()).toBe(0);
+    worker.fireAll();
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
+  it('moves back to a plain timer when keepalive turns off, and fires once', () => {
+    vi.useFakeTimers();
+    setEditorKeepAlive(true);
+    const callback = vi.fn();
+    const cancel = keepaliveTimer(callback, 1_000);
+    setEditorKeepAlive(false);
+    expect(worker.timers.size).toBe(0);
+    vi.advanceTimersByTime(1_000);
+    expect(callback).toHaveBeenCalledTimes(1);
+    setEditorKeepAlive(true);
+    expect(worker.timers.size).toBe(0);
+    cancel();
+    expect(callback).toHaveBeenCalledTimes(1);
+  });
+
   it('falls back to setTimeout when no worker can be created', () => {
     vi.useFakeTimers();
     setTickWorkerFactory(() => null);

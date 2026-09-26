@@ -6,6 +6,7 @@ import {
   AgentKeepaliveService,
   PRESENCE_STALE_MS,
   RECENT_CALL_MS,
+  RECONNECT_KEEPALIVE_MS,
 } from '@/services/project/workspace/AgentKeepaliveService';
 
 let service: AgentKeepaliveService;
@@ -110,6 +111,39 @@ describe('AgentKeepaliveService', () => {
     attach(true, 'connected');
     expect(service.isKeepAlive()).toBe(true);
     attach(false);
+    expect(service.isKeepAlive()).toBe(false);
+  });
+
+  it('a reconnect that started under keepalive keeps it past the recent-call window', () => {
+    appState.project.workspace.status = 'connected';
+    service.noteCallStarted('a');
+    service.noteCallFinished('a');
+    now += RECENT_CALL_MS - 60_000;
+    service.recompute();
+    expect(service.isKeepAlive()).toBe(true);
+    // `pix3 serve` restarts: the socket drops, presence cannot be learned until it is back.
+    appState.project.workspace.status = 'reconnecting';
+    service.recompute();
+    now += 2 * 60_000; // the call window ran out meanwhile
+    service.recompute();
+    expect(service.reasons()).toMatchObject({ calls: false, reconnect: true });
+    expect(service.isKeepAlive()).toBe(true);
+    // Bounded: a server that never comes back does not keep the editor awake forever.
+    now += RECONNECT_KEEPALIVE_MS;
+    service.recompute();
+    expect(service.isKeepAlive()).toBe(false);
+    // Back (no agent): the normal rules.
+    appState.project.workspace.status = 'connected';
+    service.recompute();
+    expect(service.isKeepAlive()).toBe(false);
+  });
+
+  it('a reconnect with keepalive off stays off (the idle editor is unchanged)', () => {
+    appState.project.workspace.status = 'connected';
+    service.recompute();
+    appState.project.workspace.status = 'reconnecting';
+    service.recompute();
+    expect(service.reasons().reconnect).toBe(false);
     expect(service.isKeepAlive()).toBe(false);
   });
 

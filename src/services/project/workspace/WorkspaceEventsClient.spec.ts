@@ -10,7 +10,7 @@ import {
 } from '@/services/project/workspace/WorkspaceEventsClient';
 import type { WorkspaceHelloFrame } from '@/services/project/workspace/workspace-protocol';
 import { setTickWorkerFactory } from '@/services/core/background-ticker';
-import { FakeTickWorker } from '@/services/core/background-ticker.test-helpers';
+import { FakeTickWorker, setVisibility } from '@/services/core/background-ticker.test-helpers';
 import { setEditorKeepAlive } from '@/services/core/page-activity';
 
 class FakeSocket implements WorkspaceSocketLike {
@@ -398,6 +398,131 @@ describe('WorkspaceEventsClient', () => {
       expect(worker.commands).toEqual([]);
       vi.advanceTimersByTime(100);
       expect(sockets).toHaveLength(2);
+    });
+
+    describe('server restart in a hidden tab', () => {
+      let restartClient: WorkspaceEventsClient;
+      const store = new Map<string, StoredWorkspaceLease>();
+      const memoryStore: WorkspaceLeaseStore = {
+        get: id => store.get(id) ?? null,
+        set: (id, lease) => void store.set(id, lease),
+        clear: id => void store.delete(id),
+      };
+
+      beforeEach(() => {
+        store.clear();
+        setVisibility('hidden', false);
+        // The production schedule (no test override): what a live editor does.
+        restartClient = new WorkspaceEventsClient({
+          createSocket: url => {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+          },
+          leaseStore: memoryStore,
+        });
+      });
+
+      afterEach(() => {
+        restartClient.close();
+        setVisibility('visible');
+      });
+
+      /** Connect, hello from `session-1`, lease granted; returns the live socket. */
+      const connectHeld = (handlers: WorkspaceEventsHandlers = {}): FakeSocket => {
+        restartClient.connect('http://localhost:8490', 'p3ws_secret', handlers);
+        const socket = sockets[sockets.length - 1];
+        socket.open();
+        socket.receive(hello({ leaseGraceMs: 10_000 }));
+        socket.receive({ type: 'lease', state: 'granted', leaseId: 'old-lease', resumed: false });
+        return socket;
+      };
+
+      it('under keepalive retries on the worker every ≤ 2 s and acquires fresh from the new session', () => {
+        const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        setEditorKeepAlive(true);
+        const onLease = vi.fn();
+        const first = connectHeld({ onLease });
+        expect(store.get('ws-1')).toEqual({ leaseId: 'old-lease', serverSession: 'session-1' });
+
+        first.drop(1006);
+        // Server down: every attempt is refused at once. Each wait is on the worker, none on a
+        // (throttled) main-thread timer, and none longer than 2 s.
+        const delays: number[] = [];
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          expect(vi.getTimerCount()).toBe(0);
+          const armed = [...worker.timers.values()];
+          expect(armed).toHaveLength(1);
+          delays.push(armed[0]);
+          const before = sockets.length;
+          worker.fireAll();
+          expect(sockets).toHaveLength(before + 1);
+          sockets[sockets.length - 1].drop(1006);
+        }
+        expect(delays).toEqual([500, 1_000, 2_000, 2_000, 2_000, 2_000, 2_000, 2_000]);
+        expect(Math.max(...delays)).toBeLessThanOrEqual(3_000);
+
+        // The restarted server answers: new serverSession, empty lease table.
+        worker.fireAll();
+        const back = sockets[sockets.length - 1];
+        back.open();
+        back.receive(hello({ serverSession: 'session-2', leaseGraceMs: 10_000 }));
+        // The leaseId of the old run is dropped, not offered (it would mean nothing there)…
+        expect(back.sent.at(-1)).toEqual({ type: 'lease', action: 'acquire' });
+        back.receive({ type: 'lease', state: 'granted', leaseId: 'new-lease', resumed: false });
+        // …and nothing waits out a grace period: granted on the first acquire, no retry armed.
+        expect(back.sent.filter(frame => frame.action === 'acquire')).toHaveLength(1);
+        expect(restartClient.getLeaseId()).toBe('new-lease');
+        expect(store.get('ws-1')).toEqual({ leaseId: 'new-lease', serverSession: 'session-2' });
+        expect(onLease).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'granted' }));
+        // Only the silence watchdog is left, on the worker.
+        expect([...worker.timers.values()]).toEqual([30_000]);
+
+        const lines = debug.mock.calls.map(call => String(call[0]));
+        expect(lines[0]).toBe('[workspace] events socket closed 1006, reconnecting');
+        expect(lines[1]).toMatch(/^\[workspace\] reconnect attempt 1 in 500 ms → closed 1006 /);
+        expect(lines.at(-1)).toMatch(
+          /^\[workspace\] reconnect attempt 9 in 2000 ms → hello \(new server session.*keepalive on, worker clock/
+        );
+        debug.mockRestore();
+      });
+
+      it('gives up an attempt that never says hello instead of waiting on the browser', () => {
+        vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        setEditorKeepAlive(true);
+        const first = connectHeld();
+        first.drop(1006);
+        worker.fireAll();
+        const hanging = sockets[sockets.length - 1];
+        // A tunnel accepted the connection but nobody behind it answers: no open, no close.
+        expect([...worker.timers.values()]).toEqual([8_000]);
+        worker.fireAll();
+        expect(hanging.closed).toBe(true);
+        expect([...worker.timers.values()]).toEqual([1_000]);
+        worker.fireAll();
+        expect(sockets[sockets.length - 1]).not.toBe(hanging);
+        vi.mocked(console.debug).mockRestore();
+      });
+
+      it('without keepalive keeps the battery-friendly schedule on plain timers', () => {
+        vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        const first = connectHeld();
+        first.drop(1006);
+        const delays: number[] = [];
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const before = sockets.length;
+          let waited = 0;
+          while (sockets.length === before && waited < 60_000) {
+            vi.advanceTimersByTime(100);
+            waited += 100;
+          }
+          delays.push(waited);
+          sockets[sockets.length - 1].drop(1006);
+        }
+        expect(delays).toEqual([500, 1_000, 2_000, 4_000, 8_000, 15_000, 15_000, 15_000]);
+        expect(worker.commands).toEqual([]);
+        vi.mocked(console.debug).mockRestore();
+      });
     });
 
     it('reports agent presence from hello and from agent-presence frames', () => {
