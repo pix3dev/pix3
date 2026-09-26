@@ -60,6 +60,8 @@ import { WORKSPACE_TOOL_NAMES } from './workspace-agent/tools.ts';
  * - every directive resolved;
  * - every `pix3 <command> [--flag]` the kit shows exists in the CLI's USAGE (with that flag);
  * - every tool name in the live-channel section is one of the 14, and all 14 are there;
+ * - no editor-only tool (`AgentToolRegistry`) is named in AGENTS.md / the verify and scripts skills;
+ * - `pix3 check --json` `files` entries are documented with the CLI's key (`{ file, sha256 }`);
  * - every diagnostic code named is one `pix3 validate` / `pix3 check` emits;
  * - every node type named in the nodes skill is a type the loader knows;
  * - every property in the nodes skill's tables is a key the loader reads (the disk-format
@@ -231,6 +233,52 @@ describe('kit drift', () => {
     expect(WORKSPACE_TOOL_NAMES.filter(tool => !snake.has(tool))).toEqual([]);
     expect(kitMcpErrorCodes().filter(code => !snake.has(code))).toEqual([]);
     expect(WORKSPACE_TOOL_NAMES).toHaveLength(14);
+  });
+
+  it('names no editor-only tool as if the live channel had it', () => {
+    // The in-editor agent has ~100 tools (`AgentToolRegistry`); the workspace channel exposes 14.
+    // A kit that tells an external agent to call `game_trace` / `game_controls` / `node_inspect`
+    // sends it after a tool it does not have. (The scene-format skill's recipe table and the
+    // included spec name in-editor tools on purpose: they translate them into file edits.)
+    const registry = readFileSync(
+      join(repoRootOfCheckout(), 'src/services/agent/AgentToolRegistry.ts'),
+      'utf8'
+    );
+    const editorTools = new Set(
+      [...registry.matchAll(/^\s+name: '([a-z]+(?:_[a-z0-9]+)+)',$/gm)].map(m => m[1])
+    );
+    expect(editorTools.size).toBeGreaterThan(WORKSPACE_TOOL_NAMES.length);
+    const files = [
+      'AGENTS.md',
+      '.claude/skills/pix3-verify/SKILL.md',
+      '.claude/skills/pix3-scripts/SKILL.md',
+    ];
+    const problems: string[] = [];
+    for (const file of files) {
+      for (const match of text(file).matchAll(/\b([a-z]+(?:_[a-z0-9]+)+)\b/g)) {
+        const name = match[1];
+        if (editorTools.has(name) && !WORKSPACE_TOOL_NAMES.includes(name)) {
+          problems.push(`${file}: ${name}`);
+        }
+      }
+    }
+    expect(problems).toEqual([]);
+  });
+
+  it("documents `pix3 check --json` files entries with the CLI's own key", () => {
+    // `CheckReport.files` is `{ file, sha256 }[]`; round 2 of the trial found the kit saying
+    // `{ path, sha256 }`. The runtime shape is asserted in the type-check test below.
+    // Only the kit's own prose: the included spec documents other `{ path, sha256 }` shapes
+    // (`.pix3/ack.json`) that are right as written.
+    const problems: string[] = [];
+    for (const file of ['AGENTS.md', '.claude/skills/pix3-verify/SKILL.md']) {
+      const content = text(file);
+      for (const match of content.matchAll(/\{\s*"?(\w+)"?\s*(?::[^,}]*)?,\s*"?sha256"?\b/g)) {
+        if (match[1] !== 'file') problems.push(`${file}: ${match[0]}`);
+      }
+      if (/path \+ sha256/.test(content)) problems.push(`${file}: "path + sha256"`);
+    }
+    expect(problems).toEqual([]);
   });
 
   it('names only diagnostic codes that validate / check emit', () => {
@@ -536,6 +584,9 @@ describe('pix3 kit', () => {
     });
     expect(report.diagnostics.filter(d => d.code === 'E_TYPE')).toEqual([]);
     expect(report.typecheck.files).toBeGreaterThan(blocks.length);
+    // The `files` entry shape the verify skill documents (`{ file, sha256 }`).
+    expect(report.files.length).toBeGreaterThan(0);
+    expect(Object.keys(report.files[0]).sort()).toEqual(['file', 'sha256']);
   }, 60_000);
 
   const deepCore = join(repoRootOfCheckout(), '..', 'DeepCore');

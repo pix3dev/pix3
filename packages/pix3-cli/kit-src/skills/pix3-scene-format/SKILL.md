@@ -109,6 +109,11 @@ The node keeps its authored distance to that edge of its parent when the parent 
 still authored in `transform.position`. HUD widgets anchor to screen edges; full-screen
 backgrounds and roots use `stretch` on both axes.
 
+**A new HUD node must not overlap the HUD that is already there.** Before you place it, read
+the `position`, `width`/`height` and anchoring of its siblings and pick a free spot (a combo
+label placed "top-right" once landed under the game's Shop button). With the live channel,
+confirm it with a `viewport_screenshot` while the game runs; without it, ask the human to look.
+
 Flow (stack children in a row/column) is a separate block:
 `flow: { enabled: true, direction: vertical, gap: 16, paddingX: 0, paddingY: 0, align: start, autoSize: false }`.
 

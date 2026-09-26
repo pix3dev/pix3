@@ -155,11 +155,15 @@ second one.
   where config and tests go, commit rules); this kit wins on **Pix3 facts** (the YAML format,
   the runtime API, `pix3 check`).
 - The project's own `package.json` means `npm install` before `pix3 check` can type-check.
+- **Use the game's own feedback mechanisms.** If its camera controller writes the camera's
+  position every frame, an engine `scene.juice.shake('camera')` / `core:Shake` on that 3D camera
+  (or on any node the game positions itself) is overwritten every frame and never shows — call
+  the game's own shake (grep `shake`) instead. The same holds for its own sound/tween helpers.
 
 ## The CLI and the live channel
 
-- `pix3 check [--json]` — after every batch (rule 4). `--json` prints `files` (path + sha256 of
-  the raw bytes), `diagnostics`, `typecheck`, `mergeLog`, `kit`.
+- `pix3 check [--json]` — after every batch (rule 4). `--json` prints `files` (`{ file, sha256 }`,
+  sha256 of the raw bytes), `diagnostics`, `typecheck`, `mergeLog`, `kit`.
 - `pix3 read <file>` — print a file and confirm to the editor you read exactly these bytes.
 - `pix3 validate [paths…]` — scenes only, no type-check.
 - **Live channel (optional).** When the human runs `pix3 serve` in this folder and connects the

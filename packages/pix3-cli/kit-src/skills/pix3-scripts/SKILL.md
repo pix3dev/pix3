@@ -194,6 +194,9 @@ before children's.
   `killAll(target?)`. Default `sec` = 0.3. Prefer these over hand-lerping.
 - Audio with no asset: `scene.audio.sfx('tap' | 'score' | 'bounce' | 'explosion' | 'powerup' | 'win' | 'lose' | 'laser' | 'tick', { volume: 1, pitch: 1 })`;
   a file: `await scene.audio.play('res://audio/hit.ogg', { bus: 'sfx' | 'music' | 'master', volume, loop, playbackRate, pan, pitchVariation: 0, volumeVariation: 0 })`.
+  Sound cannot be proven audible from the live channel: the browser only starts Web Audio after
+  a real user gesture, and `game_input`'s synthetic taps/keys are not one. Report a sound as
+  "code path verified, audibility not" and ask the human to listen.
 - Overlap queries without physics response: `scene.collision2d.overlapPoint(x, y, group?)`,
   `overlapCircle(x, y, r, group?)`, `overlapRect(cx, cy, w, h, group?)`, `raycast(…)` over
   nodes carrying `core:Hitbox2D` (the tapper/arena recipes use this).
@@ -244,6 +247,11 @@ before children's.
     super.onDetach();
   }
   ```
+- **Prefer the game's own feedback helpers.** When the game's camera controller writes the
+  camera's position every frame, `scene.juice.shake('camera')` / `core:Shake` on that 3D camera
+  (or on any node the game positions itself) is overwritten every frame and never shows. Use the
+  game's own shake (`grep -rn "shake" src scripts`) when it has one; the same goes for its own
+  sound and tween helpers.
 - The project's own `AGENTS.md` wins on process (planning first, where config goes); this kit
   wins on Pix3 facts (YAML, runtime API, `pix3 check`).
 

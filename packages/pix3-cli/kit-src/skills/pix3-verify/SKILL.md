@@ -25,8 +25,9 @@ nodes, zero size, unused assets, out-of-range values) are for judgement.
 `--json` answers `{ ok, errorCount, warningCount, files, diagnostics, notes, typecheck,
 mergeLog, kit, … }`:
 
-- `files` — every scene validated and every script type-checked, with the **sha256 of its raw
-  bytes**. These are the hashes `expect` and `pix3 ack --sha256` take.
+- `files` — every scene validated and every script type-checked, as
+  `[{ "file": "scenes/main.pix3scene", "sha256": "…" }]` (the key is `file`, not `path`) — the
+  **sha256 of its raw bytes**. These are the hashes `expect` and `pix3 ack --sha256` take.
 - `diagnostics` — one list: `{ severity, code, file, line?, nodeId?, path?, message, fix? }`.
 - `typecheck` — `{ ok, errors, tsconfig, mode, files, typescript, skipped }`; tsc errors are
   `E_TYPE` diagnostics in the list above; `skipped` says why tsc did not run at all.
@@ -99,14 +100,86 @@ The 14 tools:
 
 The loop after a batch of edits:
 
-1. `pix3 check --json` → take the `sha256` of every file you wrote from `files`.
-2. `game_run` (or `play_restart`) with `expect: { "<path>": "<sha256>", … }` — the run starts
-   only if the disk holds exactly those versions and the editor loaded them.
+1. `pix3 check --json` → take the `sha256` of every file you wrote from `files`
+   (`{ file, sha256 }` entries).
+2. A barrier tool — `game_run`, `play_start` or `play_restart` — with
+   `expect: { "<path>": "<sha256>", … }`: the run starts only if the disk holds exactly those
+   versions and the editor loaded them.
 3. Green = no error, `matchesAgent: true`, `matchesDisk: true`, empty `changedDuringRun`. Then
    `read_errors`, `game_observe` / `viewport_screenshot` to see what happened.
 4. `disk_differs_from_agent` with `mergeLog: true` → the editor merged your file with a human
    edit: `pix3 read` it (section 2). With `recovery` → someone overwrote it; the named file under
    `.pix3/recovery/` holds your version. Otherwise write the file again.
+
+### Two ways to prove behaviour
+
+**Every barrier call stops the game and starts it again from the files on disk.** `game_run`
+included: it is always a run from a fresh start, so it can never judge state that an earlier
+`game_input` produced — that state is gone before its first frame. Pick the pattern by what
+causes the behaviour:
+
+- **(a) Autonomous behaviour** (spawns, timers, physics, a HUD that counts on its own):
+  one `game_run` with `expect`, predicates in `until` (any one ends the run as a pass) and
+  `fail` (any one ends it as a failure), e.g. `until:
+  [{ kind: "nodeProperty", name: "ScoreLabel", path: "text", op: "contains", value: "10" }]`,
+  `fail: [{ kind: "newErrors" }]` (a script threw). Read `verdict`, then the result's
+  `newErrors` count, then `read_errors` when it is not 0.
+- **(b) Input-driven behaviour** (taps, keys, combos): `play_start` or `play_restart` with
+  `expect` (the barrier, once) → one or more `game_input` calls → `game_observe` / `read_logs`.
+  `game_input` and `game_observe` are observing tools: they neither stop nor resync, so the
+  state builds up across calls. Do **not** end with `game_run` to "check the result" — it
+  restarts the game.
+
+### `game_input` — what the steps really do
+
+- **Coordinates** (`x`, `y` on `tap` / `drag` / `hover`) are the 2D design space the scene
+  file uses: origin at the **centre**, **Y up**, the same numbers as a node's `position`. With
+  the 2D camera at rest, `{ x: 0, y: 0 }` is the centre of the viewport and the top edge of a
+  1080 x 1920 design is `y: 960` — not `(540, 960)` or `(960, 540)`. Coordinates follow the 2D
+  camera; a node under a `CanvasLayer2D` (a HUD) is pinned to the screen instead, so for HUD and
+  buttons prefer `target: "<node name or id>"`, which projects the node's live position the
+  right way for either.
+- **`tap` holds the pointer down 700 ms by default** (so a `Button2D` sees a real press). For
+  fast repeated hits — a combo window, a rhythm check — pass `holdMs` (e.g. `holdMs: 50`) and a
+  short `wait` between taps; `frames` instead of `ms` / `holdMs` counts game ticks.
+- **One call is capped at 15 s** of requested time (holds + drags + waits); longer answers
+  `Input script too long` — split it into several `game_input` calls.
+- **Input goes through the engine's `InputService`**: `PointerEvent`s on the game canvas and
+  `KeyboardEvent`s on `window`. Scripts that read `this.input` see it. A game that listens for
+  DOM `mouse*` / `click` / `touch*` events, keys on `document`, or on a canvas of its own does
+  **not** — verify such input by hand.
+
+### Reading the answers
+
+- **Barrier answers** carry `revision`, `startupMs` (how long the game took to start),
+  `matchesAgent` / `agentExpectations`, `matchesDisk`, `changedDuringRun`,
+  `editorWroteDuringRun`, `editorChangedSinceAgentWrite` and `result` (the editor tool's own
+  answer). **Observing answers** are `{ revision, stale, result }`.
+- `revision` is the running game's file → hash map: every open scene, every script the build
+  read, `pix3project.yaml` — it can run to hundreds of lines. Check `stale` and the match
+  flags; never paste `revision` into a report.
+- **Labels and HUD text.** An observed node reports its rendered `text` only at the window's
+  **start and end** — `observed.<node>.before.text` / `.after.text` in `game_input`,
+  `nodes.<node>.text` (and `movement.<node>.before` / `.after` with `sampleMs` or `frames`) in
+  `game_observe`;
+  there is no per-frame text timeline. The one-line `verdict` does not count a text change:
+  it can say `NO ACTIVITY` while the label went from `x1` to `x3`. For HUD text, read the text
+  fields, never the verdict alone.
+- **Timing proofs** ("the combo resets after 1 s", "x3 appears on the third hit"): add
+  temporary `console.info('[combo] x3')` markers in the script, note the current epoch ms
+  before the input, run it, then `read_logs` with `since` set to that value — every console line
+  the game prints arrives with its own epoch-ms `timestamp`, so the gaps between markers are the
+  timing. **Remove the markers afterwards** and run `pix3 check` again.
+- **Movement below ~0.5 units reads as `moved: false`**, and a shake that returns to rest
+  inside the window has no endpoint delta at all — a small camera shake is not provable from
+  `moved`. Take a `viewport_screenshot` mid-shake or log the offset with a marker.
+- **Sound**: synthetic input is not a user gesture, so the browser may keep Web Audio
+  suspended; nothing in the answers says whether a sound was heard. Report it as "code path
+  verified, audibility not".
+- **Latency** (measured in trials): observing calls take about 1 s; a barrier call takes the
+  game's startup plus 1–2 s — a small 2D game a few seconds, a heavy 3D game 13–14 s
+  (`startupMs` says which). Batch several input steps into one `game_input` rather than many
+  calls.
 
 The contract, as the CLI documents it:
 
@@ -122,10 +195,11 @@ A file that passes `check` loads and compiles. It is not a game that works. End 
 with:
 
 - what you changed (files), and whether `pix3 check` was green;
-- whether you ran it (`game_run` result) — or **what the human should do to see it**: "press
-  Play in `scenes/main.pix3scene`, tap the gold stars — the combo label top-right should count
-  x2, x3";
-- what you could not verify (behaviour, feel, anything timing-dependent);
+- whether you ran it (the barrier answer, and which pattern: `game_run` predicates or
+  `game_input` + observed text / log markers) — or **what the human should do to see it**:
+  "press Play in `scenes/main.pix3scene`, tap the gold stars — the combo label top-right should
+  count x2, x3";
+- what you could not verify (feel, audibility, small shakes, anything the channel cannot see);
 - placeholders you left.
 
 If the human reports an error from the editor, ask for the exact text (the editor's console
