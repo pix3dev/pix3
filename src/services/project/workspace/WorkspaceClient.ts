@@ -59,6 +59,8 @@ export class WorkspaceClient {
   private manifest: WorkspaceManifest | null = null;
   private manifestEntries = new Map<string, WorkspaceManifestEntry>();
   private manifestRequest: Promise<WorkspaceManifest> | null = null;
+  /** Bumped whenever the caches are dropped (reset, another endpoint). */
+  private cacheEpoch = 0;
 
   constructor(fetchImpl?: FetchLike) {
     this.fetchImpl = fetchImpl ?? ((input, init) => fetch(input, init));
@@ -119,17 +121,26 @@ export class WorkspaceClient {
     if (this.manifestRequest) {
       return this.manifestRequest;
     }
-    this.manifestRequest = (async () => {
+    // A reset or a reconfigure to another server (a workspace switch) while this request is out
+    // makes its answer the PREVIOUS workspace's: it must neither become the cached manifest nor
+    // clear the next workspace's in-flight request.
+    const epoch = this.cacheEpoch;
+    const request = (async () => {
       const response = await this.request({ method: 'GET', route: '/ws/manifest' });
       const manifest = (await response.json()) as WorkspaceManifest;
-      this.manifest = manifest;
-      this.manifestEntries = new Map(manifest.files.map(entry => [entry.path, entry]));
+      if (this.cacheEpoch === epoch) {
+        this.manifest = manifest;
+        this.manifestEntries = new Map(manifest.files.map(entry => [entry.path, entry]));
+      }
       return manifest;
     })();
+    this.manifestRequest = request;
     try {
-      return await this.manifestRequest;
+      return await request;
     } finally {
-      this.manifestRequest = null;
+      if (this.cacheEpoch === epoch) {
+        this.manifestRequest = null;
+      }
     }
   }
 
@@ -415,6 +426,7 @@ export class WorkspaceClient {
   // --- Cache bookkeeping ----------------------------------------------------------------------
 
   private clearCaches(): void {
+    this.cacheEpoch++;
     this.knownHashes.clear();
     this.bodyCache.clear();
     this.manifest = null;

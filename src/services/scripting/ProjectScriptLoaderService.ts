@@ -89,6 +89,34 @@ export class ProjectScriptLoaderService {
   /** Why the last build failed (null after a successful one) — the sync barrier reports it. */
   private lastBuildError: { file: string | null; line?: number; message: string } | null = null;
 
+  /**
+   * Bumped by every build that starts (and by the watchdog when it gives up on one). A build only
+   * publishes its outcome — status, registered classes, error — while its generation is current,
+   * so a build overtaken by a newer one (or abandoned as hung) cannot overwrite the newer result.
+   */
+  private buildGeneration = 0;
+
+  /** The build chain running now; builds never overlap, a request during one queues a rerun. */
+  private inflightBuild: Promise<void> | null = null;
+
+  /** A build was requested while one was running: run once more when it finishes. */
+  private rerunRequested = false;
+
+  /**
+   * A build was requested while the project's storage could not serve it (a `pix3 serve` workspace
+   * that is connecting, reconnecting or gone). It runs as soon as the workspace is connected.
+   */
+  private waitingForStorage = false;
+
+  /**
+   * Upper bound of one build. A build that neither finishes nor fails (a request into a dead
+   * tunnel, a wedged compiler) must not leave `scriptsStatus` at `loading` forever: every caller
+   * of {@link ensureReady} — scene loads, `compile_scripts`, the agent's sync barrier — would
+   * inherit the hang. On timeout the build is abandoned (its late result is ignored) and reported
+   * as an error; the next trigger builds again.
+   */
+  buildTimeoutMs = 60_000;
+
   // Enable auto-compilation
   enableAutoCompilation = true;
 
@@ -101,6 +129,7 @@ export class ProjectScriptLoaderService {
 
     let lastStatus = appState.project.status;
     let lastProjectId = appState.project.id;
+    let lastWorkspaceStatus = appState.project.workspace.status;
 
     // Watch for project status changes to trigger initial compilation. The project ID is watched
     // too: creating or opening a project while another one is already open flips the id WITHOUT
@@ -108,16 +137,33 @@ export class ProjectScriptLoaderService {
     // ran with the previous project's classes still registered (seen in Flow, where a prompt
     // builds a project on top of the open one: its scenes loaded with every `user:*` component
     // missing from the registry).
+    //
+    // A `pix3 serve` workspace adds one more trigger: the connection coming (back) up. A build
+    // requested while it was down was deferred (see `canReadProjectStorage`), and a build that
+    // failed may have failed only because it was down — both run again once it is connected.
     this.disposeSubscription = subscribe(appState.project, () => {
       const currentStatus = appState.project.status;
       const currentProjectId = appState.project.id;
+      const workspaceStatus = appState.project.workspace.status;
       const becameReady = currentStatus === 'ready' && lastStatus !== 'ready';
       const switchedProject = currentStatus === 'ready' && currentProjectId !== lastProjectId;
-      if ((becameReady || switchedProject) && this.enableAutoCompilation) {
+      const workspaceConnected =
+        currentStatus === 'ready' &&
+        appState.project.backend === 'workspace' &&
+        workspaceStatus === 'connected' &&
+        lastWorkspaceStatus !== 'connected' &&
+        (this.waitingForStorage || appState.project.scriptsStatus === 'error');
+      if (currentProjectId !== lastProjectId) {
+        // A build still running for the previous project must not publish into this one (nor
+        // register its classes here): retire it. The switch's own build queues behind it.
+        this.buildGeneration++;
+      }
+      if ((becameReady || switchedProject || workspaceConnected) && this.enableAutoCompilation) {
         void this.syncAndBuild();
       }
       lastStatus = currentStatus;
       lastProjectId = currentProjectId;
+      lastWorkspaceStatus = workspaceStatus;
     });
   }
 
@@ -138,17 +184,107 @@ export class ProjectScriptLoaderService {
     }
 
     this.pendingBuildWhileHidden = false;
+
+    if (!this.canReadProjectStorage()) {
+      // Listing a workspace whose connection is down throws "No workspace is connected" (or talks
+      // to the wrong server mid-switch). Defer to the reconnect instead; a caller that waits on the
+      // result gets an answer now rather than a `loading` that nothing will ever finish.
+      this.waitingForStorage = true;
+      if (options?.force) {
+        this.publishStorageUnavailable();
+      }
+      return;
+    }
+    this.waitingForStorage = false;
     appState.project.scriptsStatus = 'loading';
 
     // Clear existing debounce timer
     if (this.debounceTimer !== null) {
       window.clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+
+    if (options?.force) {
+      // A caller that waits on the build is not an editing burst: build now. Debouncing it also let
+      // a series of waiting callers (the sync barrier, compile_scripts) push the timer forward
+      // indefinitely — and a background tab throttles that timer to once a minute.
+      await this.runBuild();
+      return;
     }
 
     // Debounce the build
     this.debounceTimer = window.setTimeout(() => {
-      void this.performSyncAndBuild();
+      this.debounceTimer = null;
+      void this.runBuild();
     }, this.debounceMs);
+  }
+
+  /**
+   * Run a build, never two at once. A request while one runs makes that chain build once more
+   * (the files it read may already be outdated) and resolves when the rerun is done.
+   */
+  private runBuild(): Promise<void> {
+    if (this.inflightBuild) {
+      this.rerunRequested = true;
+      return this.inflightBuild;
+    }
+    const chain = (async () => {
+      try {
+        do {
+          this.rerunRequested = false;
+          await this.performSyncAndBuildWithTimeout();
+        } while (this.rerunRequested);
+      } finally {
+        this.inflightBuild = null;
+      }
+    })();
+    this.inflightBuild = chain;
+    return chain;
+  }
+
+  private async performSyncAndBuildWithTimeout(): Promise<void> {
+    const build = this.performSyncAndBuild();
+    let timer: number | null = null;
+    const timedOut = new Promise<'timeout'>(resolve => {
+      timer = window.setTimeout(() => resolve('timeout'), this.buildTimeoutMs);
+    });
+    try {
+      const outcome = await Promise.race([build.then(() => 'done' as const), timedOut]);
+      if (outcome === 'timeout') {
+        // Abandon it: bumping the generation makes whatever it eventually produces a no-op.
+        this.buildGeneration++;
+        const message = `Script build did not finish within ${Math.round(this.buildTimeoutMs / 1000)} s and was abandoned; it runs again on the next change or compile.`;
+        this.lastBuildError = { file: null, message };
+        appState.project.errorMessage = message;
+        appState.project.scriptsStatus = 'error';
+        this.logger.error(message);
+        // The abandoned build still settles some day; nothing may await it.
+        build.catch(() => undefined);
+      }
+    } finally {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+      }
+    }
+  }
+
+  /**
+   * Whether the project's files can be listed right now. Only a `pix3 serve` workspace can be open
+   * without being readable: between `connect()` of a new workspace and the project switch, while
+   * the socket reconnects, or after the server went away.
+   */
+  private canReadProjectStorage(): boolean {
+    return (
+      appState.project.backend !== 'workspace' || appState.project.workspace.status === 'connected'
+    );
+  }
+
+  private publishStorageUnavailable(): void {
+    const message =
+      'The workspace server is not connected; project scripts build again once it reconnects.';
+    this.lastBuiltProjectId = appState.project.id;
+    this.lastBuildError = { file: null, message };
+    appState.project.scriptsStatus = 'error';
   }
 
   /**
@@ -181,8 +317,21 @@ export class ProjectScriptLoaderService {
       return;
     }
 
-    if (isStale || appState.project.scriptsStatus === 'idle' || this.pendingBuildWhileHidden) {
-      await this.syncAndBuild({ force: true });
+    // A `loading` with no build running or scheduled is orphaned (e.g. a deferred build whose
+    // storage never came back): waiting on it would only ever end in the timeout below.
+    const orphanedLoading =
+      appState.project.scriptsStatus === 'loading' &&
+      this.inflightBuild === null &&
+      this.debounceTimer === null;
+
+    if (
+      isStale ||
+      orphanedLoading ||
+      appState.project.scriptsStatus === 'idle' ||
+      this.pendingBuildWhileHidden
+    ) {
+      // Not awaited: the build is bounded by its own watchdog, this wait by the 15 s below.
+      void this.syncAndBuild({ force: true });
     }
 
     await new Promise<void>(resolve => {
@@ -214,17 +363,55 @@ export class ProjectScriptLoaderService {
   }
 
   /**
-   * Perform the actual sync and build workflow
+   * Perform the actual sync and build workflow.
+   *
+   * Every exit publishes a final `scriptsStatus` (`ready` or `error`) — including a thrown storage
+   * error — unless the build was overtaken (see {@link buildGeneration}) or a rerun is queued, in
+   * which case the newer build publishes. Nothing here may leave `loading` behind.
    */
   private async performSyncAndBuild(): Promise<void> {
+    const generation = ++this.buildGeneration;
+    /** Still the newest build: allowed to touch the registry. */
+    const isCurrent = (): boolean => generation === this.buildGeneration;
+    /** Allowed to publish a final status (a queued rerun publishes instead). */
+    const mayPublish = (): boolean => isCurrent() && !this.rerunRequested;
+    const publish = (
+      status: 'ready' | 'error',
+      options: { errorMessage?: string | null; refreshSignal?: boolean } = {}
+    ): void => {
+      if (!mayPublish()) {
+        return;
+      }
+      if (options.errorMessage !== undefined) {
+        appState.project.errorMessage = options.errorMessage;
+      }
+      if (options.refreshSignal) {
+        appState.project.scriptRefreshSignal++;
+      }
+      appState.project.scriptsStatus = status;
+    };
+
     try {
       appState.project.scriptsStatus = 'loading';
       this.lastBuiltProjectId = appState.project.id;
       this.lastBuildError = null;
+
+      // The debounce may fire after the workspace connection dropped (or mid-switch).
+      if (!this.canReadProjectStorage()) {
+        this.waitingForStorage = true;
+        if (mayPublish()) {
+          this.publishStorageUnavailable();
+        }
+        return;
+      }
+
       this.logger.info('Compiling project scripts...');
 
       // Step 1: List all .ts files in supported script directories
       const { sourceFiles, checkedDirectories } = await this.collectScriptFiles();
+      if (!isCurrent()) {
+        return;
+      }
 
       if (sourceFiles.length === 0) {
         this.logger.info(
@@ -232,8 +419,7 @@ export class ProjectScriptLoaderService {
         );
         this.lastCollectedFiles = new Map();
         this.clearRegisteredScripts();
-        appState.project.errorMessage = null;
-        appState.project.scriptsStatus = 'ready';
+        publish('ready', { errorMessage: null });
         return;
       }
 
@@ -274,11 +460,14 @@ export class ProjectScriptLoaderService {
           this.logger.error(`Failed to read ${file.path}`, error);
         }
       }
+      if (!isCurrent()) {
+        return;
+      }
 
       if (filesMap.size === 0) {
         this.logger.warn('No script files could be read');
         this.lastCollectedFiles = new Map();
-        appState.project.scriptsStatus = 'ready'; // Treat as ready but empty
+        publish('ready'); // Treat as ready but empty
         return;
       }
 
@@ -291,8 +480,7 @@ export class ProjectScriptLoaderService {
       if (entryFiles.length === 0) {
         this.logger.info('No project Script components found to register');
         this.clearRegisteredScripts();
-        appState.project.errorMessage = null;
-        appState.project.scriptsStatus = 'ready';
+        publish('ready', { errorMessage: null });
         return;
       }
 
@@ -305,6 +493,9 @@ export class ProjectScriptLoaderService {
           async (filePath, context) => this.loadBundledDependency(filePath, context)
         );
       } catch (error) {
+        if (!isCurrent()) {
+          return;
+        }
         const compilation = error as CompilationError;
         this.lastBuildError = {
           file: compilation.file ?? null,
@@ -312,8 +503,10 @@ export class ProjectScriptLoaderService {
           message: compilation.message ?? String(error),
         };
         const userError = this.handleCompilationError(compilation, checkedDirectories);
-        appState.project.errorMessage = userError;
-        appState.project.scriptsStatus = 'error';
+        publish('error', { errorMessage: userError });
+        return;
+      }
+      if (!isCurrent()) {
         return;
       }
 
@@ -328,16 +521,20 @@ export class ProjectScriptLoaderService {
       this.attachPendingSceneComponents();
 
       // Notify UI that scripts have been updated
-      appState.project.scriptRefreshSignal++;
-      appState.project.scriptsStatus = 'ready';
+      publish('ready', { refreshSignal: true });
 
       this.logger.info(`✓ Scripts compiled and loaded successfully`);
     } catch (error) {
-      appState.project.scriptsStatus = 'error';
+      if (!isCurrent()) {
+        return;
+      }
       this.lastBuildError = {
         file: null,
         message: error instanceof Error ? error.message : String(error),
       };
+      // Always settle, even when a rerun is queued: the rerun overwrites it, and a waiter must not
+      // be left on `loading` if that rerun is itself deferred.
+      appState.project.scriptsStatus = 'error';
       this.logger.error('Failed to compile scripts', error);
     }
   }
