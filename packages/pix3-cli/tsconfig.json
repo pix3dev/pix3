@@ -1,0 +1,33 @@
+{
+  // Type-checks sources AND specs. Specs run under the root vitest config
+  // (`// @vitest-environment node`), so `vitest` resolves from the root install.
+  //
+  // Bundler resolution + DOM lib because `src/validate/**` type-checks against `@pix3/runtime`,
+  // which ships TypeScript sources written for bundler resolution (extensionless relative imports,
+  // DOM types, parameter properties). Those files are never run by Node's type stripping: they are
+  // bundled by esbuild (`src/validate/bundle.ts`). The guarantees Node's type stripping needs for
+  // everything else — erasable syntax only — are enforced by `tsconfig.build.json`, which compiles
+  // every file `node src/index.ts` can load and excludes `src/validate/**` (bar its entry).
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "preserve",
+    "moduleResolution": "bundler",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    // The runtime, from source — the same path esbuild resolves when bundling `validate`, and the
+    // one the root vitest config aliases for the specs.
+    "paths": {
+      "@pix3/runtime": ["../pix3-runtime/src/index.ts"],
+      "@pix3/runtime/node": ["../pix3-runtime/src/node/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

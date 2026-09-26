@@ -41,7 +41,8 @@ import type { SceneNodeDefinition, InstanceOverrides } from './SceneLoader';
 import { getNodePropertySchema } from '../fw/property-schema-utils';
 import { collectComponentDefinitions } from './component-hydration';
 
-interface SceneDocument {
+/** The plain document `serializeScene` stringifies (see {@link SceneSaver.serializeSceneDocument}). */
+export interface SavedSceneDocument {
   version: string;
   description?: string;
   metadata?: Record<string, unknown>;
@@ -60,19 +61,28 @@ export class SceneSaver {
   constructor() {}
 
   /**
-   * Serialize a scene graph back to YAML format for saving.
+   * The plain document `serializeScene` writes, before YAML stringification — the same keys and
+   * values, as objects. For hosts that compare scene states (the editor's protected-set recorder
+   * diffs it before/after each operation) without paying for a YAML round trip.
    */
-  serializeScene(graph: SceneGraph): string {
+  serializeSceneDocument(graph: SceneGraph): SavedSceneDocument {
     const rootDefinitions: SceneNodeDefinition[] = graph.rootNodes.map(node =>
       this.serializeNode(node)
     );
 
-    const document: SceneDocument = {
+    return {
       version: graph.version ?? '1.0.0',
       description: graph.description,
       metadata: graph.metadata,
       root: rootDefinitions,
     };
+  }
+
+  /**
+   * Serialize a scene graph back to YAML format for saving.
+   */
+  serializeScene(graph: SceneGraph): string {
+    const document = this.serializeSceneDocument(graph);
 
     // Custom YAML stringification to keep vectors as inline arrays
     let yaml = stringify(document, { indent: 2 });

@@ -23,7 +23,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
   - Shadow DOM: `import styles from './component.ts.css?raw';` + `static styles = css`${unsafeCSS(styles)}`;`
 - **Accent Color**: Use CSS variables `--pix3-accent-color` (#ffcf33) and `--pix3-accent-rgb`.
 - **Icons**: Use **vector icons via `IconService`** (`@inject(IconService)` → `getIcon(name, IconSize.*)`), never emoji or Unicode symbol glyphs (📎🔑✕✓📄↻●⏸). Register a custom SVG in `IconService` if the icon isn't in Feather. Emoji belong only in user-authored content, never in UI chrome.
-- **Emoji are never artwork**, in editor chrome or in a generated game. A `label`/`text` that is **nothing but emoji** is a sprite substitute: platform-dependent glyph, no recolour, no atlas, no animation, hollow box where the font lacks it. `src/services/agent/emoji-as-art.ts` refuses it on `set_property`, `create_node`, `set_component_property` and every `.pix3scene` write. Use `ColorRect2D` for a placeholder and `generate_asset` + `Sprite2D` for real art. An emoji inside a sentence is ordinary text and is allowed.
+- **Emoji are never artwork**, in editor chrome or in a generated game. A `label`/`text` that is **nothing but emoji** is a sprite substitute: platform-dependent glyph, no recolour, no atlas, no animation, hollow box where the font lacks it. `src/services/agent/emoji-as-art.ts` refuses it on `set_property`, `create_node`, `set_component_property` and every `.pix3scene` write; the detection itself is `packages/pix3-runtime/src/core/emoji-as-art.ts`, shared with `pix3 validate` (`E_EMOJI_AS_ART`). Use `ColorRect2D` for a placeholder and `generate_asset` + `Sprite2D` for real art. An emoji inside a sentence is ordinary text and is allowed.
 
 ### Dependency Injection
 

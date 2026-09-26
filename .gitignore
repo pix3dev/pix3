@@ -48,3 +48,6 @@ repomix-output.xml
 # e.g. `@txt2sfx/*` before it was published to npm). Never commit the copied dist.
 .yalc/
 yalc.lock
+
+# @pix3/cli: build-time copy of src/templates/projects (see packages/pix3-cli/scripts/copy-templates.mjs)
+packages/pix3-cli/templates/

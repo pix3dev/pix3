@@ -15,12 +15,12 @@
     "dev:collab:server": "npm run dev -w packages/pix3-collab-server",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src packages/pix3-runtime/src packages/pix3-collab-server/src --ext .ts,.js",
-    "lint:fix": "eslint src packages/pix3-runtime/src packages/pix3-collab-server/src --ext .ts,.js --fix",
+    "lint": "eslint src packages/pix3-runtime/src packages/pix3-collab-server/src packages/pix3-cli/src --ext .ts,.js",
+    "lint:fix": "eslint src packages/pix3-runtime/src packages/pix3-collab-server/src packages/pix3-cli/src --ext .ts,.js --fix",
     "format": "prettier --write src/**/*.{ts,css}",
     "format:check": "prettier --check src/**/*.{ts,css}",
     "test": "vitest run",
-    "type-check": "tsc --noEmit && tsc --noEmit -p packages/pix3-collab-server",
+    "type-check": "tsc --noEmit && tsc --noEmit -p packages/pix3-collab-server && tsc --noEmit -p packages/pix3-cli && tsc --noEmit -p packages/pix3-cli/tsconfig.build.json",
     "knip": "knip",
     "postinstall": "node -e \"require('fs').copyFileSync('node_modules/esbuild-wasm/esbuild.wasm', 'public/esbuild.wasm')\"",
     "licenses:report": "node scripts/licenses-report.mjs"
@@ -77,7 +77,8 @@
   },
   "overrides": {},
   "workspaces": [
-    "packages/pix3-collab-server"
+    "packages/pix3-collab-server",
+    "packages/pix3-cli"
   ],
   "license": "Apache-2.0"
 }

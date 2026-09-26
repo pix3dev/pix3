@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  // Specs are type-checked by `tsconfig.json` but never shipped. `src/validate/**` is bundled by
+  // esbuild instead (it pulls in `@pix3/runtime` from source); only its Node-runnable entry
+  // (`validate/entry.ts`, reached from `index.ts`) is compiled here.
+  "exclude": ["src/**/*.spec.ts", "src/validate/**"],
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    // Everything compiled here must also run as-is under `node src/index.ts` (Node 24 type
+    // stripping), which rejects enums, namespaces and parameter properties.
+    "erasableSyntaxOnly": true,
+    // Sources import with explicit `.ts` extensions (so `node src/index.ts` runs them as-is on
+    // Node 24); the emit rewrites them to `.js`. Node refuses to strip types under node_modules,
+    // which is why the published bin is compiled JS rather than the sources.
+    "rewriteRelativeImportExtensions": true,
+    "sourceMap": false,
+    "declaration": false
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "name": "@pix3/cli",
+  "version": "1.6.0",
+  "description": "Pix3 command line: create a project from a recipe, and link your own coding agent (Claude Code, Codex, ...) to an open Pix3 editor window over a loopback MCP channel.",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/pix3dev/pix3.git",
+    "directory": "packages/pix3-cli"
+  },
+  "bin": {
+    "pix3": "dist/index.js"
+  },
+  "main": "dist/index.js",
+  "files": [
+    "dist",
+    "templates"
+  ],
+  "engines": {
+    "node": ">=24.15.0 <25"
+  },
+  "scripts": {
+    "start": "node src/index.ts",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-validate.mjs",
+    "copy-templates": "node scripts/copy-templates.mjs",
+    "prepack": "npm run copy-templates && npm run build",
+    "postpack": "node scripts/copy-templates.mjs --clean",
+    "type-check": "tsc --noEmit && tsc --noEmit -p tsconfig.build.json"
+  },
+  "keywords": [
+    "pix3",
+    "cli",
+    "mcp",
+    "game-engine",
+    "agent"
+  ],
+  "license": "Apache-2.0",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ws": "^8.18.0",
+    "yaml": "^2.6.0"
+  },
+  "optionalDependencies": {
+    "esbuild": "^0.27.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.5.2",
+    "@types/ws": "^8.18.1",
+    "typescript": "~5.8.3"
+  }
+}

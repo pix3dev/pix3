@@ -21,6 +21,8 @@ export default defineConfig({
       'packages/pix3-runtime/src/**/*.spec.ts',
       // Server specs opt out of happy-dom per file via `// @vitest-environment node`.
       'packages/pix3-collab-server/src/**/*.spec.ts',
+      // CLI specs are Node too (`// @vitest-environment node`).
+      'packages/pix3-cli/src/**/*.spec.ts',
     ],
     // The default 'forks' pool reports "No test suite found" for every spec on
     // win32-arm64 (vitest 4.x); the threads pool runs them fine everywhere.
