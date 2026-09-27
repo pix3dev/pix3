@@ -196,7 +196,7 @@ jobs:
           ln -sfn "${APP_DIR}" "${DEPLOY_ROOT}/current"
 
           sudo systemctl restart pix3-collab-server
-          sudo systemctl --no-pager --full status pix3-collab-server | head -n 20
+          systemctl --no-pager --full status pix3-collab-server | head -n 20
 
           ls -1dt "${DEPLOY_ROOT}"/releases/* | tail -n +6 | xargs -r rm -rf
           EOF
