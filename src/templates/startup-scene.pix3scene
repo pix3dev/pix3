@@ -82,8 +82,8 @@ root:
             name: Logo Sprite
             properties:
               texture: { type: 'texture', url: 'templ://pix3-logo.png' }
-              width: 64
-              height: 64
+              width: 121
+              height: 48
               transform:
                 position: [0, 0]
                 scale: [1, 1]

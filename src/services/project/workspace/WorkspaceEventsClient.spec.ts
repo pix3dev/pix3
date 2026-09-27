@@ -1,0 +1,699 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import {
+  WorkspaceEventsClient,
+  sessionLeaseStore,
+  type StoredWorkspaceLease,
+  type WorkspaceEventsHandlers,
+  type WorkspaceLeaseStore,
+  type WorkspaceSocketLike,
+} from '@/services/project/workspace/WorkspaceEventsClient';
+import type { WorkspaceHelloFrame } from '@/services/project/workspace/workspace-protocol';
+import { setTickWorkerFactory } from '@/services/core/background-ticker';
+import { FakeTickWorker, setVisibility } from '@/services/core/background-ticker.test-helpers';
+import { setEditorKeepAlive } from '@/services/core/page-activity';
+
+class FakeSocket implements WorkspaceSocketLike {
+  readyState = 0;
+  onopen: ((event: Event) => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onclose: ((event: CloseEvent) => void) | null = null;
+  onerror: ((event: Event) => void) | null = null;
+  readonly sent: Array<Record<string, unknown>> = [];
+  closed = false;
+
+  constructor(readonly url: string) {}
+
+  send(data: string): void {
+    this.sent.push(JSON.parse(data) as Record<string, unknown>);
+  }
+
+  close(): void {
+    this.closed = true;
+    this.readyState = 3;
+  }
+
+  // --- server side ---
+  open(): void {
+    this.readyState = 1;
+    this.onopen?.(new Event('open'));
+  }
+
+  receive(frame: Record<string, unknown>): void {
+    this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(frame) }));
+  }
+
+  drop(code = 1006, reason = ''): void {
+    this.readyState = 3;
+    this.onclose?.({ code, reason } as CloseEvent);
+  }
+}
+
+const hello = (overrides: Partial<WorkspaceHelloFrame> = {}): Record<string, unknown> => ({
+  type: 'hello',
+  workspaceId: 'ws-1',
+  serverSession: 'session-1',
+  protocol: 1,
+  cliVersion: '1.6.0',
+  revision: 'rev-1',
+  seq: 0,
+  root: '/srv/game',
+  projectId: null,
+  projectName: 'Game',
+  lease: 'free',
+  ...overrides,
+});
+
+describe('WorkspaceEventsClient', () => {
+  let sockets: FakeSocket[];
+  let client: WorkspaceEventsClient;
+
+  const makeClient = (leaseStore?: WorkspaceLeaseStore): WorkspaceEventsClient =>
+    new WorkspaceEventsClient({
+      createSocket: url => {
+        const socket = new FakeSocket(url);
+        sockets.push(socket);
+        return socket;
+      },
+      backoffMs: [100, 200],
+      ...(leaseStore ? { leaseStore } : {}),
+    });
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    sessionStorage.clear();
+    sockets = [];
+    client = makeClient();
+  });
+
+  afterEach(() => {
+    client.close();
+    vi.useRealTimers();
+  });
+
+  const connect = (handlers: WorkspaceEventsHandlers = {}): FakeSocket => {
+    client.connect('http://localhost:8490', 'p3ws_secret', handlers);
+    const socket = sockets[sockets.length - 1];
+    socket.open();
+    return socket;
+  };
+
+  it('connects to /ws/events without the token in the URL and sends auth first', () => {
+    const socket = connect();
+
+    expect(socket.url).toBe('ws://localhost:8490/ws/events');
+    expect(socket.url).not.toContain('p3ws_secret');
+    expect(socket.sent[0]).toEqual({ type: 'auth', token: 'p3ws_secret' });
+  });
+
+  it('reports hello, then asks for the lease', () => {
+    const onHello = vi.fn();
+    const socket = connect({ onHello });
+
+    socket.receive(hello());
+
+    expect(onHello).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: 'ws-1' }), {
+      reconnected: false,
+    });
+    expect(socket.sent[1]).toEqual({ type: 'lease', action: 'acquire' });
+  });
+
+  it('dispatches change batches and answers pings', () => {
+    const onChange = vi.fn();
+    const socket = connect({ onChange });
+    socket.receive(hello());
+
+    const frame = {
+      type: 'change',
+      seq: 3,
+      revision: 'rev-2',
+      events: [{ op: 'modify', path: 'scenes/main.pix3scene', kind: 'file', sha256: 'abc' }],
+    };
+    socket.receive(frame);
+    socket.receive({ type: 'ping' });
+
+    expect(onChange).toHaveBeenCalledWith(frame);
+    expect(socket.sent.at(-1)).toEqual({ type: 'pong' });
+    expect(client.getLastRevision()).toBe('rev-2');
+  });
+
+  it('reconnects with backoff, resumes the lease and asks for a re-scan', () => {
+    const onRescanNeeded = vi.fn();
+    const onConnectionState = vi.fn();
+    const first = connect({ onRescanNeeded, onConnectionState });
+    first.receive(hello());
+    first.receive({ type: 'lease', state: 'granted', leaseId: 'lease-7', resumed: false });
+
+    first.drop(1006);
+    expect(onConnectionState).toHaveBeenLastCalledWith('reconnecting');
+    expect(sockets).toHaveLength(1);
+
+    vi.advanceTimersByTime(100);
+    expect(sockets).toHaveLength(2);
+    const second = sockets[1];
+    second.open();
+    expect(second.sent[0]).toEqual({ type: 'auth', token: 'p3ws_secret' });
+
+    second.receive(hello({ revision: 'rev-9' }));
+
+    expect(onRescanNeeded).toHaveBeenCalledTimes(1);
+    expect(second.sent[1]).toEqual({ type: 'lease', action: 'acquire', leaseId: 'lease-7' });
+  });
+
+  it('reports a busy lease and sends takeover on request', () => {
+    const onLease = vi.fn();
+    const socket = connect({ onLease });
+    socket.receive(hello());
+    socket.receive({ type: 'lease', state: 'busy', inGrace: true });
+
+    expect(onLease).toHaveBeenCalledWith({ type: 'lease', state: 'busy', inGrace: true });
+
+    client.takeOverLease();
+    expect(socket.sent.at(-1)).toEqual({ type: 'lease', action: 'takeover' });
+  });
+
+  it('does not reconnect after an auth failure (4401)', () => {
+    const onConnectionState = vi.fn();
+    const socket = connect({ onConnectionState });
+
+    socket.drop(4401, 'unauthorized');
+    vi.advanceTimersByTime(10_000);
+
+    expect(sockets).toHaveLength(1);
+    expect(onConnectionState).toHaveBeenLastCalledWith(
+      'closed',
+      expect.objectContaining({ code: 'unauthorized' })
+    );
+  });
+
+  it('hands MCP calls to onCall and answers with its result while holding the lease', async () => {
+    let finish: (value: { content: Array<{ type: 'text'; text: string }> }) => void = () => {};
+    const onCall = vi.fn(
+      () =>
+        new Promise<{ content: Array<{ type: 'text'; text: string }> }>(resolve => {
+          finish = resolve;
+        })
+    );
+    const socket = connect({ onCall });
+    socket.receive(hello());
+    socket.receive({ type: 'lease', state: 'granted', leaseId: 'L1', resumed: false });
+    socket.receive({
+      type: 'call',
+      id: 'c2',
+      name: 'play_status',
+      input: {},
+      agent: { name: 'claude-code', session: 's', verified: false },
+    });
+    expect(onCall).toHaveBeenCalledWith(expect.objectContaining({ id: 'c2', name: 'play_status' }));
+    expect(socket.sent.some(frame => frame.type === 'call-result')).toBe(false);
+    finish({ content: [{ type: 'text', text: '{"isPlaying":false}' }] });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(socket.sent.at(-1)).toEqual({
+      type: 'call-result',
+      id: 'c2',
+      result: { content: [{ type: 'text', text: '{"isPlaying":false}' }] },
+    });
+  });
+
+  it('drops the answer of a call when the lease was lost meanwhile', async () => {
+    let finish: (value: { content: Array<{ type: 'text'; text: string }> }) => void = () => {};
+    const socket = connect({
+      onCall: () =>
+        new Promise(resolve => {
+          finish = resolve;
+        }),
+    });
+    socket.receive(hello());
+    socket.receive({ type: 'lease', state: 'granted', leaseId: 'L1', resumed: false });
+    socket.receive({ type: 'call', id: 'c3', name: 'play_status', input: {} });
+    socket.receive({ type: 'lease', state: 'lost', reason: 'taken_over', leaseId: 'L1' });
+    finish({ content: [{ type: 'text', text: 'late' }] });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(socket.sent.some(frame => frame.type === 'call-result')).toBe(false);
+  });
+
+  it('answers MCP calls with an isError "not implemented" result', () => {
+    const socket = connect();
+    socket.receive(hello());
+    socket.receive({ type: 'call', id: 'c1', name: 'get_scene', input: {} });
+
+    expect(socket.sent.at(-1)).toMatchObject({
+      type: 'call-result',
+      id: 'c1',
+      result: { isError: true },
+    });
+  });
+
+  it('releases the lease when closed on purpose and stays closed', () => {
+    const socket = connect();
+    socket.receive(hello());
+    socket.receive({ type: 'lease', state: 'granted', leaseId: 'l', resumed: false });
+
+    client.close();
+    vi.advanceTimersByTime(10_000);
+
+    expect(socket.sent.at(-1)).toEqual({ type: 'lease', action: 'release' });
+    expect(socket.closed).toBe(true);
+    expect(sockets).toHaveLength(1);
+  });
+
+  describe('lease across a tab reload', () => {
+    const memoryStore = (): WorkspaceLeaseStore & { map: Map<string, StoredWorkspaceLease> } => {
+      const map = new Map<string, StoredWorkspaceLease>();
+      return {
+        map,
+        get: id => map.get(id) ?? null,
+        set: (id, lease) => void map.set(id, lease),
+        clear: id => void map.delete(id),
+      };
+    };
+
+    it('persists the granted leaseId per workspace in sessionStorage and sends it after a reload', () => {
+      const socket = connect();
+      socket.receive(hello());
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'lease-7', resumed: false });
+      expect(sessionLeaseStore.get('ws-1')).toMatchObject({
+        leaseId: 'lease-7',
+        serverSession: 'session-1',
+      });
+
+      // F5: the page (and this client) is gone without a close(); a new one starts from scratch.
+      window.dispatchEvent(new Event('pagehide'));
+      expect(sessionLeaseStore.get('ws-1')?.unloaded).toBe(true);
+      const reloaded = makeClient();
+      reloaded.connect('http://localhost:8490', 'p3ws_secret', {});
+      const next = sockets.at(-1)!;
+      next.open();
+      next.receive(hello());
+      expect(next.sent[1]).toEqual({ type: 'lease', action: 'acquire', leaseId: 'lease-7' });
+      next.receive({ type: 'lease', state: 'granted', leaseId: 'lease-7', resumed: true });
+      expect(reloaded.getLeaseId()).toBe('lease-7');
+      reloaded.close();
+    });
+
+    it('ignores a stored lease of another server run, and of another workspace', () => {
+      const store = memoryStore();
+      store.set('ws-1', { leaseId: 'old', serverSession: 'session-0' });
+      store.set('ws-2', { leaseId: 'other-ws', serverSession: 'session-1' });
+      client = makeClient(store);
+      const socket = connect();
+      socket.receive(hello());
+      expect(socket.sent[1]).toEqual({ type: 'lease', action: 'acquire' });
+      expect(store.map.has('ws-1')).toBe(false);
+      expect(store.map.get('ws-2')?.leaseId).toBe('other-ws');
+    });
+
+    it('forgets the stored lease on lost, released and a deliberate close', () => {
+      const store = memoryStore();
+      client = makeClient(store);
+      const socket = connect();
+      socket.receive(hello());
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'a', resumed: false });
+      socket.receive({ type: 'lease', state: 'lost', reason: 'taken_over', leaseId: 'a' });
+      expect(store.map.has('ws-1')).toBe(false);
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'b', resumed: false });
+      socket.receive({ type: 'lease', state: 'released' });
+      expect(store.map.has('ws-1')).toBe(false);
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'c', resumed: false });
+      expect(store.map.get('ws-1')?.leaseId).toBe('c');
+      client.close();
+      expect(store.map.has('ws-1')).toBe(false);
+    });
+
+    it('retries acquire after busy-in-grace (grace from hello) until granted', () => {
+      const onLease = vi.fn();
+      const socket = connect({ onLease });
+      socket.receive(hello({ leaseGraceMs: 10_000 }));
+      socket.receive({ type: 'lease', state: 'busy', inGrace: true });
+      const acquires = (): number =>
+        socket.sent.filter(frame => frame.type === 'lease' && frame.action === 'acquire').length;
+      expect(acquires()).toBe(1);
+
+      vi.advanceTimersByTime(10_499);
+      expect(acquires()).toBe(1);
+      vi.advanceTimersByTime(1);
+      expect(acquires()).toBe(2);
+
+      // Still in grace (timing): ask again after another grace.
+      socket.receive({ type: 'lease', state: 'busy', inGrace: true });
+      vi.advanceTimersByTime(10_500);
+      expect(acquires()).toBe(3);
+
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'fresh', resumed: false });
+      vi.advanceTimersByTime(60_000);
+      expect(acquires()).toBe(3);
+      expect(client.getLeaseId()).toBe('fresh');
+      expect(onLease).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'granted' }));
+    });
+
+    it('falls back to 11 s without leaseGraceMs, and stops at a non-grace busy', () => {
+      const socket = connect();
+      socket.receive(hello());
+      socket.receive({ type: 'lease', state: 'busy', inGrace: true });
+      const acquires = (): number =>
+        socket.sent.filter(frame => frame.type === 'lease' && frame.action === 'acquire').length;
+      vi.advanceTimersByTime(10_999);
+      expect(acquires()).toBe(1);
+      vi.advanceTimersByTime(1);
+      expect(acquires()).toBe(2);
+
+      // Another window connected and took it: that is final until the user takes over.
+      socket.receive({ type: 'lease', state: 'busy', inGrace: false });
+      vi.advanceTimersByTime(60_000);
+      expect(acquires()).toBe(2);
+    });
+
+    const previousPages: WorkspaceEventsClient[] = [];
+    afterEach(() => {
+      for (const page of previousPages.splice(0)) page.close();
+    });
+
+    const acquiresOn = (socket: FakeSocket): Array<Record<string, unknown>> =>
+      socket.sent.filter(frame => frame.type === 'lease' && frame.action === 'acquire');
+
+    /** A page that held `lease-7` and then unloaded; returns the store the next page reads. */
+    const heldThenUnloaded = (
+      options: { pagehide?: boolean } = {}
+    ): WorkspaceLeaseStore & { map: Map<string, StoredWorkspaceLease> } => {
+      const store = memoryStore();
+      const page = new WorkspaceEventsClient({
+        createSocket: url => {
+          const socket = new FakeSocket(url);
+          sockets.push(socket);
+          return socket;
+        },
+        leaseStore: store,
+        navigationType: () => 'navigate',
+      });
+      previousPages.push(page);
+      page.connect('http://localhost:8490', 'p3ws_secret', {});
+      const socket = sockets.at(-1)!;
+      socket.open();
+      socket.receive(hello());
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'lease-7', resumed: false });
+      if (options.pagehide !== false) window.dispatchEvent(new Event('pagehide'));
+      // The page is gone without close(): its socket stays open on the server for a while.
+      return store;
+    };
+
+    const nextPage = (
+      store: WorkspaceLeaseStore,
+      navigationType: string,
+      handlers: WorkspaceEventsHandlers = {}
+    ): FakeSocket => {
+      client = new WorkspaceEventsClient({
+        createSocket: url => {
+          const socket = new FakeSocket(url);
+          sockets.push(socket);
+          return socket;
+        },
+        leaseStore: store,
+        navigationType: () => navigationType,
+        pageLifecycle: null,
+      });
+      client.connect('http://localhost:8490', 'p3ws_secret', handlers);
+      const socket = sockets.at(-1)!;
+      socket.open();
+      socket.receive(hello({ leaseGraceMs: 10_000 }));
+      return socket;
+    };
+
+    it('busy right after reload while the old socket is still open → retries with the stored id and is granted within seconds', () => {
+      const store = heldThenUnloaded();
+      const onLease = vi.fn();
+      const socket = nextPage(store, 'reload', { onLease });
+      expect(acquiresOn(socket)).toEqual([
+        { type: 'lease', action: 'acquire', leaseId: 'lease-7' },
+      ]);
+
+      // An older server: the previous page's socket is still open, so busy, not in grace.
+      socket.receive({ type: 'lease', state: 'busy', inGrace: false });
+      vi.advanceTimersByTime(1_000);
+      expect(acquiresOn(socket)).toHaveLength(2);
+      socket.receive({ type: 'lease', state: 'busy', inGrace: false });
+      vi.advanceTimersByTime(1_000);
+      expect(acquiresOn(socket)).toHaveLength(3);
+      expect(acquiresOn(socket).at(-1)).toEqual({
+        type: 'lease',
+        action: 'acquire',
+        leaseId: 'lease-7',
+      });
+
+      // The old socket closed meanwhile: the lease is in grace and the id resumes it.
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'lease-7', resumed: true });
+      vi.advanceTimersByTime(30_000);
+      expect(acquiresOn(socket)).toHaveLength(3);
+      expect(client.getLeaseId()).toBe('lease-7');
+      expect(onLease).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'granted' }));
+    });
+
+    it('stops the resume retries after ~15 s and stays read-only', () => {
+      const store = heldThenUnloaded();
+      const socket = nextPage(store, 'reload');
+      for (let i = 0; i < 30; i += 1) {
+        socket.receive({ type: 'lease', state: 'busy', inGrace: false });
+        vi.advanceTimersByTime(1_000);
+      }
+      const sent = acquiresOn(socket).length;
+      expect(sent).toBeGreaterThanOrEqual(14);
+      expect(sent).toBeLessThanOrEqual(16);
+      vi.advanceTimersByTime(60_000);
+      expect(acquiresOn(socket)).toHaveLength(sent);
+    });
+
+    it('a genuine second tab without the id stays read-only with no retries', () => {
+      const socket = connect();
+      socket.receive(hello({ leaseGraceMs: 10_000 }));
+      expect(acquiresOn(socket)).toEqual([{ type: 'lease', action: 'acquire' }]);
+      socket.receive({ type: 'lease', state: 'busy', inGrace: false });
+      vi.advanceTimersByTime(60_000);
+      expect(acquiresOn(socket)).toHaveLength(1);
+    });
+
+    it('a duplicated tab (copied entry, original still live, not a reload) acquires without the id', () => {
+      // No pagehide: the original page is alive; its entry was copied into the duplicate.
+      const store = heldThenUnloaded({ pagehide: false });
+      const socket = nextPage(store, 'back_forward');
+      expect(acquiresOn(socket)).toEqual([{ type: 'lease', action: 'acquire' }]);
+      expect(store.map.has('ws-1')).toBe(false);
+      socket.receive({ type: 'lease', state: 'busy', inGrace: false });
+      vi.advanceTimersByTime(60_000);
+      expect(acquiresOn(socket)).toHaveLength(1);
+    });
+
+    it('presents the id after the previous page marked it on pagehide, whatever the navigation type', () => {
+      const store = heldThenUnloaded();
+      expect(store.map.get('ws-1')?.unloaded).toBe(true);
+      const socket = nextPage(store, 'navigate');
+      expect(acquiresOn(socket)).toEqual([
+        { type: 'lease', action: 'acquire', leaseId: 'lease-7' },
+      ]);
+      // Claimed by the new page: the unload mark is gone.
+      expect(store.map.get('ws-1')?.unloaded).toBeUndefined();
+    });
+
+    it("on lost/resumed_elsewhere keeps the stored entry (it is the next page's now)", () => {
+      const store = memoryStore();
+      client = makeClient(store);
+      const socket = connect();
+      socket.receive(hello());
+      socket.receive({ type: 'lease', state: 'granted', leaseId: 'lease-7', resumed: false });
+      socket.receive({
+        type: 'lease',
+        state: 'lost',
+        reason: 'resumed_elsewhere',
+        leaseId: 'lease-7',
+      });
+      expect(client.getLeaseId()).toBeNull();
+      expect(store.map.get('ws-1')?.leaseId).toBe('lease-7');
+    });
+  });
+
+  describe('agent keepalive and presence', () => {
+    let worker: FakeTickWorker;
+
+    beforeEach(() => {
+      worker = new FakeTickWorker();
+      setTickWorkerFactory(() => worker);
+    });
+
+    afterEach(() => {
+      setEditorKeepAlive(false);
+      setTickWorkerFactory(null);
+    });
+
+    it('reconnects on the worker ticker under keepalive (no throttled main-thread timer)', () => {
+      setEditorKeepAlive(true);
+      const first = connect();
+      first.receive(hello());
+      first.drop(1006);
+      expect(sockets).toHaveLength(1);
+      // The backoff delay was armed on the worker, not with setTimeout.
+      expect([...worker.timers.values()]).toContain(100);
+      vi.advanceTimersByTime(60_000);
+      expect(sockets).toHaveLength(1);
+      worker.fireAll();
+      expect(sockets).toHaveLength(2);
+    });
+
+    it('uses plain timers without keepalive (the idle battery case is unchanged)', () => {
+      const first = connect();
+      first.receive(hello());
+      first.drop(1006);
+      expect(worker.commands).toEqual([]);
+      vi.advanceTimersByTime(100);
+      expect(sockets).toHaveLength(2);
+    });
+
+    describe('server restart in a hidden tab', () => {
+      let restartClient: WorkspaceEventsClient;
+      const store = new Map<string, StoredWorkspaceLease>();
+      const memoryStore: WorkspaceLeaseStore = {
+        get: id => store.get(id) ?? null,
+        set: (id, lease) => void store.set(id, lease),
+        clear: id => void store.delete(id),
+      };
+
+      beforeEach(() => {
+        store.clear();
+        setVisibility('hidden', false);
+        // The production schedule (no test override): what a live editor does.
+        restartClient = new WorkspaceEventsClient({
+          createSocket: url => {
+            const socket = new FakeSocket(url);
+            sockets.push(socket);
+            return socket;
+          },
+          leaseStore: memoryStore,
+        });
+      });
+
+      afterEach(() => {
+        restartClient.close();
+        setVisibility('visible');
+      });
+
+      /** Connect, hello from `session-1`, lease granted; returns the live socket. */
+      const connectHeld = (handlers: WorkspaceEventsHandlers = {}): FakeSocket => {
+        restartClient.connect('http://localhost:8490', 'p3ws_secret', handlers);
+        const socket = sockets[sockets.length - 1];
+        socket.open();
+        socket.receive(hello({ leaseGraceMs: 10_000 }));
+        socket.receive({ type: 'lease', state: 'granted', leaseId: 'old-lease', resumed: false });
+        return socket;
+      };
+
+      it('under keepalive retries on the worker every ≤ 2 s and acquires fresh from the new session', () => {
+        const debug = vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        setEditorKeepAlive(true);
+        const onLease = vi.fn();
+        const first = connectHeld({ onLease });
+        expect(store.get('ws-1')).toMatchObject({
+          leaseId: 'old-lease',
+          serverSession: 'session-1',
+        });
+
+        first.drop(1006);
+        // Server down: every attempt is refused at once. Each wait is on the worker, none on a
+        // (throttled) main-thread timer, and none longer than 2 s.
+        const delays: number[] = [];
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          expect(vi.getTimerCount()).toBe(0);
+          const armed = [...worker.timers.values()];
+          expect(armed).toHaveLength(1);
+          delays.push(armed[0]);
+          const before = sockets.length;
+          worker.fireAll();
+          expect(sockets).toHaveLength(before + 1);
+          sockets[sockets.length - 1].drop(1006);
+        }
+        expect(delays).toEqual([500, 1_000, 2_000, 2_000, 2_000, 2_000, 2_000, 2_000]);
+        expect(Math.max(...delays)).toBeLessThanOrEqual(3_000);
+
+        // The restarted server answers: new serverSession, empty lease table.
+        worker.fireAll();
+        const back = sockets[sockets.length - 1];
+        back.open();
+        back.receive(hello({ serverSession: 'session-2', leaseGraceMs: 10_000 }));
+        // The leaseId of the old run is dropped, not offered (it would mean nothing there)…
+        expect(back.sent.at(-1)).toEqual({ type: 'lease', action: 'acquire' });
+        back.receive({ type: 'lease', state: 'granted', leaseId: 'new-lease', resumed: false });
+        // …and nothing waits out a grace period: granted on the first acquire, no retry armed.
+        expect(back.sent.filter(frame => frame.action === 'acquire')).toHaveLength(1);
+        expect(restartClient.getLeaseId()).toBe('new-lease');
+        expect(store.get('ws-1')).toMatchObject({
+          leaseId: 'new-lease',
+          serverSession: 'session-2',
+        });
+        expect(onLease).toHaveBeenLastCalledWith(expect.objectContaining({ state: 'granted' }));
+        // Only the silence watchdog is left, on the worker.
+        expect([...worker.timers.values()]).toEqual([30_000]);
+
+        const lines = debug.mock.calls.map(call => String(call[0]));
+        expect(lines[0]).toBe('[workspace] events socket closed 1006, reconnecting');
+        expect(lines[1]).toMatch(/^\[workspace\] reconnect attempt 1 in 500 ms → closed 1006 /);
+        expect(lines.at(-1)).toMatch(
+          /^\[workspace\] reconnect attempt 9 in 2000 ms → hello \(new server session.*keepalive on, worker clock/
+        );
+        debug.mockRestore();
+      });
+
+      it('gives up an attempt that never says hello instead of waiting on the browser', () => {
+        vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        setEditorKeepAlive(true);
+        const first = connectHeld();
+        first.drop(1006);
+        worker.fireAll();
+        const hanging = sockets[sockets.length - 1];
+        // A tunnel accepted the connection but nobody behind it answers: no open, no close.
+        expect([...worker.timers.values()]).toEqual([8_000]);
+        worker.fireAll();
+        expect(hanging.closed).toBe(true);
+        expect([...worker.timers.values()]).toEqual([1_000]);
+        worker.fireAll();
+        expect(sockets[sockets.length - 1]).not.toBe(hanging);
+        vi.mocked(console.debug).mockRestore();
+      });
+
+      it('without keepalive keeps the battery-friendly schedule on plain timers', () => {
+        vi.spyOn(console, 'debug').mockImplementation(() => undefined);
+        const first = connectHeld();
+        first.drop(1006);
+        const delays: number[] = [];
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const before = sockets.length;
+          let waited = 0;
+          while (sockets.length === before && waited < 60_000) {
+            vi.advanceTimersByTime(100);
+            waited += 100;
+          }
+          delays.push(waited);
+          sockets[sockets.length - 1].drop(1006);
+        }
+        expect(delays).toEqual([500, 1_000, 2_000, 4_000, 8_000, 15_000, 15_000, 15_000]);
+        expect(worker.commands).toEqual([]);
+        vi.mocked(console.debug).mockRestore();
+      });
+    });
+
+    it('reports agent presence from hello and from agent-presence frames', () => {
+      const onAgentPresence = vi.fn();
+      const socket = connect({ onAgentPresence });
+      socket.receive(
+        hello({ agentPresence: { attached: true, agent: { name: 'codex', verified: false } } })
+      );
+      expect(onAgentPresence).toHaveBeenLastCalledWith({
+        attached: true,
+        agent: { name: 'codex', verified: false },
+      });
+      socket.receive({ type: 'agent-presence', attached: false, agent: null });
+      expect(onAgentPresence).toHaveBeenLastCalledWith({ attached: false, agent: null });
+      // An older server's hello says nothing: no presence callback for it.
+      onAgentPresence.mockClear();
+      socket.receive(hello());
+      expect(onAgentPresence).not.toHaveBeenCalled();
+    });
+  });
+});

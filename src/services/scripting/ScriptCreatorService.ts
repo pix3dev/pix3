@@ -1,5 +1,5 @@
 import { injectable, inject } from '@/fw/di';
-import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { ProjectScriptLoaderService } from '@/services/scripting/ProjectScriptLoaderService';
 
 export interface ScriptCreationParams {
@@ -16,8 +16,8 @@ export interface ScriptCreationInstance {
 
 @injectable()
 export class ScriptCreatorService {
-  @inject(FileSystemAPIService)
-  private readonly fs!: FileSystemAPIService;
+  @inject(ProjectStorageService)
+  private readonly fs!: ProjectStorageService;
 
   @inject(ProjectScriptLoaderService)
   private readonly scriptLoader!: ProjectScriptLoaderService;

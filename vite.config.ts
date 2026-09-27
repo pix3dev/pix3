@@ -2,9 +2,11 @@ import { defineConfig, loadEnv } from 'vite';
 import { resolve } from 'path';
 import wasm from 'vite-plugin-wasm';
 import { VitePWA } from 'vite-plugin-pwa';
+import { execFileSync } from 'node:child_process';
 
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
+  ensureAgentKit();
   const collabTarget = env.VITE_COLLAB_SERVER_URL || 'http://localhost:4001';
   // Dev-only bundle inventory: `ANALYZE=1 npm run build` emits dist/stats.html (treemap).
   // Never runs in a normal build — kept out of the default plugin list entirely.
@@ -287,3 +289,22 @@ export default defineConfig(async ({ mode }) => {
     },
   };
 });
+
+/**
+ * The agent kit the editor writes into a project ("Work with your own agent", File → Install Agent
+ * Kit…) is the CLI's generated `packages/pix3-cli/kit/` (gitignored), bundled through
+ * `src/services/project/agent-kit/bundled-kit.ts`. (Re)generate it before anything globs it, so
+ * dev, build and the CLI all ship the same kit. A failure (e.g. a half-edited kit template) only
+ * warns: the last generated kit stays in place, and `bundled-kit.spec.ts` reports the drift.
+ */
+function ensureAgentKit(): void {
+  try {
+    execFileSync(process.execPath, [resolve(__dirname, 'scripts/ensure-agent-kit.mjs')], {
+      stdio: ['ignore', 'ignore', 'inherit'],
+    });
+  } catch (error) {
+    console.warn(
+      `[vite] agent kit not regenerated: ${error instanceof Error ? error.message : String(error)}`
+    );
+  }
+}

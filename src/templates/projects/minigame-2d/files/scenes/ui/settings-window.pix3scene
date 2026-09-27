@@ -83,8 +83,7 @@ root:
         type: Checkbox2D
         name: Music Toggle
         properties:
-          width: 44
-          height: 44
+          size: 44
           checked: true
           checkedColor: "#ffcf33"
           uncheckedColor: "#555577"
@@ -110,8 +109,7 @@ root:
         type: Checkbox2D
         name: SFX Toggle
         properties:
-          width: 44
-          height: 44
+          size: 44
           checked: true
           checkedColor: "#ffcf33"
           uncheckedColor: "#555577"

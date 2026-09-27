@@ -1,5 +1,18 @@
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
+import { execFileSync } from 'node:child_process';
+
+// The editor bundles the CLI's generated agent kit (`packages/pix3-cli/kit/`, gitignored) — make
+// sure it exists and is current before any spec globs it. Same step as `vite.config.ts`.
+try {
+  execFileSync(process.execPath, [resolve(__dirname, 'scripts/ensure-agent-kit.mjs')], {
+    stdio: ['ignore', 'ignore', 'inherit'],
+  });
+} catch (error) {
+  console.warn(
+    `[vitest] agent kit not regenerated: ${error instanceof Error ? error.message : String(error)}`
+  );
+}
 
 export default defineConfig({
   test: {
@@ -21,6 +34,8 @@ export default defineConfig({
       'packages/pix3-runtime/src/**/*.spec.ts',
       // Server specs opt out of happy-dom per file via `// @vitest-environment node`.
       'packages/pix3-collab-server/src/**/*.spec.ts',
+      // CLI specs are Node too (`// @vitest-environment node`).
+      'packages/pix3-cli/src/**/*.spec.ts',
     ],
     // The default 'forks' pool reports "No test suite found" for every spec on
     // win32-arm64 (vitest 4.x); the threads pool runs them fine everywhere.

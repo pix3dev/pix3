@@ -206,7 +206,13 @@ export class EditorSettingsDialog extends ComponentBase {
   private warnOnUnsavedUnload = true;
 
   @state()
+  private autosaveLocalProjects = false;
+
+  @state()
   private pauseRenderingOnUnfocus = true;
+
+  @state()
+  private keepEditorRunningForAgent = true;
 
   @state()
   private navigation2D: Navigation2DSettings = {
@@ -394,7 +400,9 @@ export class EditorSettingsDialog extends ComponentBase {
     this.activeSection = this.editorSettingsService.getInitialTab();
     this.activeSubtab = this.defaultSubtab(this.activeSection);
     this.warnOnUnsavedUnload = appState.ui.warnOnUnsavedUnload;
+    this.autosaveLocalProjects = appState.ui.autosaveLocalProjects;
     this.pauseRenderingOnUnfocus = appState.ui.pauseRenderingOnUnfocus;
+    this.keepEditorRunningForAgent = appState.ui.keepEditorRunningForAgent;
     this.navigation2D = { ...appState.ui.navigation2D };
 
     const prefs = this.aiImageSettings.getPreferences();
@@ -743,6 +751,48 @@ export class EditorSettingsDialog extends ComponentBase {
         ${this.renderNote(
           'warn-unsaved',
           'Disable this to skip the browser confirmation dialog on refresh or navigation.'
+        )}
+      </div>
+
+      <div class="settings-field">
+        <div class="field-head">
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              .checked=${this.autosaveLocalProjects}
+              @change=${this.onAutosaveToggle}
+            />
+            <span>Autosave scenes in local project folders</span>
+          </label>
+          ${this.renderInfo('autosave-local')}
+        </div>
+        ${this.renderNote(
+          'autosave-local',
+          'Saves an edited scene about a second after each change, so an agent or another tool ' +
+            'working on the same folder sees it. Always on for pix3 serve workspaces and for ' +
+            'folders with an agent kit (AGENTS.md or .pix3/). Every autosaved version is kept ' +
+            'in .pix3/recovery/.'
+        )}
+      </div>
+
+      <div class="settings-field">
+        <div class="field-head">
+          <label class="toggle-row">
+            <input
+              type="checkbox"
+              .checked=${this.keepEditorRunningForAgent}
+              @change=${this.onKeepAliveToggle}
+            />
+            <span>Keep the editor running while an agent is connected</span>
+          </label>
+          ${this.renderInfo('agent-keepalive')}
+        </div>
+        ${this.renderNote(
+          'agent-keepalive',
+          'While pix3 mcp is attached to this workspace (or an agent call ran in the last five ' +
+            'minutes), the game, the viewport, file polling and reconnects keep running even when ' +
+            'this tab is hidden or unfocused, so the agent never waits for a battery-saving pause. ' +
+            'Without an agent the editor pauses in the background exactly as before.'
         )}
       </div>
 
@@ -2354,6 +2404,16 @@ export class EditorSettingsDialog extends ComponentBase {
     this.warnOnUnsavedUnload = target.checked;
   }
 
+  private onAutosaveToggle(e: Event): void {
+    const target = e.target as HTMLInputElement;
+    this.autosaveLocalProjects = target.checked;
+  }
+
+  private onKeepAliveToggle(e: Event): void {
+    const target = e.target as HTMLInputElement;
+    this.keepEditorRunningForAgent = target.checked;
+  }
+
   private onPauseToggle(e: Event): void {
     const target = e.target as HTMLInputElement;
     this.pauseRenderingOnUnfocus = target.checked;
@@ -2376,7 +2436,9 @@ export class EditorSettingsDialog extends ComponentBase {
   private async onSave(): Promise<void> {
     const operation = new UpdateEditorSettingsOperation({
       warnOnUnsavedUnload: this.warnOnUnsavedUnload,
+      autosaveLocalProjects: this.autosaveLocalProjects,
       pauseRenderingOnUnfocus: this.pauseRenderingOnUnfocus,
+      keepEditorRunningForAgent: this.keepEditorRunningForAgent,
       navigation2D: this.navigation2D,
     });
 

@@ -62,6 +62,19 @@ import {
   type RuntimeTimeConfig,
 } from './runtime-time';
 import { playable } from './PlayableSdk';
+import { disconnectSignalTargetEverywhere } from './signal-target-links';
+
+/** The frame source of {@link SceneRunner}'s loop — `requestAnimationFrame`'s contract. */
+export interface RunnerFrameScheduler {
+  request(callback: (timestampMs: number) => void): number;
+  cancel(handle: number): void;
+}
+
+/** Resolved at call time, so a test's stubbed `requestAnimationFrame` is what runs. */
+const DEFAULT_FRAME_SCHEDULER: RunnerFrameScheduler = {
+  request: callback => requestAnimationFrame(callback),
+  cancel: handle => cancelAnimationFrame(handle),
+};
 
 /**
  * Below this slow-mo base scale the audio mixer blends to the `'muffled'`
@@ -179,6 +192,8 @@ export class SceneRunner {
   private readonly raycaster = new Raycaster();
   private readonly raycastPointer = new Vector2();
   private animationFrameId: number | null = null;
+  /** Where the realtime/fixed loop gets its frames (rAF unless the host swaps it). */
+  private frameScheduler: RunnerFrameScheduler = DEFAULT_FRAME_SCHEDULER;
   private isRunning: boolean = false;
   private fixedTimeAccumulator = 0;
   private elapsedTime = 0;
@@ -724,7 +739,7 @@ export class SceneRunner {
     this.ordered2DCount = 0;
     this.clock.stop();
     if (this.animationFrameId !== null) {
-      cancelAnimationFrame(this.animationFrameId);
+      this.frameScheduler.cancel(this.animationFrameId);
       this.animationFrameId = null;
     }
     // Undo a non-realtime mute here, not in the graph block below: the mode can
@@ -817,6 +832,24 @@ export class SceneRunner {
     this.inputService.detach();
   }
 
+  /**
+   * Drive the loop from another frame source than `requestAnimationFrame` (or `null` for rAF).
+   * A host that must keep a game stepping where rAF does not fire — the editor in a hidden tab
+   * while an agent runs it — passes a scheduler with the same contract: `request(cb)` calls `cb`
+   * once with a timestamp, `cancel(handle)` withdraws it. A frame already armed moves over.
+   */
+  setFrameScheduler(scheduler: RunnerFrameScheduler | null): void {
+    const next = scheduler ?? DEFAULT_FRAME_SCHEDULER;
+    if (next === this.frameScheduler) return;
+    const armed = this.animationFrameId !== null;
+    if (this.animationFrameId !== null) {
+      this.frameScheduler.cancel(this.animationFrameId);
+      this.animationFrameId = null;
+    }
+    this.frameScheduler = next;
+    if (armed) this.scheduleNextFrame();
+  }
+
   pause(): void {
     if (!this.isRunning || this.isPaused) return;
     this.isPaused = true;
@@ -824,7 +857,7 @@ export class SceneRunner {
     // than stopping the playbacks) means resume picks every buffer up where the pause caught it.
     this.audioService.setPaused(true);
     if (this.animationFrameId !== null) {
-      cancelAnimationFrame(this.animationFrameId);
+      this.frameScheduler.cancel(this.animationFrameId);
       this.animationFrameId = null;
     }
   }
@@ -1028,7 +1061,7 @@ export class SceneRunner {
     // rAF chain, and leaving manual must start one again.
     if (resolved.mode === 'manual') {
       if (this.animationFrameId !== null) {
-        cancelAnimationFrame(this.animationFrameId);
+        this.frameScheduler.cancel(this.animationFrameId);
         this.animationFrameId = null;
       }
       return;
@@ -1108,7 +1141,7 @@ export class SceneRunner {
     if (!this.isRunning || this.isPaused) return;
     if (this.timeConfig.mode === 'manual') return;
     if (this.animationFrameId !== null) return;
-    this.animationFrameId = requestAnimationFrame(this.tick);
+    this.animationFrameId = this.frameScheduler.request(this.tick);
   }
 
   /**
@@ -2331,6 +2364,9 @@ export class SceneRunner {
           });
         }
       }
+      // Same safety net as NodeBase.removeComponent: an override that skipped
+      // super.onDetach() must not leave handlers on other nodes behind.
+      disconnectSignalTargetEverywhere(component);
 
       if (component.resetStartedState) {
         component.resetStartedState();

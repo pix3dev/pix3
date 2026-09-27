@@ -81,7 +81,10 @@ schema clamps out-of-range values rather than rejecting them.
 - **A third kind of thing.** Copy a prefab, give its `core:Hitbox2D` a new group,
   `create_node` + `add_component` a third `Spawner`, append `<group>:score:5` to
   `touchRules`. Chasers: a script on the prefab that steers toward `player`'s
-  world position — contact is already punished.
+  world position — contact is already punished. Spawn it under a spawner (the
+  default `parentNode`) listed in `freezeNodes`: `finish()` freezes that whole
+  subtree, so the chaser stops on game over. Parented elsewhere, it keeps
+  crawling over the result card — list that parent in `freezeNodes` too.
 - **More juice.** `scene.juice.punchScale/shake/flash` + `scene.time.hitstop` are
   already called in `TouchRules`; raise the numbers there.
 
@@ -89,7 +92,8 @@ schema clamps out-of-range values rather than rejecting them.
 
 The result overlay and RETRY are **owned by `GameRules`**: it hides the overlay on
 start and keeps `retry-button` **disabled**, then `finish(won)` shows the overlay,
-writes the result text, enables RETRY and freezes the gameplay nodes. For a custom
+writes the result text, enables RETRY and freezes the `freezeNodes` subtrees
+(every component on them and on what they spawned). For a custom
 win/lose condition call `finish(true|false)` on that component — do NOT show the
 overlay yourself. A hand-rolled ending leaves RETRY on screen with its handler bound
 and `enabled: false`, i.e. a button that can never be pressed (`game_observe` reports

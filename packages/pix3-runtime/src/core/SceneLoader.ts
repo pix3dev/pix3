@@ -1184,6 +1184,9 @@ export class SceneLoader {
           scale: this.readVector2(transform?.scale ?? props.scale, UNIT_VECTOR2),
           rotation: typeof rotation === 'number' ? rotation : 0,
           layout: this.parseNode2DLayout(record),
+          // `SceneSaver` writes `flow` for a plain Node2D like for every 2D node; reading it back
+          // here too keeps a flow container from losing its stacking on the first round trip.
+          flow: this.parseNode2DFlow(record),
           opacity: this.asNumber(props.opacity, undefined),
         });
       }

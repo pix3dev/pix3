@@ -30,8 +30,25 @@ export interface OperationInvokeResult {
   readonly commit?: OperationCommit;
 }
 
+/**
+ * Who asked for an operation — read by the co-authoring recorder
+ * (`src/services/project/coauthoring/ProtectedSetService.ts`): only `user` operations that reach
+ * history are recorded as human edits into the protected set `P`. `external` = applying a version
+ * that came from disk (reload / merge); `system` = editor machinery that is neither (restoring a
+ * snapshot, bookkeeping). Omitted = `user`.
+ */
+export type OperationOrigin = 'user' | 'external' | 'system';
+
+/**
+ * Metadata tag of an operation that is never a human edit whatever its origin (e.g. a reload from
+ * disk). Equivalent to invoking it with `origin: 'external'`.
+ */
+export const NON_HUMAN_OPERATION_TAG = 'non-human';
+
 export interface OperationInvokeOptions {
   readonly context?: Partial<OperationContext>;
+  /** See {@link OperationOrigin}; defaults to `user`. */
+  readonly origin?: OperationOrigin;
   readonly label?: string;
   readonly coalesceKey?: string;
   readonly beforeSnapshot?: AppStateSnapshot;

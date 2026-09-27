@@ -5,7 +5,7 @@ import { appState } from '@/state';
 import { IconService } from '@/services/editor/IconService';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { LayoutManagerService } from '@/core/LayoutManager';
-import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
+import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import { DialogService } from '@/services/editor/DialogService';
 import { AgentChatService } from '@/services/agent/AgentChatService';
 import {
@@ -50,8 +50,8 @@ export class Pix3ProjectHome extends ComponentBase {
   @inject(LayoutManagerService)
   private readonly layoutManager!: LayoutManagerService;
 
-  @inject(FileSystemAPIService)
-  private readonly fileSystem!: FileSystemAPIService;
+  @inject(ProjectStorageService)
+  private readonly fileSystem!: ProjectStorageService;
 
   @inject(DialogService)
   private readonly dialogService!: DialogService;

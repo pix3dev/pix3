@@ -20,6 +20,10 @@
     "./testing": {
       "import": "./src/testing/index.ts",
       "types": "./src/testing/index.ts"
+    },
+    "./node": {
+      "import": "./src/node/index.ts",
+      "types": "./src/node/index.ts"
     }
   },
   "scripts": {

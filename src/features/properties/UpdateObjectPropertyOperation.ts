@@ -386,6 +386,11 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
     if (value === null || value === undefined) {
       return { isValid: false, reason: 'Value cannot be null or undefined' };
     }
+    // NaN / Infinity never serialize (YAML writes them as 0 or drops them), and the co-authoring
+    // protected set would record a value the saved file cannot hold.
+    if (containsNonFiniteNumber(value)) {
+      return { isValid: false, reason: 'Value contains a non-finite number (NaN or Infinity)' };
+    }
     return { isValid: true };
   }
 
@@ -429,4 +434,12 @@ export class UpdateObjectPropertyOperation implements Operation<OperationInvokeR
       this.captureAnchoredDescendantRects(child);
     }
   }
+}
+
+/** True for a non-finite number, also inside a vector / array / plain object (a few levels deep). */
+function containsNonFiniteNumber(value: unknown, depth = 0): boolean {
+  if (typeof value === 'number') return !Number.isFinite(value);
+  if (depth >= 3 || !value || typeof value !== 'object') return false;
+  const items = Array.isArray(value) ? value : Object.values(value as Record<string, unknown>);
+  return items.some(item => containsNonFiniteNumber(item, depth + 1));
 }

@@ -32,6 +32,7 @@ jobs:
     timeout-minutes: 30
     env:
       VITE_COLLAB_SERVER_URL: https://cloud.pix3.dev
+      VITE_PIX3_CLI_CONFIRMED_VERSION: ${{ vars.VITE_PIX3_CLI_CONFIRMED_VERSION }}
 
     steps:
       - name: Checkout repository

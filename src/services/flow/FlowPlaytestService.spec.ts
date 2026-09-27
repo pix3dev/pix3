@@ -388,8 +388,16 @@ describe('FlowPlaytestService', () => {
   it('executes non-terminal routine files and reports failures', async () => {
     const storageMock = {
       listDirectory: vi.fn(async () => [
-        { name: 'score-routine.json', path: 'design/tests/routines/score-routine.json', kind: 'file' },
-        { name: 'terminal-retry.json', path: 'design/tests/routines/terminal-retry.json', kind: 'file' },
+        {
+          name: 'score-routine.json',
+          path: 'design/tests/routines/score-routine.json',
+          kind: 'file',
+        },
+        {
+          name: 'terminal-retry.json',
+          path: 'design/tests/routines/terminal-retry.json',
+          kind: 'file',
+        },
       ]),
     };
     const { service, execute } = build(
@@ -449,7 +457,11 @@ describe('FlowPlaytestService', () => {
     it('verifies recipe-bouncer-2d controls and terminal-retry routine pass', async () => {
       const storageMock = {
         listDirectory: vi.fn(async () => [
-          { name: 'terminal-retry.json', path: 'design/tests/routines/terminal-retry.json', kind: 'file' },
+          {
+            name: 'terminal-retry.json',
+            path: 'design/tests/routines/terminal-retry.json',
+            kind: 'file',
+          },
         ]),
       };
       const { service, execute } = build(
@@ -478,7 +490,11 @@ describe('FlowPlaytestService', () => {
     it('verifies recipe-arena-2d controls and terminal-retry routine pass', async () => {
       const storageMock = {
         listDirectory: vi.fn(async () => [
-          { name: 'terminal-retry.json', path: 'design/tests/routines/terminal-retry.json', kind: 'file' },
+          {
+            name: 'terminal-retry.json',
+            path: 'design/tests/routines/terminal-retry.json',
+            kind: 'file',
+          },
         ]),
       };
       const { service, execute } = build(
@@ -509,7 +525,11 @@ describe('FlowPlaytestService', () => {
       const storageMock = {
         listDirectory: vi.fn(async () => [
           { name: 'restart.json', path: 'design/tests/routines/restart.json', kind: 'file' },
-          { name: 'terminal-retry.json', path: 'design/tests/routines/terminal-retry.json', kind: 'file' },
+          {
+            name: 'terminal-retry.json',
+            path: 'design/tests/routines/terminal-retry.json',
+            kind: 'file',
+          },
         ]),
       };
       const { service, execute } = build(
@@ -527,7 +547,9 @@ describe('FlowPlaytestService', () => {
             return {
               ok: true,
               routine: { name: 'restart', description: 'Restart check', macro: false },
-              expectations: [{ index: 0, assertion: 'phase playing', met: true, detail: 'playing' }],
+              expectations: [
+                { index: 0, assertion: 'phase playing', met: true, detail: 'playing' },
+              ],
             };
           }
           return { ok: true };
@@ -543,20 +565,15 @@ describe('FlowPlaytestService', () => {
     });
 
     it('fails smoke when an enabled visible control is off-screen', async () => {
-      const { service } = build(
-        runResult('until'),
-        (name: string) => {
-          if (name === 'game_controls') {
-            return {
-              ok: true,
-              controls: [
-                { name: 'escape-btn', visible: true, enabled: true, reach: 'off-screen' },
-              ],
-            };
-          }
-          return { ok: true };
+      const { service } = build(runResult('until'), (name: string) => {
+        if (name === 'game_controls') {
+          return {
+            ok: true,
+            controls: [{ name: 'escape-btn', visible: true, enabled: true, reach: 'off-screen' }],
+          };
         }
-      );
+        return { ok: true };
+      });
       const result = await service.smoke();
       expect(result).toMatchObject({
         status: 'failed',
@@ -566,25 +583,23 @@ describe('FlowPlaytestService', () => {
     });
 
     it('fails smoke when an enabled visible control is in-frame-unproven', async () => {
-      const { service } = build(
-        runResult('until'),
-        (name: string) => {
-          if (name === 'game_controls') {
-            return {
-              ok: true,
-              controls: [
-                { name: 'unproven-btn', visible: true, enabled: true, reach: 'in-frame-unproven' },
-              ],
-            };
-          }
-          return { ok: true };
+      const { service } = build(runResult('until'), (name: string) => {
+        if (name === 'game_controls') {
+          return {
+            ok: true,
+            controls: [
+              { name: 'unproven-btn', visible: true, enabled: true, reach: 'in-frame-unproven' },
+            ],
+          };
         }
-      );
+        return { ok: true };
+      });
       const result = await service.smoke();
       expect(result).toMatchObject({
         status: 'failed',
         findingKey: 'control-unproven:unproven-btn',
-        reason: 'Control "unproven-btn" is visible but in-frame-unproven (no physical proof in reachability.json or session).',
+        reason:
+          'Control "unproven-btn" is visible but in-frame-unproven (no physical proof in reachability.json or session).',
       });
     });
 
@@ -594,13 +609,7 @@ describe('FlowPlaytestService', () => {
           throw new Error('EACCES: permission denied');
         }),
       };
-      const { service } = build(
-        runResult('until'),
-        { ok: true },
-        '',
-        undefined,
-        storageMock
-      );
+      const { service } = build(runResult('until'), { ok: true }, '', undefined, storageMock);
       const result = await service.smoke();
       expect(result).toMatchObject({
         status: 'inconclusive',

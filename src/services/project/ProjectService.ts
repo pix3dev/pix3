@@ -15,6 +15,7 @@ import {
   type FileDescriptor,
 } from '@/services/project/FileSystemAPIService';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { sha256 } from '@/services/project/external-merge/hash';
 import { BrowserProjectStorageService } from '@/services/project/BrowserProjectStorageService';
 import { parse, stringify } from 'yaml';
 import { ref } from 'valtio/vanilla';
@@ -22,7 +23,10 @@ import { ProjectTemplateService } from '@/services/project/ProjectTemplateServic
 import { SceneStateUpdater } from '@/core/SceneStateUpdater';
 import {
   createDefaultProjectManifest,
+  createProjectId,
+  getProjectId,
   normalizeProjectManifest,
+  withProjectId,
   type ProjectManifest,
 } from '@/core/ProjectManifest';
 import {
@@ -37,6 +41,9 @@ import type * as Y from 'yjs';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { CollaborationService } from '@/services/collab/CollaborationService';
 import { ideaTimeline } from '@/services/flow/idea-timeline';
+import { WorkspaceSessionService } from '@/services/project/workspace/WorkspaceSessionService';
+import { WorkspaceCredentialStore } from '@/services/project/workspace/WorkspaceCredentialStore';
+import { WorkspaceError } from '@/services/project/workspace/workspace-protocol';
 
 const RECENTS_KEY = 'pix3.recentProjects:v1';
 const PROJECT_MANIFEST_PATH = 'pix3project.yaml';
@@ -67,7 +74,18 @@ export interface RecentProjectEntry {
   readonly localAbsolutePath?: string;
   readonly linkedCloudProjectId?: string;
   readonly linkedLocalSessionId?: string;
+  /** `backend: 'workspace'` only: the address this browser reaches `pix3 serve` at. */
+  readonly endpoint?: string;
+  /** `backend: 'workspace'` only: the server's `workspaceId` (also the key of the stored token). */
+  readonly workspaceId?: string;
   readonly lastOpenedAt: number;
+}
+
+export interface OpenWorkspaceOptions {
+  readonly endpoint: string;
+  readonly token: string;
+  /** Recents reopen: refuse when the address now serves a different workspace. */
+  readonly expectedWorkspaceId?: string;
 }
 
 export interface CreateProjectOptions {
@@ -81,6 +99,12 @@ export interface CreateProjectOptions {
    * `'local'`. (Cloud projects are created via {@link CloudProjectService}.)
    */
   readonly backend?: 'local' | 'browser';
+  /**
+   * Template/overlay paths to leave out (see `applyTemplateFiles` `options.skip`). A project made
+   * for an external agent skips the in-editor agent overlay the agent kit replaces
+   * (`EXTERNAL_AGENT_TEMPLATE_SKIP`).
+   */
+  readonly skipTemplatePaths?: readonly string[];
 }
 
 export interface ActivateProjectOptions {
@@ -96,6 +120,13 @@ export class ProjectService {
   private readonly storage = ServiceContainer.getInstance().getService<ProjectStorageService>(
     ServiceContainer.getInstance().getOrCreateToken(ProjectStorageService)
   );
+  /**
+   * sha256 of the `pix3project.yaml` bytes the editor last read or wrote (null: none read). The
+   * agent channel's sync barrier reports it as the manifest version the game runs with, and
+   * re-reads the manifest when the disk holds another one.
+   */
+  private loadedManifestHash: string | null = null;
+
   private readonly browserStore =
     ServiceContainer.getInstance().getService<BrowserProjectStorageService>(
       ServiceContainer.getInstance().getOrCreateToken(BrowserProjectStorageService)
@@ -114,8 +145,13 @@ export class ProjectService {
         .map<RecentProjectEntry>(p => ({
           id: p.id,
           name: p.name,
-          backend: p.backend === 'cloud' ? 'cloud' : p.backend === 'browser' ? 'browser' : 'local',
+          backend:
+            p.backend === 'cloud' || p.backend === 'browser' || p.backend === 'workspace'
+              ? p.backend
+              : 'local',
           localAbsolutePath: p.localAbsolutePath,
+          endpoint: typeof p.endpoint === 'string' ? p.endpoint : undefined,
+          workspaceId: typeof p.workspaceId === 'string' ? p.workspaceId : undefined,
           linkedCloudProjectId:
             typeof p.linkedCloudProjectId === 'string' ? p.linkedCloudProjectId : undefined,
           linkedLocalSessionId:
@@ -238,6 +274,8 @@ export class ProjectService {
       localAbsolutePath: entry.localAbsolutePath,
       linkedCloudProjectId: entry.linkedCloudProjectId,
       linkedLocalSessionId: entry.linkedLocalSessionId,
+      endpoint: entry.endpoint,
+      workspaceId: entry.workspaceId,
       lastOpenedAt: entry.lastOpenedAt ?? Date.now(),
     };
     filtered.unshift(toAdd);
@@ -256,7 +294,14 @@ export class ProjectService {
   syncProjectMetadata(): void {
     if (appState.project.status !== 'ready' || !appState.project.id) return;
 
+    const workspace = appState.project.workspace;
     this.addRecentProject({
+      ...(appState.project.backend === 'workspace'
+        ? {
+            endpoint: workspace.endpoint ?? undefined,
+            workspaceId: workspace.workspaceId ?? undefined,
+          }
+        : {}),
       id: appState.project.id,
       name: appState.project.projectName ?? 'Untitled Project',
       backend: appState.project.backend,
@@ -324,7 +369,7 @@ export class ProjectService {
       appState.project.hybridSync = createInitialHybridSyncState();
       appState.project.status = 'ready';
       appState.project.errorMessage = null;
-      appState.project.manifest = await this.loadProjectManifest();
+      appState.project.manifest = await this.loadManifestOnOpen();
 
       // save recent entry with id and persist handle to IndexedDB (best-effort)
       this.addRecentProject({
@@ -374,6 +419,11 @@ export class ProjectService {
       return;
     }
 
+    if (entry.backend === 'workspace') {
+      await this.openRecentWorkspaceProject(entry);
+      return;
+    }
+
     if (entry.id) {
       try {
         const handle = await this.getPersistedProjectDirectoryHandle(entry.id);
@@ -390,7 +440,7 @@ export class ProjectService {
             appState.project.hybridSync = createInitialHybridSyncState();
             appState.project.status = 'ready';
             appState.project.errorMessage = null;
-            appState.project.manifest = await this.loadProjectManifest();
+            appState.project.manifest = await this.loadManifestOnOpen();
             // update timestamp in recents
             this.addRecentProject({
               id: entry.id,
@@ -412,6 +462,82 @@ export class ProjectService {
 
     // fallback to picker which will create a new persisted mapping
     await this.openProjectViaPicker();
+  }
+
+  /**
+   * Open a project served by `pix3 serve` (no File System Access). Connects first and only then
+   * touches `appState.project`, so a wrong token or a dead tunnel leaves the currently open
+   * project exactly as it was. Throws {@link WorkspaceError} with a user-facing message.
+   */
+  async openWorkspaceProject(options: OpenWorkspaceOptions): Promise<void> {
+    const container = ServiceContainer.getInstance();
+    const session = container.getService<WorkspaceSessionService>(
+      container.getOrCreateToken(WorkspaceSessionService)
+    );
+    const credentials = container.getService<WorkspaceCredentialStore>(
+      container.getOrCreateToken(WorkspaceCredentialStore)
+    );
+
+    const { endpoint, hello } = await session.connect(options.endpoint, options.token, {
+      expectedWorkspaceId: options.expectedWorkspaceId ?? null,
+    });
+
+    const id = hello.workspaceId;
+    appState.project.id = id;
+    appState.project.backend = 'workspace';
+    appState.project.directoryHandle = null;
+    appState.project.projectName = hello.projectName || 'Workspace Project';
+    // `root` is a path on the SERVER's machine; "Open in IDE" must not treat it as local.
+    appState.project.localAbsolutePath = null;
+    appState.project.hybridSync = createInitialHybridSyncState();
+    appState.project.status = 'ready';
+    appState.project.errorMessage = null;
+    session.attachToProject(id);
+    appState.project.manifest = await this.loadManifestOnOpen();
+
+    this.addRecentProject({
+      id,
+      name: appState.project.projectName ?? 'Workspace Project',
+      backend: 'workspace',
+      endpoint,
+      workspaceId: hello.workspaceId,
+      lastOpenedAt: Date.now(),
+    });
+    await credentials.set(hello.workspaceId, options.token.trim());
+  }
+
+  /**
+   * Reopen a recents workspace entry with its stored token. No token (or a rejected one) is a
+   * `WorkspaceError('unauthorized')` — the caller asks for a new token, never for a folder.
+   */
+  private async openRecentWorkspaceProject(entry: RecentProjectEntry): Promise<void> {
+    const workspaceId = entry.workspaceId ?? entry.id;
+    if (!entry.endpoint || !workspaceId) {
+      throw new WorkspaceError('bad_request', 'This recent workspace entry is incomplete.');
+    }
+    const container = ServiceContainer.getInstance();
+    const credentials = container.getService<WorkspaceCredentialStore>(
+      container.getOrCreateToken(WorkspaceCredentialStore)
+    );
+    const token = await credentials.get(workspaceId);
+    if (!token) {
+      throw new WorkspaceError(
+        'unauthorized',
+        `No saved token for "${entry.name}" in this browser. Paste the token printed by \`pix3 serve\`.`
+      );
+    }
+    try {
+      await this.openWorkspaceProject({
+        endpoint: entry.endpoint,
+        token,
+        expectedWorkspaceId: workspaceId,
+      });
+    } catch (error) {
+      if (error instanceof WorkspaceError && error.code === 'unauthorized') {
+        await credentials.delete(workspaceId);
+      }
+      throw error;
+    }
   }
 
   /**
@@ -444,7 +570,7 @@ export class ProjectService {
     appState.project.hybridSync = createInitialHybridSyncState();
     appState.project.status = 'ready';
     appState.project.errorMessage = null;
-    appState.project.manifest = await this.loadProjectManifest();
+    appState.project.manifest = await this.loadManifestOnOpen();
     this.addRecentProject({
       id: entry.id,
       name: appState.project.projectName ?? entry.name,
@@ -459,6 +585,15 @@ export class ProjectService {
    * if permissions have been dropped (used by Router/Deep Linking)
    */
   async openLocalSession(sessionId: string): Promise<boolean> {
+    const recent = this.getRecentProjects().find(r => r.id === sessionId);
+    if (recent?.backend === 'workspace') {
+      // A reload of `#editor?local=<workspaceId>`: reconnect with the stored token. A failure
+      // (server down, token rotated) throws a WorkspaceError the router turns into the connect
+      // dialog — never a folder picker.
+      await this.openRecentWorkspaceProject(recent);
+      return true;
+    }
+
     const handle = await this.getHandleFromIndexedDB(sessionId);
     if (!handle) {
       throw new Error('Local session not found in IndexedDB.');
@@ -486,7 +621,7 @@ export class ProjectService {
       appState.project.hybridSync = createInitialHybridSyncState();
       appState.project.status = 'ready';
       appState.project.errorMessage = null;
-      appState.project.manifest = await this.loadProjectManifest();
+      appState.project.manifest = await this.loadManifestOnOpen();
 
       if (existing) {
         this.addRecentProject({
@@ -520,7 +655,7 @@ export class ProjectService {
       appState.project.hybridSync = createInitialHybridSyncState();
       appState.project.status = 'ready';
       appState.project.errorMessage = null;
-      appState.project.manifest = await this.loadProjectManifest();
+      appState.project.manifest = await this.loadManifestOnOpen();
 
       const recents = this.getRecentProjects();
       const existing = recents.find(r => r.id === sessionId);
@@ -610,7 +745,10 @@ export class ProjectService {
   }
 
   async listProjectRoot(): Promise<FileDescriptor[]> {
-    if (appState.project.backend !== 'cloud' && !appState.project.directoryHandle) return [];
+    const backend = appState.project.backend;
+    if (backend !== 'cloud' && backend !== 'workspace' && !appState.project.directoryHandle) {
+      return [];
+    }
     try {
       return await this.storage.listDirectory('.');
     } catch {
@@ -721,7 +859,12 @@ export class ProjectService {
       }
 
       // Create base project structure
-      await this.applyTemplateFiles(options.name, options.manifest, options.templateId);
+      await this.applyTemplateFiles(
+        options.name,
+        options.manifest,
+        options.templateId,
+        options.skipTemplatePaths ? { skip: options.skipTemplatePaths } : undefined
+      );
 
       await activateOptions?.beforeActivate?.();
 
@@ -935,13 +1078,18 @@ export class ProjectService {
     }
     // createDirectory creates the whole nested chain and is a no-op for
     // existing directories — errors are real failures and must surface.
-    await this.fs.createDirectory(directory);
+    if (appState.project.backend === 'workspace') {
+      await this.storage.createDirectory(directory);
+    } else {
+      await this.fs.createDirectory(directory);
+    }
     ensuredDirectories.add(directory);
   }
 
   async loadProjectManifest(): Promise<ProjectManifest> {
     try {
       const yaml = await this.storage.readTextFile(PROJECT_MANIFEST_PATH);
+      this.loadedManifestHash = await this.manifestHashOf(yaml);
       const parsed = parse(yaml);
       const manifest = normalizeProjectManifest(parsed);
       // Push the project-tier AO default so scenes set to `inherit` resolve it.
@@ -964,10 +1112,39 @@ export class ProjectService {
       });
       return manifest;
     } catch {
+      this.loadedManifestHash = null;
       const fallback = createDefaultProjectManifest();
       setProjectAODefault(fallback.ambientOcclusion);
       setProjectTextureFiltering(fallback.textureFiltering);
       return fallback;
+    }
+  }
+
+  /**
+   * The manifest of a local/browser project being opened, with `metadata.projectId` backfilled.
+   *
+   * Projects created before the editor minted ids (or by hand) have none; the first open writes one
+   * — once, since the next open finds it. Only an existing `pix3project.yaml` is touched: a folder
+   * without one is not silently turned into a project here. Best-effort: a read-only folder still
+   * opens, just without a stable id this session.
+   */
+  private async loadManifestOnOpen(): Promise<ProjectManifest> {
+    const manifest = await this.loadProjectManifest();
+    if (getProjectId(manifest) !== null) {
+      return manifest;
+    }
+    try {
+      await this.storage.readTextFile(PROJECT_MANIFEST_PATH);
+    } catch {
+      return manifest;
+    }
+    const withId = withProjectId(manifest, createProjectId());
+    try {
+      await this.saveProjectManifest(withId);
+      return normalizeProjectManifest(withId);
+    } catch (error) {
+      console.warn('[ProjectService] Could not backfill metadata.projectId', error);
+      return manifest;
     }
   }
 
@@ -1022,7 +1199,27 @@ export class ProjectService {
     };
     const yaml = stringify(payload, { indent: 2 });
     await this.storage.writeTextFile(PROJECT_MANIFEST_PATH, yaml);
+    this.loadedManifestHash = await this.manifestHashOf(yaml);
     appState.project.manifest = normalized;
+  }
+
+  /** sha256 of the manifest bytes the editor last read or wrote (see `loadedManifestHash`). */
+  getLoadedManifestHash(): string | null {
+    return this.loadedManifestHash;
+  }
+
+  /** Re-read `pix3project.yaml` into `appState.project.manifest` (it changed on disk). */
+  async reloadProjectManifest(): Promise<void> {
+    appState.project.manifest = await this.loadProjectManifest();
+  }
+
+  /** The workspace ETag of the exchange that just happened (the exact bytes), else the text's hash. */
+  private async manifestHashOf(yaml: string): Promise<string | null> {
+    try {
+      return this.storage.getKnownContentHash?.(PROJECT_MANIFEST_PATH) ?? (await sha256(yaml));
+    } catch {
+      return null;
+    }
   }
 
   private async updateProjectReferencesAfterMove(
@@ -1608,6 +1805,17 @@ export class ProjectService {
       collaborationService.disconnect();
     } catch {
       // ignore if collaboration service is not available yet
+    }
+    if (appState.project.backend === 'workspace') {
+      try {
+        ServiceContainer.getInstance()
+          .getService<WorkspaceSessionService>(
+            ServiceContainer.getInstance().getOrCreateToken(WorkspaceSessionService)
+          )
+          .disconnect();
+      } catch (error) {
+        console.warn('[ProjectService] Failed to disconnect the workspace', error);
+      }
     }
 
     appState.project.id = null;

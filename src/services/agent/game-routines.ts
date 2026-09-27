@@ -209,6 +209,7 @@ const INPUT_STEP_FIELDS: Record<keyof GameInputStep, true> = {
   args: true,
   x: true,
   y: true,
+  space: true,
   to: true,
   code: true,
   codes: true,
@@ -417,6 +418,11 @@ export function parseRoutineStep(raw: unknown): { step: RoutineStep } | { error:
     if (record[field] !== undefined && typeof record[field] !== 'string') {
       return { error: `"${field}" must be a string.` };
     }
+  }
+  if (record.space !== undefined && record.space !== 'world' && record.space !== 'overlay') {
+    return {
+      error: `"space" must be 'world' (through the Camera2D) or 'overlay' (CanvasLayer2D).`,
+    };
   }
   for (const field of ['x', 'y', 'ms', 'frames', 'holdMs'] as const) {
     const value = record[field];

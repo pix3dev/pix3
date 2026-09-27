@@ -292,6 +292,10 @@ export class LayoutManagerService {
   private editorTabItems = new Map<string, ContentItem>();
   private editorTabFocusedListeners = new Set<(tabId: string) => void>();
   private editorTabCloseRequestedListeners = new Set<(tabId: string) => void>();
+  private editorTabContextMenuListeners = new Set<
+    (tabId: string, at: { x: number; y: number }) => void
+  >();
+  private handleTabContextMenu?: (e: MouseEvent) => void;
   private handleTabCloseClick?: (e: MouseEvent) => void;
   private tabDecorationHandle: ReturnType<typeof setTimeout> | null = null;
 
@@ -325,26 +329,7 @@ export class LayoutManagerService {
       const tabEl = target.closest('.lm_tab') as HTMLElement | null;
       if (!tabEl) return;
 
-      // Find the ComponentItem that owns this tab by matching against our tracked items.
-      const tabTitle = tabEl.querySelector('.lm_title')?.textContent ?? '';
-      let matchedTabId: string | null = null;
-
-      for (const [tabId] of this.editorTabContainers) {
-        // Match by checking the item's title against the tab title.
-        const item = this.editorTabItems.get(tabId);
-        if (item && (item as ComponentItem).title === tabTitle) {
-          matchedTabId = tabId;
-          break;
-        }
-      }
-
-      // Fallback: search by component state tabId in the GL tree.
-      if (!matchedTabId && this.layout) {
-        const root = (this.layout as unknown as { rootItem?: ContentItem }).rootItem;
-        if (root) {
-          matchedTabId = this.findTabIdByTitle(root, tabTitle);
-        }
-      }
+      const matchedTabId = this.resolveEditorTabId(tabEl);
 
       if (!matchedTabId) return; // Not one of our editor tabs, let GL handle it.
 
@@ -362,6 +347,24 @@ export class LayoutManagerService {
       }
     };
     container.addEventListener('mousedown', this.handleTabCloseClick, true);
+
+    // Right-click on an editor tab: the shell opens the tab's context menu (e.g. "Restore my
+    // version…" for scenes). Other tabs keep the browser's default.
+    this.handleTabContextMenu = (e: MouseEvent) => {
+      const tabEl = (e.target as HTMLElement | null)?.closest?.('.lm_tab') as HTMLElement | null;
+      if (!tabEl || this.editorTabContextMenuListeners.size === 0) return;
+      const tabId = this.resolveEditorTabId(tabEl);
+      if (!tabId) return;
+      e.preventDefault();
+      for (const listener of this.editorTabContextMenuListeners) {
+        try {
+          listener(tabId, { x: e.clientX, y: e.clientY });
+        } catch {
+          // ignore
+        }
+      }
+    };
+    container.addEventListener('contextmenu', this.handleTabContextMenu);
 
     this.registerComponents(this.layout);
     await this.loadDefaultLayout();
@@ -404,6 +407,31 @@ export class LayoutManagerService {
   subscribeEditorTabFocused(listener: (tabId: string) => void): () => void {
     this.editorTabFocusedListeners.add(listener);
     return () => this.editorTabFocusedListeners.delete(listener);
+  }
+
+  subscribeEditorTabContextMenu(
+    listener: (tabId: string, at: { x: number; y: number }) => void
+  ): () => void {
+    this.editorTabContextMenuListeners.add(listener);
+    return () => this.editorTabContextMenuListeners.delete(listener);
+  }
+
+  /** The editor tab id a Golden Layout `.lm_tab` element belongs to (matched by title). */
+  private resolveEditorTabId(tabEl: HTMLElement): string | null {
+    const tabTitle = tabEl.querySelector('.lm_title')?.textContent ?? '';
+    for (const [tabId] of this.editorTabContainers) {
+      const item = this.editorTabItems.get(tabId);
+      if (item && (item as ComponentItem).title === tabTitle) {
+        return tabId;
+      }
+    }
+    if (this.layout) {
+      const root = (this.layout as unknown as { rootItem?: ContentItem }).rootItem;
+      if (root) {
+        return this.findTabIdByTitle(root, tabTitle);
+      }
+    }
+    return null;
   }
 
   subscribeEditorTabCloseRequested(listener: (tabId: string) => void): () => void {
@@ -1124,6 +1152,10 @@ export class LayoutManagerService {
     if (this.container && this.handleTabCloseClick) {
       this.container.removeEventListener('mousedown', this.handleTabCloseClick, true);
       this.handleTabCloseClick = undefined;
+    }
+    if (this.container && this.handleTabContextMenu) {
+      this.container.removeEventListener('contextmenu', this.handleTabContextMenu);
+      this.handleTabContextMenu = undefined;
     }
     if (this.layout) {
       try {

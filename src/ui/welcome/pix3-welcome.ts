@@ -35,6 +35,8 @@ import {
   type ComposerAttachment,
 } from '@/ui/shared/composer-attachments';
 import { CURRENT_EDITOR_VERSION } from '@/version';
+import { WorkspaceConnectDialogService } from '@/services/project/workspace/WorkspaceConnectDialogService';
+import { isWorkspaceError } from '@/services/project/workspace/workspace-protocol';
 
 /**
  * The welcome screen leads with the prompt: Flow is the default way in (design §1.1/§3.1), so
@@ -87,6 +89,9 @@ export class Pix3Welcome extends ComponentBase {
 
   @inject(LlmProviderRegistry)
   private readonly llmRegistry!: LlmProviderRegistry;
+
+  @inject(WorkspaceConnectDialogService)
+  private readonly workspaceConnectDialog!: WorkspaceConnectDialogService;
 
   @state()
   private prompt = '';
@@ -503,6 +508,11 @@ export class Pix3Welcome extends ComponentBase {
     }
   };
 
+  private onConnectWorkspace = (): void => {
+    this.projectError = null;
+    this.workspaceConnectDialog.open();
+  };
+
   private onStartNew = async (): Promise<void> => {
     try {
       await this.projectLifecycleService.showCreateDialog();
@@ -542,6 +552,17 @@ export class Pix3Welcome extends ComponentBase {
     try {
       await this.projectService.openRecentProject(entry);
     } catch (error) {
+      if (entry.backend === 'workspace' && isWorkspaceError(error)) {
+        // A workspace reopen never falls back to a folder picker: the connect dialog says what is
+        // wrong (token rejected, server down, tunnel, protocol) and retries with one click.
+        this.workspaceConnectDialog.open({
+          endpoint: entry.endpoint ?? null,
+          errorMessage: error.message,
+          workspaceName: entry.name,
+          workspaceId: entry.workspaceId ?? null,
+        });
+        return;
+      }
       this.captureProjectOpenError(error);
     }
   };
@@ -676,6 +697,9 @@ export class Pix3Welcome extends ComponentBase {
     }
     // Both rows under the Local Projects tab are local; the badge says WHERE, so a
     // file-system project reads "Folder" rather than repeating the tab's own word.
+    if (entry.backend === 'workspace') {
+      return 'Workspace';
+    }
     return entry.backend === 'browser' ? 'Browser' : 'Folder';
   }
 
@@ -691,7 +715,9 @@ export class Pix3Welcome extends ComponentBase {
         ? 'cloud-outline'
         : entry.backend === 'browser'
           ? 'globe'
-          : 'folder-outline';
+          : entry.backend === 'workspace'
+            ? 'server'
+            : 'folder-outline';
     return this.iconService.getIcon(iconName, 18);
   }
 
@@ -702,7 +728,12 @@ export class Pix3Welcome extends ComponentBase {
   private getLocalProjectItems(): Array<{ entry: RecentProjectEntry; recentIndex: number }> {
     return this.recents
       .map((entry, recentIndex) => ({ entry, recentIndex }))
-      .filter(item => item.entry.backend === 'local' || item.entry.backend === 'browser');
+      .filter(
+        item =>
+          item.entry.backend === 'local' ||
+          item.entry.backend === 'browser' ||
+          item.entry.backend === 'workspace'
+      );
   }
 
   private renderPromptHero() {
@@ -983,6 +1014,14 @@ export class Pix3Welcome extends ComponentBase {
                 <button @click=${this.onOpen} class="action-btn">
                   <span class="action-icon">${this.iconService.getIcon('folder-outline', 18)}</span>
                   <span class="action-label">Open Project</span>
+                </button>
+                <button
+                  @click=${this.onConnectWorkspace}
+                  class="action-btn"
+                  title="Open a project served by pix3 serve (e.g. on a VS Code Remote SSH host)"
+                >
+                  <span class="action-icon">${this.iconService.getIcon('server', 18)}</span>
+                  <span class="action-label">Connect to Workspace</span>
                 </button>
                 <button @click=${this.onStartNew} class="action-btn">
                   <span class="action-icon"

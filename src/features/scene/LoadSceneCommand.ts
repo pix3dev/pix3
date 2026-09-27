@@ -6,6 +6,9 @@ import { SceneValidationError } from '@pix3/runtime';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import type { SceneGraph } from '@pix3/runtime';
 import { ref } from 'valtio/vanilla';
+import { optionalService } from '@/services/project/coauthoring/optional-service';
+import { SceneDiskStateService } from '@/services/project/coauthoring/SceneDiskStateService';
+import { readDiskVersion, type DiskVersion } from '@/services/project/coauthoring/disk-version';
 import {
   CommandBase,
   type CommandContext,
@@ -72,8 +75,19 @@ export class LoadSceneCommand extends CommandBase<LoadSceneCommandPayload, void>
     state.scenes.loadError = null;
 
     try {
-      const sceneText = await this.resources.readText(filePath);
+      const diskState = filePath.startsWith('res://')
+        ? optionalService(context.container, SceneDiskStateService)
+        : null;
+      // Co-authoring: read the raw bytes once, hash THOSE and parse their text, so the recorded
+      // version is exactly what was loaded (a BOM would make a text hash never match the disk's).
+      const diskVersion = diskState ? await this.readDiskVersionSafe(filePath) : null;
+      const sceneText = diskVersion?.text ?? (await this.resources.readText(filePath));
       const graph = await this.sceneManager.parseScene(sceneText, { filePath });
+      if (diskState) {
+        // The pre-write check of every later save compares the disk against this version, and
+        // the external merge reads it as E (the version the editor accepted).
+        await diskState.recordRead(filePath, diskVersion?.bytes ?? sceneText, sceneText);
+      }
 
       const activeId = this.payload.sceneId ?? state.scenes.activeSceneId ?? 'startup-scene';
       const existing = state.scenes.descriptors[activeId] ?? null;
@@ -166,6 +180,14 @@ export class LoadSceneCommand extends CommandBase<LoadSceneCommandPayload, void>
       state.scenes.loadError = message;
       console.error('[LoadSceneCommand] Scene load failed:', error);
       throw error;
+    }
+  }
+
+  private async readDiskVersionSafe(filePath: string): Promise<DiskVersion | null> {
+    try {
+      return await readDiskVersion(this.storage, filePath);
+    } catch {
+      return null;
     }
   }
 

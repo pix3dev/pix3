@@ -166,8 +166,29 @@ pix3-status-bar .status-perf.high {
   color: var(--danger);
 }
 
+/* Fixed-width values so digit-count changes don't shift the labels to the left. */
+pix3-status-bar .status-perf-value {
+  display: inline-block;
+  text-align: right;
+  white-space: nowrap;
+}
+
+pix3-status-bar .status-perf-value.cpu {
+  min-width: 4ch; /* "100%" */
+}
+
+pix3-status-bar .status-perf-value.gpu {
+  min-width: 7.5ch; /* "999.9ms" */
+}
+
 pix3-status-bar .status-perf-sep {
   opacity: 0.45;
+}
+
+/* The viewport is repainting every frame (a preview is animating); the tooltip says which. */
+pix3-status-bar .status-perf-live {
+  color: var(--pix3-accent-color);
+  font-weight: 600;
 }
 
 pix3-status-bar .status-version {
@@ -308,4 +329,9 @@ pix3-status-bar .status-sync.is-error:hover {
   to {
     transform: rotate(360deg);
   }
+}
+
+/* Autosave pill of the co-authoring mode: "off" is a normal setup, so muted rather than amber. */
+pix3-status-bar .status-sync.is-off {
+  color: var(--fg-3);
 }

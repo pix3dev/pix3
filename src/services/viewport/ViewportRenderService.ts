@@ -82,8 +82,14 @@ import {
   type Transform2DUpdateOptions,
   type Selection2DOverlay,
 } from '@/services/viewport/TransformTool2d';
-import { isDocumentActive } from '@/services/core/page-activity';
+import {
+  isDocumentActive,
+  isEditorKeepAlive,
+  onEditorKeepAliveChange,
+} from '@/services/core/page-activity';
+import { BackgroundTicker } from '@/services/core/background-ticker';
 import { isPointerBlocked } from './peek-gating';
+import { GestureStateService } from './GestureStateService';
 
 // The transform tool is UI state (`appState.ui.transformMode`) — the four `view.transform-mode-*`
 // commands report it as their checked state. Re-exported here so the many modules that already
@@ -148,6 +154,11 @@ export interface FrameNodesOptions {
 
 @injectable()
 export class ViewportRendererService {
+  @inject(GestureStateService)
+  private readonly gestureState!: GestureStateService;
+
+  private readonly disposeGestureProbe: () => void;
+
   @inject(SceneManager)
   private readonly sceneManager!: SceneManager;
 
@@ -192,6 +203,11 @@ export class ViewportRendererService {
   private animationId?: number;
   private isPaused = true;
   private isWindowFocused = isDocumentActive(document);
+  /**
+   * Frame source of the render loop: rAF, or worker ticks in a hidden tab while an agent keeps the
+   * editor alive — there rAF never fires, and a loop parked on it would swallow `requestRender`.
+   */
+  private readonly frameTicker = new BackgroundTicker();
   private disposers: Array<() => void> = [];
   private gridHelper?: THREE.GridHelper;
   private editorAmbientLight?: THREE.AmbientLight;
@@ -413,6 +429,9 @@ export class ViewportRendererService {
 
   constructor() {
     this.transformTool2d = new TransformTool2d();
+    this.disposeGestureProbe = this.gestureState.registerProbe(() =>
+      this.transformSession.isGestureActive()
+    );
   }
 
   private disposeObject3D(root: THREE.Object3D): void {
@@ -705,12 +724,15 @@ export class ViewportRendererService {
     window.addEventListener('pageshow', onPageShow);
     window.addEventListener('pagehide', onPageHide);
     document.addEventListener('visibilitychange', onVisibilityChange);
+    // An agent attaching / leaving re-decides the focus pause (`AgentKeepaliveService`).
+    const disposeKeepAlive = onEditorKeepAliveChange(() => this.handleFocusPause());
     this.disposers.push(() => {
       window.removeEventListener('focus', onFocus);
       window.removeEventListener('blur', onBlur);
       window.removeEventListener('pageshow', onPageShow);
       window.removeEventListener('pagehide', onPageHide);
       document.removeEventListener('visibilitychange', onVisibilityChange);
+      disposeKeepAlive();
     });
 
     this.syncNavigationMode();
@@ -845,7 +867,7 @@ export class ViewportRendererService {
   pause(): void {
     this.isPaused = true;
     if (this.animationId) {
-      cancelAnimationFrame(this.animationId);
+      this.frameTicker.cancel(this.animationId);
       this.animationId = undefined;
     }
     this.cancelPanMomentum();
@@ -1950,7 +1972,7 @@ export class ViewportRendererService {
    */
   private parkRenderLoop(): void {
     if (this.animationId !== undefined) {
-      cancelAnimationFrame(this.animationId);
+      this.frameTicker.cancel(this.animationId);
       this.animationId = undefined;
     }
     // …but not when the reason we are parking is that nobody can see the canvas (Vibe with its
@@ -4577,7 +4599,7 @@ export class ViewportRendererService {
         return;
       }
 
-      this.animationId = requestAnimationFrame(render);
+      this.animationId = this.frameTicker.request(render);
       this.renderLoopTick();
     };
 
@@ -4619,6 +4641,23 @@ export class ViewportRendererService {
   }
 
   /**
+   * Why the viewport is currently painting every frame instead of on demand (empty when idle).
+   * Surfaced in the status bar's load tooltip so a hot loop is attributable — above all to a
+   * user script whose editor preview keeps asking for frames.
+   */
+  getContinuousRenderReasons(): string[] {
+    const reasons: string[] = [];
+    if (this.previewAnimationActions.size > 0) {
+      reasons.push(`animation preview ×${this.previewAnimationActions.size}`);
+    }
+    reasons.push(...this.previewTicker.getActivePreviewReasons());
+    if (this.axisGizmo.isAnimating()) {
+      reasons.push('view-cube flight');
+    }
+    return reasons;
+  }
+
+  /**
    * Pointer-down over the orientation gizmo: snaps the camera onto the clicked
    * axis. Returns true when the press belongs to the gizmo, in which case the
    * viewport must not also treat it as a pick.
@@ -4633,7 +4672,8 @@ export class ViewportRendererService {
   }
 
   private shouldPauseForWindowFocus(): boolean {
-    if (!appState.ui.pauseRenderingOnUnfocus || this.isWindowFocused) {
+    // An agent keeps the editor alive: its screenshots and edits must land while the tab is away.
+    if (!appState.ui.pauseRenderingOnUnfocus || this.isWindowFocused || isEditorKeepAlive()) {
       return false;
     }
 
@@ -4643,10 +4683,12 @@ export class ViewportRendererService {
   }
 
   dispose(): void {
+    this.disposeGestureProbe();
     // Cancel animation loop
     if (this.animationId !== undefined) {
-      cancelAnimationFrame(this.animationId);
+      this.frameTicker.cancel(this.animationId);
     }
+    this.frameTicker.dispose();
 
     // Cancel pan momentum animation
     this.cancelPanMomentum();

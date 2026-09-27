@@ -26,7 +26,9 @@ what this map does not name, and say in one line what you were missing.
   `dispose()` only outside the tick), `getComponent(Class)`, `addComponent(c)`,
   `removeComponent(c)`.
 - Signals: `node.emit(name, ...args)`, `node.connect(name, target, fn)`,
-  `node.disconnect(name, target, fn)` (the `Script` base auto-disconnects on detach).
+  `node.disconnect(name, target, fn)`. A script's handlers (`target === this`) are
+  auto-disconnected on detach — on its own node and on any other node it connected to.
+  Window listeners, store subscriptions and timers are still yours to clean up.
   **UI controls emit:** every `UIControl2D` (`Button2D`, `Slider2D`, `Checkbox2D`, `Joystick2D`,
   `InventorySlot2D`, `ScrollContainer2D`) → `'pressed'`, `'released'`, `'click'` (a completed
   tap — wire buttons to THIS), `'pointerdown'`, `'pointerup'`; `Checkbox2D` / `InventorySlot2D`
@@ -68,8 +70,11 @@ what this map does not name, and say in one line what you were missing.
 - Time: `scene.time.hitstop(ms)` (edge-triggered — on a contact START, never per frame),
   `scene.time.slowMotion(scale, { durationMs, blendMs })`, `setScale`, `reset`, `scale`,
   `isFrozen`.
-- **Juice (`scene.juice`)** — one-liners, call them WITH the mechanic: `shake(target, {…})`,
-  `punchScale(target, {…})`, `popIn(target, {…})`, `flash({…})`, `burst(anchor, { count: 14,
+- **Juice (`scene.juice`)** — one-liners, call them WITH the mechanic: `shake(target, {
+  amplitude: 8, frequency: 24, duration: 0.35, decay: 1.5 })`, `punchScale(target, { amount: 0.3,
+  duration: 0.35, vibrato: 3 })`, `popIn(target, { from: 0, duration: 0.4, easing: 'backOut' })`
+  (these three take `duration`, not `durationSec`), `flash({ color: '#ffffff', intensity: 1,
+  durationSec: 0.2 })`, `burst(anchor, { count: 14,
   speed: 260, spread: 2π, direction, lifeSec: 0.5, color | colors: [], sizePx: 10, gravityY:
   -600, fadeOut: true, additive: true, zIndex })`, `floatText('+25', { at, color,
   fontSizePx: 28, driftPx: 60, durationSec: 0.8, glow })`. `target` = node | node query |

@@ -118,6 +118,30 @@ describe('UpdateObjectPropertyOperation', () => {
     expect(viewportRendererMock.updateSelection).not.toHaveBeenCalled();
   });
 
+  it('refuses a non-finite number (NaN position) instead of recording and saving it', async () => {
+    const sprite = new Sprite2D({ id: 'sprite-nan', name: 'Sprite', width: 64, height: 64 });
+    sprite.position.set(3, 4, 0);
+    const { context, state } = createOperationContext(sprite);
+    for (const value of [{ x: Number.NaN, y: 5 }, [Infinity, 0]]) {
+      const result = await new UpdateObjectPropertyOperation({
+        nodeId: sprite.nodeId,
+        propertyPath: 'position',
+        value,
+      }).perform(context);
+      expect(result.didMutate).toBe(false);
+    }
+    const width = await new UpdateObjectPropertyOperation({
+      nodeId: sprite.nodeId,
+      propertyPath: 'width',
+      value: Number.NaN,
+    }).perform(context);
+    expect(width.didMutate).toBe(false);
+    expect(sprite.position.x).toBe(3);
+    expect(sprite.position.y).toBe(4);
+    expect(sprite.width).toBe(64);
+    expect(state.scenes.descriptors['scene-1']?.isDirty).toBe(false);
+  });
+
   it('forwards perform/undo/redo edits to the running clone via the runtime sink', async () => {
     const calls: Array<{ nodeId: string; propertyPath: string; value: unknown }> = [];
     registerRuntimeLivePropertySink((nodeId, propertyPath, value) => {

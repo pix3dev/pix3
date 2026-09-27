@@ -28,6 +28,26 @@ const TEXT_FILE_EXTENSIONS = new Set([
   'yml',
 ]);
 
+/**
+ * Media types a cached read must announce. The browser decodes an image Blob by its type, and an
+ * SVG in particular renders only as `image/svg+xml` — `.svg` is cached as text (so `readTextFile`
+ * stays cheap), which used to hand it back as `text/plain` and leave the Sprite2D blank.
+ */
+const MEDIA_MIME_BY_EXTENSION: Readonly<Record<string, string>> = {
+  svg: 'image/svg+xml',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+  gif: 'image/gif',
+  mp3: 'audio/mpeg',
+  ogg: 'audio/ogg',
+  wav: 'audio/wav',
+};
+
+/** Blob types that say nothing about the content, so the extension may override them. */
+const GENERIC_BLOB_TYPES = new Set(['', 'text/plain', 'application/octet-stream']);
+
 type CloudCacheStorageKind = 'text' | 'idb-blob' | 'opfs';
 
 interface CloudCacheRecord {
@@ -106,14 +126,16 @@ export class CloudProjectCacheService {
     }
 
     if (record.storage === 'text') {
-      return new Blob([record.textContent ?? ''], { type: 'text/plain' });
+      return new Blob([record.textContent ?? ''], {
+        type: this.resolveMediaType(normalizedPath) ?? 'text/plain',
+      });
     }
 
-    if (record.storage === 'idb-blob') {
-      return record.blobContent ?? null;
-    }
-
-    return await this.readBlobFromOpfs(projectId, record.opfsPath ?? normalizedPath);
+    const blob =
+      record.storage === 'idb-blob'
+        ? (record.blobContent ?? null)
+        : await this.readBlobFromOpfs(projectId, record.opfsPath ?? normalizedPath);
+    return blob ? this.withMediaType(normalizedPath, blob) : null;
   }
 
   async storeTextFile(
@@ -228,6 +250,21 @@ export class CloudProjectCacheService {
         database?.close();
       })
       .catch(() => undefined);
+  }
+
+  private resolveMediaType(path: string): string | null {
+    const fileName = path.split('/').pop() ?? path;
+    const extension = fileName.includes('.') ? fileName.split('.').pop()?.toLowerCase() : '';
+    return (extension && MEDIA_MIME_BY_EXTENSION[extension]) || null;
+  }
+
+  /** Re-types an image/audio blob whose stored type is generic (OPFS files often come back untyped). */
+  private withMediaType(path: string, blob: Blob): Blob {
+    const mediaType = this.resolveMediaType(path);
+    if (!mediaType || !GENERIC_BLOB_TYPES.has(blob.type.split(';')[0].trim().toLowerCase())) {
+      return blob;
+    }
+    return blob.slice(0, blob.size, mediaType);
   }
 
   private isTextPath(path: string): boolean {

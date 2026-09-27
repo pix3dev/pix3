@@ -1,0 +1,152 @@
+pix3-workspace-connect-dialog {
+  display: contents;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: var(--pix3-z-modal);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: oklch(0 0 0 / 0.55);
+  backdrop-filter: blur(4px);
+}
+
+pix3-workspace-connect-dialog .workspace-connect-content {
+  box-sizing: border-box;
+  display: grid;
+  gap: 16px;
+  width: min(100%, 480px);
+  padding: 24px;
+  border-radius: var(--radius-3);
+  border: 1px solid var(--line-2);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
+}
+
+pix3-workspace-connect-dialog .workspace-connect-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 1.25rem;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-title__icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+pix3-workspace-connect-dialog .workspace-connect-title__icon svg,
+pix3-workspace-connect-dialog .workspace-connect-error__icon svg {
+  display: block;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-copy,
+pix3-workspace-connect-dialog .workspace-connect-hint {
+  margin: 0;
+  color: var(--fg-2);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+pix3-workspace-connect-dialog code {
+  padding: 0 4px;
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  font-size: 0.85em;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-field {
+  display: grid;
+  gap: 6px;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-field label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--fg-1);
+}
+
+pix3-workspace-connect-dialog .workspace-connect-field input {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-1);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  outline: none;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-field input:focus {
+  border-color: var(--accent);
+}
+
+pix3-workspace-connect-dialog .workspace-connect-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-1);
+  background: var(--bg-2);
+  color: var(--danger);
+  font-size: 0.88rem;
+  line-height: 1.45;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-error__icon {
+  flex-shrink: 0;
+  padding-top: 2px;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-btn {
+  box-sizing: border-box;
+  min-width: 110px;
+  padding: 10px 16px;
+  border-radius: var(--radius-2);
+  border: 1px solid var(--line-2);
+  background: var(--bg-2);
+  color: var(--fg-0);
+  cursor: pointer;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-btn[disabled] {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+pix3-workspace-connect-dialog .workspace-connect-btn:focus-visible,
+pix3-workspace-connect-dialog .workspace-connect-field input:focus-visible {
+  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline-offset: 1px;
+}
+
+@media (max-width: 640px) {
+  pix3-workspace-connect-dialog .workspace-connect-actions {
+    flex-direction: column-reverse;
+  }
+
+  pix3-workspace-connect-dialog .workspace-connect-btn {
+    width: 100%;
+  }
+}

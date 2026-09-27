@@ -5,7 +5,7 @@ import { SceneLoader, type ParseSceneOptions } from './SceneLoader';
 // SceneManager. Exported players never save, so they pass no saver and the whole
 // serializer (plus `yaml.stringify`) tree-shakes away. See
 // `.plans/done/playable-export-size.md` §2 Р5.
-import type { SceneSaver } from './SceneSaver';
+import type { SavedSceneDocument, SceneSaver } from './SceneSaver';
 import { Node2D } from '../nodes/Node2D';
 
 export interface SceneGraph {
@@ -71,11 +71,27 @@ export class SceneManager {
     return this.sceneSaver.serializeScene(graph);
   }
 
-  setActiveSceneGraph(sceneId: string, graph: SceneGraph): void {
+  /** The document {@link serializeScene} would stringify, as plain objects (no YAML). */
+  serializeSceneDocument(graph: SceneGraph): SavedSceneDocument {
+    if (!this.sceneSaver) {
+      throw new Error(
+        '[SceneManager] No SceneSaver was provided — this host cannot serialize scenes.'
+      );
+    }
+    return this.sceneSaver.serializeSceneDocument(graph);
+  }
+
+  setActiveSceneGraph(
+    sceneId: string,
+    graph: SceneGraph,
+    options: { readonly disposePrevious?: boolean } = {}
+  ): void {
     // Replacing an existing graph (e.g. scene reload from disk) — free the old
     // graph's GPU resources so geometries/materials/textures are not leaked.
+    // `disposePrevious: false` keeps the old graph intact for a caller that will swap it back
+    // (an undoable whole-graph replacement in the editor); that caller then owns its disposal.
     const previous = this.sceneGraphs.get(sceneId);
-    if (previous && previous !== graph) {
+    if (previous && previous !== graph && options.disposePrevious !== false) {
       this.disposeSceneGraph(previous);
     }
     this.sceneGraphs.set(sceneId, graph);

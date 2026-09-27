@@ -42,7 +42,8 @@ metadata:
 root:
   # Renders nothing; the renderer picks it up and builds the effect stack.
   # `bloomIntensity` is a recipe tunable (design/recipe.md) — the Flow theme
-  # pack turns it up for neon and down for pastel.
+  # pack turns it up for neon; a pastel / light look RAISES `bloomThreshold`
+  # (~0.9) instead — a pale ground over 0.58 blooms the whole screen.
   - id: post-fx
     type: PostProcess
     name: Post FX

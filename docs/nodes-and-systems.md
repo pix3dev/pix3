@@ -235,7 +235,7 @@ scene tree (Godot-like). **Use:** add a `Camera2D`; put HUD under a `CanvasLayer
 Fire-and-forget game feel from scripts (or the matching `core:*` presets):
 
 - `scene.time.hitstop(ms)`, `scene.time.slowMotion(scale, {durationMs, blendMs})`, `setScale` / `reset` / `scale` / `isFrozen`. Scales gameplay `dt`; render + real-time chrome are unscaled. **Hitstop is edge-triggered:** call it when a contact _begins_, never every frame while an overlap lasts — a freeze sets gameplay `dt` to 0, so the contact that drives the call cannot separate on its own (the engine caps one freeze at the longest single request and warns once, so this degrades to a slow game instead of a frozen one).
-- `scene.juice.shake(target, opts)`, `punchScale(target, opts)`, `popIn(target, opts)`, `flash({color,intensity,durationSec})`. `target` is a node, a node query, or `'camera'` / `'camera2d'`.
+- `scene.juice.shake(target, {amplitude=8, frequency=24, duration=0.35, decay=1.5})` (`duration: 0` = until stopped), `punchScale(target, {amount=0.3, duration=0.35, vibrato=3})`, `popIn(target, {from=0, duration=0.4, easing='backOut'})`, `flash({color='#ffffff', intensity=1, durationSec=0.2})`. The three transform effects take `duration` in seconds — **not** `durationSec` (same keys as their `core:Shake` / `core:PunchScale` / `core:PopIn` config). `target` is a node, a node query, or `'camera'` / `'camera2d'`.
 - `scene.juice.burst(target, opts)` — one-shot 2D particle burst. `target` is a node, a node query, or a `{x,y}` 2D world point. Options (all defaulted, all clamped): `count` (14, max 512), `speed` (260 px/s), `spread` (radians, default `2π`), `direction` (radians, default up), `lifeSec` (0.5), `color` / `colors` (palette), `sizePx` (10), `gravityY` (-600), `fadeOut` (true), `additive` (true — the neon look), `zIndex`. Preset form: `core:BurstOnSignal`.
 - `scene.juice.floatText(text, opts)` — floating score/text popup (pops in, rises, fades, frees itself; never pickable). Options: `at` (node / query / `{x,y}`), `color`, `fontSizePx` (28), `fontFamily`, `driftPx` (60 up), `durationSec` (0.8), `glow` (`true` = glow in the text colour, or a colour string), `glowStrength` (1.5), `zIndex`.
   Both spawn a runtime-only 2D node into the anchor's 2D root — no authoring, no
@@ -762,8 +762,12 @@ hidden node (a spawner, a timer, a state machine) keep working.
 
 `node.connect(name, target, method)` / `disconnect` / `emit(name, ...args)`. The
 decoupled event bus between nodes, scripts, animation event tracks, and juice
-`triggerEvent`s. Always `disconnect` in `onDetach` (the `Script` base auto-drops
-connections where the script is the target).
+`triggerEvent`s. Every connection whose target is a script is dropped when that
+script detaches — on its own node **and** on any other node
+(`gameRoot.connect('score', this, this.onScore)` from a HUD script), via
+`removeComponent`, `queueFree`/`dispose` of its node, or scene stop — even if an
+override skips `super.onDetach()`. Window listeners, store subscriptions and
+timers are still the script's own to clean up in `onDetach`.
 
 ### Game commands (`scene.commands`) — named intents
 
@@ -930,8 +934,12 @@ to expose inspector-editable params (see §6). `this.config` holds params.
 > chrome, timers) uses `performance.now()` — mirror how `flash()`/letterbox work.
 
 **Editor preview (draw the node your way without play mode):** implement
-`tickEditorPreview(dt, ctx)` — the editor calls it every non-play frame for each
-enabled component. Use `ctx.setAppearanceOverride({ textureRegion?, tint?,
+`tickEditorPreview(dt, ctx)` — the editor calls it on every non-play frame it
+paints, for each enabled component. The viewport still renders on demand:
+implementing the hook does not keep it painting — only `ctx.requestRender()`
+called _during_ the tick asks for the next frame (called later, e.g. when an
+asset finishes loading, it is a one-off repaint). The status bar shows **Live**
+and names the script while one keeps the loop hot. Use `ctx.setAppearanceOverride({ textureRegion?, tint?,
 visible? })` to change how _this component's node_ draws in the editor viewport;
 it is immediate-mode (stop pushing → the proxy reverts) and never mutates or
 serializes the node. `ctx.assetLoader` / `ctx.requestRender()` are also provided;

@@ -29,9 +29,17 @@ export const resetAppState = (): void => {
   appState.router = defaults.router;
 };
 
-export { createInitialHybridSyncState, createInitialProjectOpenProgressState } from './AppState';
+export {
+  createInitialCoauthoringState,
+  createInitialHybridSyncState,
+  createInitialProjectOpenProgressState,
+  createInitialWorkspaceConnectionState,
+} from './AppState';
 
 export type {
+  AutosaveStatus,
+  CoauthoringState,
+  MergeBannerState,
   AnimationDescriptor,
   AnimationLoadState,
   AnimationsState,
@@ -66,6 +74,9 @@ export type {
   TransformMode,
   ThemeName,
   UIState,
+  WorkspaceConnectionState,
+  WorkspaceConnectionStatus,
+  WorkspaceLeaseState,
   RouterState,
   RouterStatus,
   RouteParams,

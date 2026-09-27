@@ -21,6 +21,7 @@ const sourceVersionPath = resolve(projectRoot, 'src/version.ts');
 const workspacePackageJsonPaths = [
   resolve(projectRoot, 'packages/pix3-runtime/package.json'),
   resolve(projectRoot, 'packages/pix3-collab-server/package.json'),
+  resolve(projectRoot, 'packages/pix3-cli/package.json'),
 ];
 
 function createDisplayVersion(version, build) {

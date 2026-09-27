@@ -1,5 +1,5 @@
 import { ServiceContainer, injectable } from '@/fw/di';
-import { resolveFileSystemAPIService } from '@/services/project/FileSystemAPIService';
+import { resolveProjectStorageService } from '@/services/project/ProjectStorageService';
 import {
   createCenteredPreviewRoot,
   disposeObject3DResources,
@@ -31,7 +31,6 @@ interface ThumbnailPipeline {
 
 @injectable()
 export class ThumbnailGenerator {
-  private readonly fileSystemService = resolveFileSystemAPIService();
   private pipeline: ThumbnailPipeline | null = null;
 
   public generate(blob: Blob): Promise<string>;
@@ -42,7 +41,9 @@ export class ThumbnailGenerator {
     const { gltf, cleanup } = await loadGltfFromBlob({
       blob,
       sourcePath: filePath,
-      readBlob: path => this.fileSystemService.readBlob(path),
+      // Through storage, not the FSA service: a cloud or workspace project has no directory
+      // handle, and the model's sibling files (.bin, textures) live wherever the project does.
+      readBlob: path => resolveProjectStorageService().readBlob(path),
       loader,
     });
     const framedRoot = createCenteredPreviewRoot(gltf.scene);

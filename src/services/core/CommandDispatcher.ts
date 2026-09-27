@@ -25,6 +25,39 @@ const READ_ONLY_ALLOWED_COMMANDS = new Set([
 const READ_ONLY_ALLOWED_PREFIXES = ['viewport.', 'game.', 'editor.'];
 
 /**
+ * A window that does not own the open project (plan §4.3 "Несколько окон": another window holds
+ * the project's Web Lock / the workspace lease) is view-only until it takes over: every command
+ * that could change a scene or write a file is refused here. Navigation, selection, viewport and
+ * play mode stay available; so do `scene.reload` / `scene.refresh-prefab-instances` (a non-owner
+ * still follows the disk). Undo/redo
+ * are NOT allowed (unlike collaboration read-only mode): they mutate the graph like any edit.
+ */
+const NON_OWNER_ALLOWED_COMMANDS = new Set([
+  'scene.load',
+  'scene.reload',
+  // Following the disk, like a reload: prefab instances pick up a prefab changed on disk.
+  'scene.refresh-prefab-instances',
+  'scene.select-object',
+  'scene.open-prefab',
+  'project.open-settings',
+  'project.open-in-ide',
+  'game.open-popout',
+]);
+const NON_OWNER_ALLOWED_PREFIXES = ['viewport.', 'game.', 'editor.open-', 'editor.switch-'];
+
+/** True when this window must not run `commandId` because another window owns the project. */
+export function isBlockedForNonOwner(commandId: string): boolean {
+  const project = appState.project;
+  if (project.status !== 'ready' || project.backend === 'cloud' || project.coauthoring.isOwner) {
+    return false;
+  }
+  return (
+    !NON_OWNER_ALLOWED_COMMANDS.has(commandId) &&
+    !NON_OWNER_ALLOWED_PREFIXES.some(prefix => commandId.startsWith(prefix))
+  );
+}
+
+/**
  * CommandDispatcher executes commands with proper lifecycle management.
  * It creates appropriate context, checks preconditions, and invokes command execution.
  */
@@ -75,6 +108,15 @@ export class CommandDispatcher {
       !READ_ONLY_ALLOWED_PREFIXES.some(prefix => command.metadata.id.startsWith(prefix))
     ) {
       console.warn(`[CommandDispatcher] Read-only mode blocked command: ${command.metadata.id}`);
+      return false;
+    }
+
+    if (isBlockedForNonOwner(command.metadata.id)) {
+      console.warn(
+        `[CommandDispatcher] This window does not own the project; blocked: ${command.metadata.id}`
+      );
+      // The ownership banner reads this and tells the user why nothing happened.
+      appState.project.coauthoring.editBlockedAt = Date.now();
       return false;
     }
 

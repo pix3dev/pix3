@@ -9,6 +9,7 @@ import { OperationService } from '@/services/core/OperationService';
 import { FileSystemAPIService } from '@/services/project/FileSystemAPIService';
 import { SaveAsPrefabOperation } from '@/features/scene/SaveAsPrefabOperation';
 import { SceneManager } from '@pix3/runtime';
+import { appState } from '@/state';
 
 export interface SaveAsPrefabCommandParams {
   nodeId?: string;
@@ -109,7 +110,9 @@ export class SaveAsPrefabCommand extends CommandBase<void, void> {
     type WindowWithSave = { showSaveFilePicker?: ShowSaveFilePickerFn };
     const w = window as unknown as WindowWithSave;
 
-    if (!w.showSaveFilePicker) {
+    // A workspace project is not on this computer: a save picker would offer local folders the
+    // project is not in. Use the conventional prefab path instead.
+    if (!w.showSaveFilePicker || appState.project.backend === 'workspace') {
       const fallbackBaseName = this.toSceneFileBaseName(nodeName, nodeId);
       return `res://prefabs/${fallbackBaseName}.pix3scene`;
     }

@@ -179,9 +179,11 @@ describe('AgentToolRegistry', () => {
       const registry = buildRegistry();
       Object.defineProperty(registry, 'tools', { value: [{ name: 'fs_write', handler }] });
 
-      expect(await registry.execute('fs_write', { path: 'res://scripts/player.ts' })).toMatchObject({
-        ok: true,
-      });
+      expect(await registry.execute('fs_write', { path: 'res://scripts/player.ts' })).toMatchObject(
+        {
+          ok: true,
+        }
+      );
       // Should recognise player.ts even with Windows backslashes or leading slashes
       expect(
         await registry.execute('fs_write', { path: 'scripts\\player.ts', overwrite: true })

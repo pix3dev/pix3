@@ -347,6 +347,42 @@ export const createDefaultProjectManifest = (): ProjectManifest => ({
   metadata: {},
 });
 
+/**
+ * Where a project's stable identity lives: `metadata.projectId` (a random UUID).
+ *
+ * Not a top-level key: `normalizeProjectManifest` keeps only the fields it knows, while `metadata`
+ * round-trips verbatim — so `pix3 new` (packages/pix3-cli `manifest.ts`, which writes the same key)
+ * and the editor agree on it without either having to learn the other's schema. The editor mints
+ * it when it creates a project and backfills it once when it opens a project that lacks one. It is
+ * a filter for "is this the project I think it is" (the CLI's link/serve channel), not a secret.
+ */
+export const PROJECT_ID_METADATA_KEY = 'projectId';
+
+/** `metadata.projectId`, trimmed, or null when absent/blank. */
+export const getProjectId = (manifest: ProjectManifest): string | null => {
+  const value = manifest.metadata?.[PROJECT_ID_METADATA_KEY];
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null;
+};
+
+/** A fresh project id (UUID v4; `crypto.randomUUID` where available). */
+export const createProjectId = (): string => {
+  const cryptoApi = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (typeof cryptoApi?.randomUUID === 'function') {
+    return cryptoApi.randomUUID();
+  }
+  // RFC 4122 v4 shape from Math.random — only for runtimes without WebCrypto.
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, char => {
+    const random = Math.floor(Math.random() * 16);
+    return (char === 'x' ? random : (random & 0x3) | 0x8).toString(16);
+  });
+};
+
+/** The manifest with `metadata.projectId` set (other metadata untouched, key appended last). */
+export const withProjectId = (manifest: ProjectManifest, projectId: string): ProjectManifest => ({
+  ...manifest,
+  metadata: { ...(manifest.metadata ?? {}), [PROJECT_ID_METADATA_KEY]: projectId },
+});
+
 export const normalizeProjectManifest = (input: unknown): ProjectManifest => {
   if (!input || typeof input !== 'object') {
     return createDefaultProjectManifest();

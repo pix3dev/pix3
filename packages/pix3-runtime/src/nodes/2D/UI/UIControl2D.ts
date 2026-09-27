@@ -1123,7 +1123,7 @@ export abstract class UIControl2D extends Node2D implements Interactive {
         {
           name: 'labelFontSize',
           type: 'number',
-          ui: { label: 'Font Size', group: 'Label', min: 8, max: 64, step: 1 },
+          ui: { label: 'Font Size', group: 'Label', min: 8, max: 200, step: 1 },
           getValue: n => (n as UIControl2D).labelFontSize,
           setValue: (n, v) => {
             (n as UIControl2D).labelFontSize = Number(v);

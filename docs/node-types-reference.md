@@ -128,7 +128,7 @@ The base class for all 2D scene nodes. Use this for simple grouping or as a cont
   the main axis always, the cross axis only when its own Anchors are off.
 - Cannot have children by default (set `isContainer = true` to enable)
 - Transforms affect all children in local space
-- Rotation is clockwise, in degrees
+- Rotation is in degrees; positive is counter-clockwise (Y points up), and scripts see radians in `rotation.z`
 - **Draw order:** by default the 2D pass paints in scene-tree DFS order (a later/deeper node draws
   on top — Godot-like). `zIndex` lifts a node out of that order without moving it in the tree:
   nodes are bucketed by _effective_ z first, and tree order only breaks ties inside a bucket. With
@@ -181,18 +181,20 @@ A 2D image display node. Renders a textured quad that always faces the camera.
 
 **Properties:**
 
-| Property      | Type   | Default | Description              |
-| ------------- | ------ | ------- | ------------------------ |
-| `texturePath` | string | null    | Path to texture (res://) |
-| `width`       | number | 64      | Display width in pixels  |
-| `height`      | number | 64      | Display height in pixels |
-| `color`       | color  | #ffffff | Tint color               |
+| Property            | Type    | Default        | Description                                                                                                            |
+| ------------------- | ------- | -------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `texture`           | texture | null           | Texture resource (`{ type: texture, url: res://… }`); a legacy `texturePath` string is still accepted on load          |
+| `textureKey`        | string  | ""             | Localization sprite key; when it resolves, the localized path wins over `texture`                                      |
+| `anchor`            | vector2 | [0.5, 0.5]     | Normalized pivot the image is positioned around                                                                        |
+| `width`             | number  | texture width  | Display width in pixels; when unset it takes the texture's natural width on load (64 placeholder until then)           |
+| `height`            | number  | texture height | Display height in pixels; when unset it takes the texture's natural height on load (64 placeholder until then)         |
+| `aspectRatioLocked` | boolean | false          | Keep width/height at the texture's aspect ratio while resizing                                                         |
+| `color`             | color   | #ffffff        | Constructor-only placeholder colour shown before the texture loads; reset to white on load, not in the schema or saved |
 
 **Usage Notes:**
 
 - Supports PNG, JPG, WebP textures
 - Aspect ratio is controlled by width/height properties
-- Use white color to display texture without tint
 - Texture is scaled to fit the specified dimensions
 
 ---
@@ -554,16 +556,17 @@ A toggle checkbox control for boolean settings.
 
 **Properties:**
 
-| Property            | Type    | Default | Description                                        |
-| ------------------- | ------- | ------- | -------------------------------------------------- |
-| `width`             | number  | 24      | Checkbox size                                      |
-| `height`            | number  | 24      | Checkbox size                                      |
-| `checked`           | boolean | false   | Checked state                                      |
-| `uncheckedColor`    | color   | #333333 | Unchecked border                                   |
-| `checkedColor`      | color   | #4a9eff | Checked fill color                                 |
-| `textureBox`        | texture | null    | Sprite for the box; also the checked fallback      |
-| `textureBoxChecked` | texture | null    | Optional sprite for the box while checked          |
-| `textureMark`       | texture | null    | Sprite drawn over the box while checked (the tick) |
+| Property            | Type    | Default  | Description                                         |
+| ------------------- | ------- | -------- | --------------------------------------------------- |
+| `size`              | number  | 30       | Side of the square box, in pixels                   |
+| `checked`           | boolean | false    | Checked state                                       |
+| `uncheckedColor`    | color   | #ffffff  | Box fill colour while unchecked                     |
+| `checkedColor`      | color   | #4a9eff  | Box fill colour while checked                       |
+| `checkmarkColor`    | color   | #ffffff  | Colour of the fallback tick (ignored with a sprite) |
+| `checkmarkAction`   | string  | Checkbox | Virtual input action pulsed / latched on toggle     |
+| `textureBox`        | texture | null     | Sprite for the box; also the checked fallback       |
+| `textureBoxChecked` | texture | null     | Optional sprite for the box while checked           |
+| `textureMark`       | texture | null     | Sprite drawn over the box while checked (the tick)  |
 
 **Signals:**
 
@@ -608,24 +611,28 @@ A progress bar or health bar display.
 
 **Properties:**
 
-| Property            | Type    | Default | Description                                                 |
-| ------------------- | ------- | ------- | ----------------------------------------------------------- |
-| `width`             | number  | 200     | Bar width in pixels                                         |
-| `height`            | number  | 20      | Bar height in pixels                                        |
-| `value`             | number  | 50      | Current fill value                                          |
-| `maxValue`          | number  | 100     | Maximum fill value                                          |
-| `backgroundColor`   | color   | #333333 | Background color                                            |
-| `fillColor`         | color   | #4a9eff | Fill bar color                                              |
-| `textureTrough`     | texture | null    | Sprite for the empty trough behind the fill                 |
-| `textureFill`       | texture | null    | Sprite for the filled portion                               |
-| `sliceBorderLeft`   | number  | 0       | Left 9-slice inset of the trough/fill sprites, in source px |
-| `sliceBorderRight`  | number  | 0       | Right 9-slice inset, in source px                           |
-| `sliceBorderTop`    | number  | 0       | Top 9-slice inset, in source px                             |
-| `sliceBorderBottom` | number  | 0       | Bottom 9-slice inset, in source px                          |
+| Property              | Type    | Default | Description                                                                          |
+| --------------------- | ------- | ------- | ------------------------------------------------------------------------------------ |
+| `width`               | number  | 150     | Bar width in pixels                                                                  |
+| `height`              | number  | 20      | Bar height in pixels                                                                 |
+| `value`               | number  | 100     | Current fill value, clamped to `minValue`..`maxValue`                                |
+| `minValue`            | number  | 0       | Value at which the bar is empty                                                      |
+| `maxValue`            | number  | 100     | Value at which the bar is full                                                       |
+| `backBackgroundColor` | color   | #333333 | Trough (background) colour                                                           |
+| `barColor`            | color   | #ff4444 | Fill colour                                                                          |
+| `showBorder`          | boolean | true    | Draw a frame around the bar                                                          |
+| `borderColor`         | color   | #000000 | Frame colour                                                                         |
+| `borderWidth`         | number  | 2       | Frame thickness in pixels (not in the Inspector schema; authored/saved in YAML only) |
+| `textureTrough`       | texture | null    | Sprite for the empty trough behind the fill                                          |
+| `textureFill`         | texture | null    | Sprite for the filled portion                                                        |
+| `sliceBorderLeft`     | number  | 0       | Left 9-slice inset of the trough/fill sprites, in source px                          |
+| `sliceBorderRight`    | number  | 0       | Right 9-slice inset, in source px                                                    |
+| `sliceBorderTop`      | number  | 0       | Top 9-slice inset, in source px                                                      |
+| `sliceBorderBottom`   | number  | 0       | Bottom 9-slice inset, in source px                                                   |
 
 **Usage Notes:**
 
-- Fill percentage = value / maxValue
+- Fill fraction = (value - minValue) / (maxValue - minValue)
 - Useful for health bars, mana bars, loading progress
 - Can be oriented horizontally
 - A slot's sprite replaces its flat colour (tint goes white); unset slots keep the colour
@@ -643,14 +650,18 @@ A specialized slot control for inventory systems. Supports drag-and-drop for ite
 
 **Properties:**
 
-| Property          | Type   | Default | Description             |
-| ----------------- | ------ | ------- | ----------------------- |
-| `width`           | number | 64      | Slot size               |
-| `height`          | number | 64      | Slot size               |
-| `backgroundColor` | color  | #2a2a2a | Empty slot color        |
-| `borderColor`     | color  | #444444 | Border color            |
-| `highlightColor`  | color  | #4a9eff | Selection highlight     |
-| `itemCount`       | number | 0       | Number of items in slot |
+| Property           | Type    | Default        | Description                                       |
+| ------------------ | ------- | -------------- | ------------------------------------------------- |
+| `width`            | number  | 60             | Slot size (20..200)                               |
+| `height`           | number  | 60             | Slot size (20..200)                               |
+| `backdropColor`    | color   | #555555        | Slot background                                   |
+| `borderColor`      | color   | #888888        | Border colour                                     |
+| `borderWidth`      | number  | 2              | Border thickness, px                              |
+| `quantity`         | number  | 0              | Stack count shown in the corner (≥ 0)             |
+| `showQuantity`     | boolean | true           | Draw the count                                    |
+| `quantityFontSize` | number  | 12             | Count text size, px                               |
+| `selectionColor`   | color   | #ffff00        | Highlight colour while selected                   |
+| `selectedAction`   | string  | `SlotSelected` | Virtual button pressed while the slot is selected |
 
 **Signals:**
 
@@ -978,7 +989,7 @@ A `THREE.InstancedMesh` wrapper for rendering many copies of one geometry/materi
 | `castShadow`                                | boolean | —           | Forwarded to the underlying mesh                                                                                |
 | `receiveShadow`                             | boolean | —           | Forwarded to the underlying mesh                                                                                |
 | `frustumCulled`                             | boolean | —           | Forwarded to the underlying mesh                                                                                |
-| `visibleInstanceCount`                      | number  | —           | How many instances currently draw (read-only display)                                                           |
+| `visibleInstanceCount`                      | number  | —           | How many instances currently draw (read-only display; not saved)                                               |
 | `material.type`                             | enum    | `standard`  | Material family — `standard` (PBR) / `lambert` (mobile default) / `basic` (unlit); inspector: **Material Type** |
 | `material.color`                            | color   | `#ffffff`   | Colour every instance shares; a per-instance colour multiplies it                                               |
 | `material.roughness` / `material.metalness` | number  | 0.35 / 0.25 | `standard` only; dropped from the file for the other families                                                   |
@@ -1137,8 +1148,8 @@ impostors, floating markers, particles you place by hand, and 2.5D characters.
 | `billboard`          | boolean | false   | Face the camera every frame                                            |
 | `billboardRoll`      | number  | 0       | Roll, in degrees, applied after billboarding                           |
 | `opacity`            | number  | 1       | Alpha                                                                  |
-| `textureAspectRatio` | number  | null    | Captured from the texture on load                                      |
-| `aspectRatioLocked`  | boolean | false   | Keep width/height at the texture's aspect when either is edited        |
+| `textureAspectRatio` | number  | null    | Captured from the texture on load (not saved)                          |
+| `aspectRatioLocked`  | boolean | false   | Keep width/height at the texture's aspect (inspector-only, not saved)  |
 
 **Usage Notes:**
 
@@ -1166,7 +1177,7 @@ frame rate.
 | `playing`      | boolean | true     | Play on start                                                |
 | `loop`         | boolean | true     | Repeat when the clip ends                                    |
 | `freeOnFinish` | boolean | false    | Remove the node when a non-looping clip ends                 |
-| `currentFrame` | number  | 0        | Frame index                                                  |
+| `currentFrame` | number  | 0        | Frame index (playback state, not saved)                      |
 | `billboard`    | boolean | **true** | Face the camera (note: the opposite default from `Sprite3D`) |
 | `color`        | color   | #ffffff  | Tint                                                         |
 | `opacity`      | number  | 1        | Alpha                                                        |
@@ -1371,7 +1382,7 @@ filter).
 | NodeBase             | id, name, type, visible, locked                                                                      |
 | Node2D               | position (Vector2), rotation, scale (Vector2), opacity, blendMode, zIndex                            |
 | Node3D               | position (Vector3), rotation (Euler), scale (Vector3)                                                |
-| Sprite2D             | texturePath, width, height, color                                                                    |
+| Sprite2D             | texture, width, height, anchor, aspectRatioLocked                                                    |
 | ColorRect2D          | width, height, color (the only untextured 2D fill)                                                   |
 | TiledSprite2D        | texture, width, height, patchMode, sliceBorderLeft/Right/Top/Bottom, drawCenter (nine-slice)         |
 | AnimatedSprite2D     | animationResourcePath, currentClip, isPlaying, freeOnFinish, width, height, sizeMode                 |
@@ -1386,7 +1397,7 @@ filter).
 | MeshInstance         | src                                                                                                  |
 | Sprite3D             | texture, width, height (world units), billboard, billboardRoll, opacity                              |
 | AnimatedSprite3D     | width, height, fps, playing, loop, freeOnFinish, billboard (default true)                            |
-| InstancedMesh3D      | maxInstances, enablePerInstanceColor, visibleInstanceCount (bulk write\*/flush), material.type/color |
+| InstancedMesh3D      | maxInstances, enablePerInstanceColor, material.type/color (bulk write\*/flush from scripts)          |
 | DirectionalLightNode | color, intensity, castShadow                                                                         |
 | AmbientLightNode     | color, intensity (flat fill, no shadows)                                                             |
 | HemisphereLightNode  | skyColor, groundColor, intensity                                                                     |
@@ -1395,9 +1406,9 @@ filter).
 | Button2D             | width, height, backgroundColor, buttonAction, textureNormal/Hover/Pressed/Disabled, sliceBorder\*    |
 | Slider2D             | width, minValue, maxValue, value, textureTrack/Fill/Thumb, sliceBorder\*                             |
 | Joystick2D           | enabled, radius, floating, axisHorizontal, axisVertical                                              |
-| Checkbox2D           | width, checked, textureBox, textureBoxChecked, textureMark                                           |
-| Bar2D                | width, value, maxValue, textureTrough, textureFill, sliceBorder\*                                    |
-| InventorySlot2D      | width, itemCount                                                                                     |
+| Checkbox2D           | size, checked, textureBox, textureBoxChecked, textureMark                                            |
+| Bar2D                | width, value, minValue, maxValue, barColor, backBackgroundColor, textureTrough/Fill, sliceBorder\*   |
+| InventorySlot2D      | width, height, quantity, showQuantity, backdropColor, selectionColor                                 |
 | AudioPlayer          | audioTrack, autoplay, loop, volume, bus, pitchVariation, volumeVariation                             |
 | PostProcess          | affect2D, bloom*, vignette*, chromaticAberration*, aoMode, ssao*, lut\*                              |
 | Group                | NodeBase only — an organisational container                                                          |

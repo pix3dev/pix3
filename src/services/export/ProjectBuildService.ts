@@ -115,6 +115,8 @@ const NON_SHIPPABLE_DIRECTORIES = new Set([
   'out',
   'coverage',
   '.cache',
+  // Editor bookkeeping: recovery journal (old scene versions), protected set, merge log.
+  '.pix3',
 ]);
 const EXCLUDED_PROJECT_SCRIPT_SUFFIXES = ['.spec.ts', '.test.ts', '.d.ts'] as const;
 const RESOURCE_PATH_PATTERN = /res:\/\/([^\s"'\])]+)/g;

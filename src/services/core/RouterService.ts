@@ -8,6 +8,8 @@ import { CollabJoinService } from '@/services/collab/CollabJoinService';
 import { EditorTabService } from '@/services/editor/EditorTabService';
 import { CommandDispatcher } from '@/services/core/CommandDispatcher';
 import { isToolRouteHash } from '@/core/tool-routes';
+import { isWorkspaceError } from '@/services/project/workspace/workspace-protocol';
+import { WorkspaceConnectDialogService } from '@/services/project/workspace/WorkspaceConnectDialogService';
 
 @injectable()
 export class RouterService {
@@ -289,6 +291,12 @@ export class RouterService {
         return;
       }
     } catch (error) {
+      if (isWorkspaceError(error)) {
+        // A reload of a workspace project whose server is gone or whose token was rotated. The
+        // error overlay would be a dead end; the connect dialog is the way forward.
+        this.openWorkspaceReconnect(localSessionId, error.message);
+        return;
+      }
       console.error('[RouterService] Local session join failed:', error);
       appState.router.status = 'error';
       appState.router.errorMessage =
@@ -297,6 +305,26 @@ export class RouterService {
     }
 
     appState.router.status = 'idle';
+  }
+
+  private openWorkspaceReconnect(sessionId: string, message: string): void {
+    const container = ServiceContainer.getInstance();
+    const projectService = container.getService<ProjectService>(
+      container.getOrCreateToken(ProjectService)
+    );
+    const entry = projectService.getRecentProjects().find(recent => recent.id === sessionId);
+    appState.router.status = 'idle';
+    window.location.hash = '#welcome';
+    container
+      .getService<WorkspaceConnectDialogService>(
+        container.getOrCreateToken(WorkspaceConnectDialogService)
+      )
+      .open({
+        endpoint: entry?.endpoint ?? null,
+        errorMessage: message,
+        workspaceName: entry?.name ?? null,
+        workspaceId: entry?.workspaceId ?? null,
+      });
   }
 
   /**

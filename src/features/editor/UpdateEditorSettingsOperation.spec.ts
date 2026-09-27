@@ -133,4 +133,26 @@ describe('UpdateEditorSettingsOperation', () => {
 
     expect(settings?.gameAspectRatio).toBe('4:3');
   });
+
+  it('persists the agent keepalive switch (default on) and supports undo', async () => {
+    const state = createInitialAppState();
+    expect(state.ui.keepEditorRunningForAgent).toBe(true);
+    const context = {
+      state,
+      snapshot: structuredClone(state),
+      container: {} as OperationContext['container'],
+      requestedAt: Date.now(),
+    } as OperationContext;
+
+    const result = await operationWith(context, { keepEditorRunningForAgent: false });
+    expect(state.ui.keepEditorRunningForAgent).toBe(false);
+    expect(loadEditorSettings()?.keepEditorRunningForAgent).toBe(false);
+    expect(localStorage.getItem(EDITOR_SETTINGS_STORAGE_KEY)).toContain(
+      '"keepEditorRunningForAgent":false'
+    );
+
+    if (!result.didMutate || !result.commit) throw new Error('expected a mutation');
+    await result.commit.undo();
+    expect(state.ui.keepEditorRunningForAgent).toBe(true);
+  });
 });

@@ -40,8 +40,17 @@ export interface ViewportPreviewTickerDeps {
  */
 export class ViewportPreviewTicker {
   private activeParticlePreviewCount = 0;
-  private activeComponentPreviewCount = 0;
   private activeSpinePreviewCount = 0;
+  /**
+   * Components that asked for another frame (`ctx.requestRender()`) during the
+   * last component tick. Merely *implementing* `tickEditorPreview` is not a
+   * request: DeepCore's Walls/Blocks/Clusters behaviours implement it to seed
+   * static preview geometry and asked for one frame only when their assets
+   * finished loading, yet counting them held the viewport at 60 fps forever.
+   */
+  private componentFrameRequesters = new Set<ScriptComponent>();
+  /** Requesters collected while {@link tickComponents} is on the stack. */
+  private pendingFrameRequesters: Set<ScriptComponent> | null = null;
 
   /**
    * Editor appearance overrides a script pushed via `setAppearanceOverride`,
@@ -134,7 +143,7 @@ export class ViewportPreviewTicker {
 
   tickComponents(dt: number): void {
     if (appState.ui.isPlaying) {
-      this.activeComponentPreviewCount = 0;
+      this.componentFrameRequesters.clear();
       // Play mode owns rendering; drop any editor-preview overrides so the
       // proxies (if still around) revert, and re-apply cleanly on return.
       this.clearComponentAppearanceOverrides();
@@ -147,7 +156,7 @@ export class ViewportPreviewTicker {
 
     const sceneGraph = this.deps.getActiveSceneGraph();
     if (!sceneGraph) {
-      this.activeComponentPreviewCount = 0;
+      this.componentFrameRequesters.clear();
       this.clearComponentAppearanceOverrides();
       return;
     }
@@ -155,25 +164,23 @@ export class ViewportPreviewTicker {
     this.previewFrameStamp += 1;
     const frameStamp = this.previewFrameStamp;
 
-    let active = 0;
+    const requesters = new Set<ScriptComponent>();
     const visit = (nodes: NodeBase[]) => {
       for (const node of nodes) {
         if (node.components && Array.isArray(node.components) && node.components.length > 0) {
-          // Per-node context: setAppearanceOverride records against this nodeId,
-          // last writer per frame wins.
-          const context: EditorPreviewContext = {
-            assetLoader: this.deps.getAssetLoader(),
-            requestRender: () => {
-              queueMicrotask(() => this.deps.requestRender());
-            },
-            setAppearanceOverride: (override: EditorAppearanceOverride) => {
-              this.componentAppearanceOverrides.set(node.nodeId, { override, stamp: frameStamp });
-            },
-          };
           for (const component of node.components) {
-            if (component.enabled && typeof component.tickEditorPreview === 'function') {
-              active += 1;
+            if (!component.enabled || typeof component.tickEditorPreview !== 'function') {
+              continue;
             }
+            // Per-component context: setAppearanceOverride records against this nodeId (last
+            // writer per frame wins); requestRender is attributed to this component.
+            const context: EditorPreviewContext = {
+              assetLoader: this.deps.getAssetLoader(),
+              requestRender: () => this.requestFrameFor(component),
+              setAppearanceOverride: (override: EditorAppearanceOverride) => {
+                this.componentAppearanceOverrides.set(node.nodeId, { override, stamp: frameStamp });
+              },
+            };
             this.tickPreviewComponent(node, component, dt, context);
           }
         }
@@ -184,22 +191,65 @@ export class ViewportPreviewTicker {
       }
     };
 
-    visit(sceneGraph.rootNodes);
-    this.activeComponentPreviewCount = active;
+    this.pendingFrameRequesters = requesters;
+    try {
+      visit(sceneGraph.rootNodes);
+    } finally {
+      this.pendingFrameRequesters = null;
+    }
+    this.componentFrameRequesters = requesters;
     this.flushComponentAppearanceOverrides(sceneGraph, frameStamp);
   }
 
   /**
-   * True while a particle or script-component editor preview is animating and
+   * A component's `ctx.requestRender()`.
+   *
+   * Called *during* its tick, it means "animate: give me the next frame too" — recorded so the
+   * rAF loop keeps painting while (and only while) the component keeps asking. It must not paint
+   * synchronously: with the loop parked, `requestRender` renders on the spot, and a component
+   * that asks every tick would re-enter itself through microtasks forever.
+   *
+   * Called *later* (an asset promise resolving), it is an ordinary on-demand dirty mark.
+   */
+  private requestFrameFor(component: ScriptComponent): void {
+    if (this.pendingFrameRequesters) {
+      this.pendingFrameRequesters.add(component);
+      return;
+    }
+    queueMicrotask(() => this.deps.requestRender());
+  }
+
+  /**
+   * True while a particle, Spine or script-component editor preview is animating and
    * therefore needs a fresh frame every tick. The counts are refreshed by their
-   * tickers on every rendered frame.
+   * tickers on every rendered frame; a component counts only if it asked for the next
+   * frame via `ctx.requestRender()` on its last tick.
    */
   hasActivePreview(): boolean {
     return (
       this.activeParticlePreviewCount > 0 ||
-      this.activeComponentPreviewCount > 0 ||
+      this.componentFrameRequesters.size > 0 ||
       this.activeSpinePreviewCount > 0
     );
+  }
+
+  /**
+   * Human-readable reasons the previews are keeping the viewport painting every frame, for the
+   * status bar's load tooltip. Empty when the viewport is idle (on-demand).
+   */
+  getActivePreviewReasons(): string[] {
+    const reasons: string[] = [];
+    if (this.activeParticlePreviewCount > 0) {
+      reasons.push(`particle preview ×${this.activeParticlePreviewCount}`);
+    }
+    if (this.activeSpinePreviewCount > 0) {
+      reasons.push(`Spine preview ×${this.activeSpinePreviewCount}`);
+    }
+    if (this.componentFrameRequesters.size > 0) {
+      const types = [...new Set([...this.componentFrameRequesters].map(c => c.type))];
+      reasons.push(`script preview: ${types.join(', ')}`);
+    }
+    return reasons;
   }
 
   /**

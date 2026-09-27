@@ -93,6 +93,28 @@ describe('Label2D script assignments (reactive schema properties)', () => {
     expect(label.isTyping).toBe(true);
   });
 
+  it('repaints when a script assigns label, labelColor or glowStrength (no setText needed)', () => {
+    // Pinned because the agent kit states it: style fields redraw on plain assignment.
+    const label = createLabel({ width: 200, height: 60 });
+    const internals = internalsOf(label);
+    const repaints = (mutate: () => void): boolean => {
+      const before = internals.labelTexture?.version ?? -1;
+      const textureBefore = internals.labelTexture;
+      mutate();
+      return (
+        internals.labelTexture !== textureBefore || (internals.labelTexture?.version ?? -1) > before
+      );
+    };
+
+    expect(repaints(() => (label.label = 'Combo x2'))).toBe(true);
+    expect(label.getDisplayText()).toBe('Combo x2');
+    expect(repaints(() => (label.labelColor = '#ff3355'))).toBe(true);
+    expect(repaints(() => (label.glowStrength = 2))).toBe(true);
+    // The script path runs the schema setter, so it clamps like the inspector does.
+    label.glowStrength = 99;
+    expect(label.glowStrength).toBe(4);
+  });
+
   it('installs reactive accessors for the Label2D box fields and leaves label accessors alone', () => {
     const names = reactiveSchemaPropertyNames(createLabel());
     for (const expected of [
@@ -110,6 +132,13 @@ describe('Label2D script assignments (reactive schema properties)', () => {
     // label/labelColor/... are UIControl2D accessors that already re-render on write.
     expect(names.has('label')).toBe(false);
     expect(names.has('labelColor')).toBe(false);
+  });
+
+  it('the inspector range for labelFontSize covers display titles (96 px on a 1080-wide design)', () => {
+    // The range is an inspector hint that `pix3 check` reports as W_PROPERTY_RANGE; at 8..64 every
+    // recipe's 96 px menu title warned on every check (trial 2026-09-27, D2).
+    const fontSize = Label2D.getPropertySchema().properties.find(p => p.name === 'labelFontSize');
+    expect(fontSize?.ui).toMatchObject({ min: 8, max: 200 });
   });
 
   it('exposes glow/outline in the schema, off by default, and clamps the strength', () => {

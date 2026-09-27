@@ -41,7 +41,7 @@ const buildService = () => {
     projectName: 'Demo',
     scenePaths: ['scenes/main.pix3scene'],
     entryScenePath: 'scenes/main.pix3scene',
-    assetPaths: ['sprites/hero.png', 'audio/hit.wav', 'scenes/main.pix3scene'],
+    assetPaths: ['sprites/hero.png', 'sprites/coin.svg', 'audio/hit.wav', 'scenes/main.pix3scene'],
     reachability: new Map(),
     usesSpine: false,
     usesPostProcessing: false,
@@ -57,6 +57,8 @@ const buildService = () => {
     readBlob: vi.fn(async (path: string) => {
       if (path.endsWith('.png')) return new Blob([PNG_BYTES], { type: 'image/png' });
       if (path.endsWith('.wav')) return new Blob(['wav'], { type: 'audio/wav' });
+      // What a cloud-cached project used to hand back for an SVG: its text, typed text/plain.
+      if (path.endsWith('.svg')) return new Blob(['<svg/>'], { type: 'text/plain' });
       return new Blob(['scene: main'], { type: 'text/plain' });
     }),
     readTextFile: vi.fn(async () => null),
@@ -175,5 +177,21 @@ describe('PlayableHtmlBuildService — export-time image compression', () => {
     expect(artifact.warnings).not.toContain(
       'Failed to embed asset for playable export: sprites/hero.png'
     );
+  });
+
+  it('embeds a text/plain-typed SVG (cloud-cached project) as image/svg+xml', async () => {
+    const { service, scriptCompiler } = buildService();
+
+    await service.buildPlayableHtml(createContext(), { entryScenePath: 'scenes/main.pix3scene' });
+
+    const [files] = scriptCompiler.bundleVirtualProject.mock.calls[0] as unknown as [
+      Map<string, string>,
+    ];
+    const embedded = files.get('virtual/generated/runtime-embedded-assets.ts') ?? '';
+    const svgEntry = embedded.slice(embedded.indexOf('sprites/coin.svg'));
+    expect(svgEntry).toMatch(/^sprites\/coin\.svg[^}]*image\/svg\+xml/);
+    // The scene keeps its text type: only images/audio are re-typed by extension.
+    const sceneEntry = embedded.slice(embedded.indexOf('scenes/main.pix3scene'));
+    expect(sceneEntry).toMatch(/^scenes\/main\.pix3scene[^}]*text\/plain/);
   });
 });

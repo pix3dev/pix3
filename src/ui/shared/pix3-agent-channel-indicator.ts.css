@@ -1,0 +1,88 @@
+pix3-agent-channel-indicator {
+  display: contents;
+}
+
+pix3-agent-channel-indicator .agent-channel-revoke {
+  color: var(--fg-2);
+}
+
+/* The generation prompt: non-blocking, bottom-right above the status bar, never over the canvas centre. */
+pix3-agent-channel-indicator .agent-permission {
+  position: fixed;
+  right: 16px;
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 36px);
+  z-index: var(--pix3-z-floating);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 10px;
+  width: min(440px, calc(100vw - 32px));
+  padding: 10px 12px;
+  border-radius: var(--radius-2);
+  border: 1px solid rgba(var(--pix3-accent-rgb), 0.45);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+pix3-agent-channel-indicator .agent-permission__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+pix3-agent-channel-indicator .agent-permission__icon svg,
+pix3-agent-channel-indicator .agent-permission__btn svg {
+  display: block;
+}
+
+pix3-agent-channel-indicator .agent-permission__text {
+  flex: 1 1 280px;
+  min-width: 0;
+  margin: 0;
+}
+
+pix3-agent-channel-indicator .agent-permission__text code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.8rem;
+  color: var(--fg-1);
+}
+
+pix3-agent-channel-indicator .agent-permission__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-left: auto;
+}
+
+pix3-agent-channel-indicator .agent-permission__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 4px 10px;
+  border-radius: var(--radius-1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(16, 20, 24, 0.9);
+  color: var(--fg-0);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+pix3-agent-channel-indicator .agent-permission__btn:hover {
+  border-color: rgba(var(--pix3-accent-rgb), 0.6);
+}
+
+pix3-agent-channel-indicator .agent-permission__btn:focus-visible {
+  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline-offset: 1px;
+}
+
+pix3-agent-channel-indicator .agent-permission__btn--primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+}

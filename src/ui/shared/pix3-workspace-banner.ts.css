@@ -1,0 +1,80 @@
+pix3-workspace-banner {
+  display: contents;
+}
+
+/* Floats over the top of the workspace, centred, below modals and menus. */
+pix3-workspace-banner .workspace-banner {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 52px);
+  left: 50%;
+  z-index: var(--pix3-z-floating);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: min(720px, calc(100vw - 32px));
+  padding: 8px 10px 8px 14px;
+  transform: translateX(-50%);
+  border-radius: var(--radius-2);
+  border: 1px solid rgba(var(--pix3-accent-rgb), 0.45);
+  background: var(--bg-1);
+  color: var(--fg-0);
+  box-shadow: var(--shadow-float);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+
+pix3-workspace-banner .workspace-banner--error {
+  border-color: var(--danger);
+}
+
+pix3-workspace-banner .workspace-banner__icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+
+pix3-workspace-banner .workspace-banner--error .workspace-banner__icon {
+  color: var(--danger);
+}
+
+pix3-workspace-banner .workspace-banner__icon svg {
+  display: block;
+}
+
+pix3-workspace-banner .workspace-banner__text {
+  min-width: 0;
+}
+
+pix3-workspace-banner .workspace-banner__detail {
+  display: block;
+  color: var(--fg-2);
+  font-size: 0.8rem;
+}
+
+pix3-workspace-banner .workspace-banner__action {
+  flex-shrink: 0;
+  padding: 5px 12px;
+  border-radius: var(--radius-1);
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: var(--accent-fg);
+  font-weight: 600;
+  cursor: pointer;
+}
+
+pix3-workspace-banner .workspace-banner__action:focus-visible {
+  outline: 2px solid rgba(var(--pix3-accent-rgb), 0.6);
+  outline-offset: 1px;
+}
+
+pix3-workspace-banner .workspace-banner--flash {
+  border-color: var(--accent);
+  box-shadow:
+    0 0 0 2px rgba(var(--pix3-accent-rgb), 0.35),
+    var(--shadow-float);
+}
+
+pix3-workspace-banner .workspace-banner__action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

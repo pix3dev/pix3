@@ -135,4 +135,21 @@ export default [
     },
     rules: typescriptRules,
   },
+  {
+    // `@pix3/cli` is Node too, with its own tsconfig (NodeNext, `.ts` import extensions).
+    files: ['packages/pix3-cli/src/**/*.ts'],
+    languageOptions: {
+      parser: tsparser,
+      parserOptions: {
+        ecmaVersion: 'latest',
+        sourceType: 'module',
+        project: './packages/pix3-cli/tsconfig.json',
+      },
+    },
+    plugins: {
+      '@typescript-eslint': tseslint,
+      prettier,
+    },
+    rules: typescriptRules,
+  },
 ];

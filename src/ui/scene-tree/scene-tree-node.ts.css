@@ -446,3 +446,27 @@ pix3-scene-tree-node {
   line-height: 1;
   box-shadow: 0 0 0 1px var(--bg-1);
 }
+
+/* Changed by an external writer (an agent) in the reload that just happened: a short accent
+   wash that fades out, so the human sees what the agent touched (plan §5 C5). */
+.tree-node__content--external-change {
+  animation: tree-node-external-change 3s ease-out;
+}
+
+@keyframes tree-node-external-change {
+  0%,
+  40% {
+    background: rgba(var(--pix3-accent-rgb), 0.22);
+    border-left-color: var(--accent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-node__content--external-change {
+    animation: none;
+    background: rgba(var(--pix3-accent-rgb), 0.16);
+  }
+}

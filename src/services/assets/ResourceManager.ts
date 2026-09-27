@@ -1,6 +1,7 @@
 import { inject, injectable } from '@/fw/di';
 import { ResourceManager as RuntimeResourceManager } from '@pix3/runtime';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
+import { isWorkspaceTransportError } from '@/services/project/workspace/workspace-protocol';
 
 const RES_SCHEME = 'res';
 
@@ -32,6 +33,11 @@ class EditorResourceManager extends RuntimeResourceManager {
       try {
         return await this.storage.readTextFile(path);
       } catch (error) {
+        // A workspace that is unreachable or rejects the token says nothing about the file: a
+        // same-named /public asset must not stand in for it (it would look like a real load).
+        if (isWorkspaceTransportError(error)) {
+          throw error;
+        }
         // Fallback to network: some resources (templates, bundled sample assets) are served from
         // /public rather than the project directory.
         let text: string;
@@ -58,6 +64,9 @@ class EditorResourceManager extends RuntimeResourceManager {
       try {
         return await this.storage.readBlob(path);
       } catch (error) {
+        if (isWorkspaceTransportError(error)) {
+          throw error;
+        }
         // Fallback to network (see readText).
         let blob: Blob;
         try {

@@ -49,8 +49,9 @@ export type { NodeActivity, WatchLogEntry } from '@/services/agent/NodeWatchReco
 
 /**
  * One scripted input step for {@link GameInputService.run}. Coordinates are in
- * the 2D world/design space — the same values node `position` properties show —
- * so a model can aim at what it reads from `scene_tree`/`node_inspect`.
+ * the 2D design space — the same values node `position` properties show: origin
+ * at the CENTRE of the design frame, Y up — so a model can aim at what it reads
+ * off the nodes. `space` picks which 2D mapping explicit coordinates go through.
  */
 export interface GameInputStep {
   type: 'tap' | 'key' | 'keys' | 'drag' | 'wait' | 'hover' | 'invoke';
@@ -60,9 +61,17 @@ export interface GameInputStep {
   interaction?: string;
   /** invoke: arguments for the interaction, keyed by the argument names the listing gives. */
   args?: Record<string, unknown>;
-  /** tap/drag/hover: explicit 2D world coordinates (used when no target given). */
+  /** tap/drag/hover: explicit 2D design coordinates (used when no target given). */
   x?: number;
   y?: number;
+  /**
+   * tap/drag/hover with explicit coordinates: which 2D mapping they go through. `'world'`
+   * (default) projects through the running Camera2D, so a panned/zoomed camera moves the point
+   * with the world; `'overlay'` uses the fixed mapping `CanvasLayer2D` descendants (HUD) are drawn
+   * with, so a HUD position stays on the HUD whatever the camera does. Ignored when aiming by
+   * `target` — a node already knows which band it lives in.
+   */
+  space?: 'world' | 'overlay';
   /** drag: destination (world coords or another node). */
   to?: { x?: number; y?: number; target?: string };
   /** key: a KeyboardEvent.code, e.g. 'KeyW', 'ArrowLeft', 'Space'. */
@@ -1726,7 +1735,7 @@ export class GameInputService {
         if (!step.codes?.length) return "A 'keys' step needs `codes`: ['KeyW', 'KeyA', ...].";
         return this.holdKeys(step.codes, durationOf(step));
       case 'tap': {
-        const point = this.resolveClientPoint(runtime, step.target, step.x, step.y);
+        const point = this.resolveClientPoint(runtime, step.target, step.x, step.y, step.space);
         if (typeof point === 'string') return point;
         this.dispatchPointer(runtime.canvas, 'pointerdown', point);
         await sleep(durationOf(step));
@@ -1737,7 +1746,7 @@ export class GameInputService {
         return null;
       }
       case 'hover': {
-        const point = this.resolveClientPoint(runtime, step.target, step.x, step.y);
+        const point = this.resolveClientPoint(runtime, step.target, step.x, step.y, step.space);
         if (typeof point === 'string') return point;
         this.dispatchPointer(runtime.canvas, 'pointermove', point, { buttons: 0 });
         await sleep(durationOf(step));
@@ -1765,9 +1774,15 @@ export class GameInputService {
         return null;
       }
       case 'drag': {
-        const from = this.resolveClientPoint(runtime, step.target, step.x, step.y);
+        const from = this.resolveClientPoint(runtime, step.target, step.x, step.y, step.space);
         if (typeof from === 'string') return from;
-        const to = this.resolveClientPoint(runtime, step.to?.target, step.to?.x, step.to?.y);
+        const to = this.resolveClientPoint(
+          runtime,
+          step.to?.target,
+          step.to?.x,
+          step.to?.y,
+          step.space
+        );
         if (typeof to === 'string') return `drag \`to\`: ${to}`;
         const durationMs = durationOf(step);
         // One move per tick when the drag is frame-denominated (inertia is read
@@ -1849,15 +1864,16 @@ export class GameInputService {
 
   /**
    * Resolve a step's aim to CLIENT coordinates on the canvas: live node (by
-   * name/id) or explicit world point → canvas backing pixels (via the runner's
-   * camera-correct projection) → client space through the canvas rect (backing
+   * name/id) or explicit design point → canvas backing pixels (via the runner's
+   * camera-correct projection; `space: 'overlay'` takes the CanvasLayer2D mapping) → client space through the canvas rect (backing
    * store ≠ CSS size). Returns an error string when unresolvable.
    */
   private resolveClientPoint(
     runtime: { runner: SceneRunner; canvas: HTMLCanvasElement },
     target: string | undefined,
     x: number | undefined,
-    y: number | undefined
+    y: number | undefined,
+    space: GameInputStep['space'] = 'world'
   ): { x: number; y: number } | string {
     let backing: { x: number; y: number } | null;
     if (target) {
@@ -1880,7 +1896,10 @@ export class GameInputService {
         return `Node "${target}" could not be projected to the canvas (no camera or zero-sized canvas).`;
       }
     } else if (typeof x === 'number' && typeof y === 'number') {
-      backing = runtime.runner.projectWorldPointToCanvas(x, y);
+      if (space !== 'world' && space !== 'overlay') {
+        return `Unknown \`space\` "${String(space)}": use 'world' (through the Camera2D, the default) or 'overlay' (the fixed CanvasLayer2D / HUD mapping).`;
+      }
+      backing = runtime.runner.projectWorldPointToCanvas(x, y, { overlay: space === 'overlay' });
       if (!backing) {
         return 'The point could not be projected to the canvas (zero-sized canvas?).';
       }
@@ -2098,7 +2117,8 @@ export class GameInputService {
           moved ||
           d.childrenChanged === true ||
           d.scaled === true ||
-          d.opacityDelta !== undefined;
+          d.opacityDelta !== undefined ||
+          textChangeOf(d) !== null;
         return { ok: reacted, note: reacted ? this.describeActivity(d) : 'no activity detected' };
       }
       default:
@@ -2109,6 +2129,9 @@ export class GameInputService {
   /** Compact per-node activity phrase for verdicts and `directionNote`. */
   private describeActivity(d: ObservedNodeDelta): string {
     const bits: string[] = [];
+    const text = textChangeOf(d);
+    // A HUD reacts by changing what it says — often the ONLY channel a score/combo label has.
+    if (text) bits.push(`text ${JSON.stringify(text.before)} → ${JSON.stringify(text.after)}`);
     if (d.moved) bits.push(`moved ${Math.round(d.delta?.distance ?? 0)}u`);
     const act = d.activity;
     if (act) {
@@ -2374,7 +2397,8 @@ export class GameInputService {
         delta.childrenChanged === true ||
         delta.scaled === true ||
         delta.opacityDelta !== undefined ||
-        delta.activity?.active === true;
+        delta.activity?.active === true ||
+        textChangeOf(delta) !== null;
       if (reacted) {
         anyActivity = true;
         parts.push(`${query}: ${this.describeActivity(delta)}`);
@@ -2427,7 +2451,7 @@ export class GameInputService {
     // answer to the question this line always provoked ("did the input reach
     // gameplay?"), and guessing at it cost whole turns before.
     const polls = this.describePollMismatch(inputContext?.input, inputContext?.steps);
-    return `NO ACTIVITY: no watched node moved/scaled/faded, no children spawned/shown, no component or game state changed, ${errs}.${offScreenTail}${polls} If the game should have reacted, the input may not have reached gameplay (menu overlay? wrong target/coords? paused?) — check read_logs / read_errors and scene_tree.${dropped}`;
+    return `NO ACTIVITY: no watched node moved/scaled/faded, no children spawned/shown, no text changed, no component or game state changed, ${errs}.${offScreenTail}${polls} If the game should have reacted, the input may not have reached gameplay (menu overlay? wrong target/coords? paused?) — check read_logs / read_errors and scene_tree.${dropped}`;
   }
 
   /** Roots + their direct children (by nodeId) — the default when no names are given. */
@@ -2444,4 +2468,16 @@ export class GameInputService {
     }
     return targets;
   }
+}
+
+/** The rendered text of an observed node at both endpoints, when it changed; else null. */
+function textChangeOf(delta: ObservedNodeDelta): { before: string; after: string } | null {
+  const before = delta.before?.text;
+  const after = delta.after?.text;
+  if (typeof before !== 'string' || typeof after !== 'string' || before === after) return null;
+  return { before: clipText(before), after: clipText(after) };
+}
+
+function clipText(text: string): string {
+  return text.length > 40 ? `${text.slice(0, 39)}…` : text;
 }

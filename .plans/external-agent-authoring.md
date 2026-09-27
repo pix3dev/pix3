@@ -1,6 +1,6 @@
 # External agent authoring — свой агент пишет игру, редактор доводит её руками
 
-Status: **план, не начат** · Date: 2026-09-25 · Ревизия 5 (после внешнего ревью, контрольного ревью, ревью Gemini и трёх ревью Codex: гонки записи, барьер
+Status: **фаза 0 в работе** (см. «Фаза 0 — состояние» в конце файла) · Date: 2026-09-25 · Ревизия 5 (после внешнего ревью, контрольного ревью, ревью Gemini и трёх ревью Codex: гонки записи, барьер
 синхронизации, идентичность папки, доверие к локальным процессам, строгая валидация, доставка) ·
 Заменяет удалённый `frozen/headless-agent-authoring-pipeline.md`
 
@@ -766,3 +766,322 @@ Agent kit (§5 B) и эти правки должны говорить одно 
 9. **Размер `npx`-установки.** Основной пакет CLI без TypeScript должен ставиться за секунды;
    TypeScript подтягивается лениво только для `check` (§5 A). Мерить в холодной установке, не в
    основной метрике.
+
+## 11. Фаза 0 — состояние (2026-09-25)
+
+Сделано спайками, ничего не закоммичено:
+
+- **Строгий профиль — go, чистый Node.** Все 30 сцен/префабов шаблонов грузятся под
+  `// @vitest-environment node` с 15-строчным шимом `canvas` (нужен только `Label2D`); схемы
+  всех 60 классов и 24 `core:` компонентов доступны без DOM; 33 скрипта рецептов не трогают
+  браузерные глобалы, нативный `esbuild` есть в `node_modules`. Спек-golden:
+  `packages/pix3-runtime/src/core/scene-loader-node-profile.spec.ts`; отчёт:
+  `measurements/external-agent-phase0-strict-profile.md`. Поправки к плану: отсутствующий
+  префаб **не** даёт `SceneValidationError`; битая структура даёт голый `TypeError` или молча
+  принимается — уровню 1 нужна проверка формы до загрузчика; `getPropertySchema()` описывает
+  инспектор, а не файл (`transform`/`layout`/`flow` + per-type extras) — нужен дескриптор
+  дискового формата в рантайме, общий с `SceneSaver`. Мёртвые ключи в шаблонах
+  (`Bar2D` в `recipe-grid-3d`, `Checkbox2D` в `minigame-2d`) и ошибки в
+  `docs/node-types-reference.md` (`Bar2D`, `Checkbox2D`, `Sprite2D`) исправлены.
+- **Движок защищённых свойств `P`** — `src/services/project/external-merge/`, 45 тестов:
+  таблица разбора, контрпримеры (а)–(и), ack `(hash, genAtWrite)`, `rejected`. Не подключён к
+  FileWatch/reload/autosave (это фаза 2). Два уточнения к §4.3, принятые координатором:
+  1. если `A.p ≠ P[p]`, но `A.p == E.p` (агент нёс файл, в котором ручной правки ещё не было),
+     ручное значение остаётся **молча** с записью `human-unchanged-by-agent` в merge-log — это
+     не вывод намерения из значений, а факт «агент не переписал ничего, что было на диске»;
+     без известного `E` — буквальная таблица (конфликт). Следствие: `clean` ≠ `M == A`, есть
+     флаг `mergedEqualsExternal`, и хеш `A` запоминается принятым только при `M == A`;
+  2. позиция в дереве хранится как `{parent, prevSibling}`, а не `{parent, index}` — вставка
+     или удаление соседа агентом не даёт ложного «перемещено».
+- **`@pix3/cli` скелет** — `packages/pix3-cli` (workspace, lockstep): `new` (байт-в-байт
+  манифест редактора, спек `src/templates/projects/cli-manifest.spec.ts`), `mcp` = stdio MCP +
+  loopback-сервер `/hello`, `/claim`, `/claim/confirm`, `/claim/takeover`, `/calls` (long-poll,
+  аренда 10 с), Origin-allowlist, Host-check; 30 тестов, включая копию проекта с тем же
+  `projectId` (403 `bad_nonce`), `busy`, перехват. Открытые решения: `projectId` лежит в
+  `metadata.projectId` (редактор выбрасывает неизвестные верхнеуровневые ключи манифеста и не
+  чеканит id — фаза 1/2 должна); холодный `npx` **3,6–4,2 с** против «~2 с» — 93 пакета
+  MCP SDK, лечится бандлом в один файл; шаблонные логотипы (3×610 КБ) раздувают tarball до
+  2 МБ. Отчёт: `measurements/external-agent-phase0-cold-start.md`.
+- **Черновик agent kit** — `measurements/phase0-agent-kit-draft/` (AGENTS.md, 4 skills,
+  `TRIAL-PROTOCOL.md`, `SOURCES.md` с 16 открытыми вопросами: расхождения спеки и сохранённой
+  формы, `click` vs `pressed`, SVG на `Sprite2D` не проверен, `core:*` config без источника).
+
+Не сделано (нужен человек или браузер): транспорт LNA в установленном PWA и живучесть
+long-poll под Service Worker; challenge между вкладками (Web Locks / `BroadcastChannel`);
+замер агентов по `TRIAL-PROTOCOL.md` (Claude Code / Codex на трёх рецептах); замер `npx` по
+опубликованной версии из реестра.
+
+### 11.1 Решения после ревью дополнения про Remote SSH (2026-09-25)
+
+Принято пользователем по [external-agent-authoring-remote-ssh.md](external-agent-authoring-remote-ssh.md):
+
+- **Фаза 3 переопределена.** Живой канал строится поверх **workspace-backend'а**: `pix3 serve`
+  (файловый API + watcher + WebSocket событий/аренды/MCP-вызовов + сопряжение токеном) и backend
+  `workspace` в `ProjectStorageService`. Для локальной папки этот же путь работает без SSH.
+  FSA-обнаружение по диапазону портов, challenge-файл и Local Network Access уходят в
+  **условную фазу для посетителей сайта** — `link-server.ts` из фазы 0 остаётся как заготовка,
+  его relay/lease выносятся в общий серверный модуль. Фазы 1 и 2 не меняются: они не зависят
+  от backend'а.
+- **Транспорт:** один WebSocket с auth-кадром первым сообщением (токен не в URL) для событий,
+  аренды и MCP-вызовов; HTTP с ETag по хешу для чтения/записи файлов. Host-check сервера
+  принимает `localhost`/`127.0.0.1` с **любым** портом (VS Code может пробросить на другой).
+- **Сопряжение:** один случайный токен, в браузере — IndexedDB, на сервере — sha256 в
+  `.pix3/workspace.json`; отзыв в v1 = удалить файл.
+- **`projectId`** — `metadata.projectId` в `pix3project.yaml`; редактор чеканит его при создании
+  проекта и дозаписывает при открытии, если отсутствует. Идентичность workspace — отдельный
+  серверный `workspaceId`, `projectId` только фильтр кандидатов.
+- **Холодный `npx`:** CLI бандлится в один файл без runtime-зависимостей (фаза 1).
+  Устаревший 610 КБ плейсхолдер `pix3-logo.png` заменён на `public/menu-logo.png` (7 КБ) во
+  всех шаблонах.
+
+### 11.2 Состояние на 2026-09-26 (ночь)
+
+- **Фаза 1, `validate`** — сделано: `pix3 validate` уровни 1+2, 23 кода с фикстурами, golden по
+  всем шаблонам без ошибок (`packages/pix3-cli/src/validate/`); дескриптор дискового формата
+  `packages/pix3-runtime/src/core/scene-disk-format.ts` закреплён спеком против `SceneSaver`;
+  `@pix3/runtime/node` — гарнитура для загрузчика в Node; `emoji-as-art` и правило регистрации
+  `user:` вынесены в рантайм; починен загрузчик (`Node2D` не читал `flow`). Отклонение: выход за
+  `ui.min/max` — предупреждение `W_PROPERTY_RANGE`, не ошибка (это подсказки слайдера).
+  `projectId` чеканится редактором. Не сделано из фазы 1: `check` (tsc, типы в `.pix3/types/`),
+  `kit`, генерация kit из источников, `read`/`ack`, бандл CLI в один файл, вход «Работать со
+  своим агентом» в редакторе.
+- **Фаза 3 (workspace), этапы 1–2 дополнения** — сделано: `pix3 serve`
+  (`packages/pix3-cli/src/serve/`, протокол в `packages/pix3-cli/README.md`, 30 тестов) и
+  редакторский backend `workspace` (`src/services/project/workspace/`, команда «Connect to
+  Workspace…», баннер аренды, recents с бейджем, тихий reconnect). Аудит FSA-мест в отчёте агента
+  перенесён в спеку кратко; отказано для workspace: `SaveAsScene` без пути, hybrid sync,
+  «открыть в IDE», создание проекта из редактора. Origin-allowlist принимает любой
+  `http://localhost:<port>`. **Ручной тест через VS Code Remote SSH ещё не проходил.**
+  Не сделано: `pix3 mcp --workspace` (транспорт от отдельного процесса к `serve`), барьер §5 D,
+  подтверждение `generate_*`, `size`/`mtime` в событиях `change`.
+- **Фаза 2** — движок merge готов, не подключён (FileWatch/reload/autosave, `.pix3/protected.json`,
+  `.pix3/recovery/`, плашка).
+
+### 11.3 Состояние на 2026-09-26 — фаза 2, первая половина
+
+Сделано (без применения merge к графу — это следующий шаг): автосохранение
+(`src/services/project/autosave/AutosaveService.ts`: workspace — всегда, локальная папка — при
+agent kit или настройке, только окно-владелец — аренда / Web Lock `pix3-project:<id>`, удержание
+при неразобранной внешней версии и во время жеста), проверка перед записью и журнал
+`.pix3/recovery/` (кольцо 200 / 7 дней, fallback в IndexedDB), запись операций человека в `P`
+(`ProtectedSetService` + `external-merge/human-operation-diff.ts` — diff сохранённой формы до/после
+каждой операции из истории, а не таблица по классам операций) с `.pix3/protected.json`, окно
+стабилизации (`ExternalChangeService`: два снимка через 300 мс, пачка, свои записи по хешу,
+«файл не читается» через ~5 с, `stale` во время play), `ProjectSyncService.syncNow()`, опрос по
+видимости, а не фокусу. Спека: «Co-authoring mode». Не сделано: применение `mergeExternalVersion`
+вместо reload, плашка конфликтов, `.pix3/merge-log.jsonl`, `ack`, передача владения между окнами
+(`BroadcastChannel`), «Вернуть мою версию», подсветка изменённых нод.
+
+
+### 11.4 Состояние на 2026-09-26 — фаза 2, вторая половина
+
+Сделано: разбор вместо reload (`src/services/project/coauthoring/ExternalMergeService.ts`, шелл
+только делегирует): `A` читается один раз байтами, `E` хранится в `SceneDiskStateService`
+(load / принимающий reload / каждое сохранение); пустой `P` без ack → reload; `clean` и `M == A`
+→ reload из `A`; иначе журнал → reload из `M` → запись `M` через `SaveSceneOperation`; `rejected`
+→ граф не трогается, путь «ждёт решения» (автосохранение держит), плашка «Принять версию агента»
+/ «Оставить мою» (`overwriteExternalHash`). Не-владелец не разбирает, только перечитывает.
+Reload неразрушающий (выделение по id, камера и свёрнутые ветки и так по id), история чистится,
+сообщение в лог; подсветка изменённых нод ~3 с. Плашка `pix3-merge-banner` (все / по пункту /
+«Вернуть мою версию до изменений агента»); принять = `AcceptAgentVersionOperation` (отпускает
+записи и заново разбирает `A` против уменьшенного `P` — одно правило на все виды конфликтов;
+undo/redo меняют экземпляры графа местами без dispose, `SceneManager.setActiveSceneGraph(…,
+{ disposePrevious: false })`), вернуть = `RestoreRecoveryVersionOperation` (разница пишется в
+`P` одной операцией человека); ПКМ по вкладке сцены → последние 10 версий журнала.
+`.pix3/merge-log.jsonl` (кольцо 500, только владелец), `.pix3/ack.json` (`AckService`: явное
+наблюдение за одним файлом `.pix3/`, перечитывается перед разбором, `consumedAcks` удаляются),
+`pix3 read` / `pix3 ack` в CLI. Хеш везде от **байтов** (`disk-version.ts`; раньше — от текста,
+BOM не совпадал с сервером). Второе окно: `CommandDispatcher` блокирует изменения (включая
+undo/redo и сохранение) у не-владельца; баннер «Проект редактируется в другом окне — Перехватить»
+(локальная папка; workspace — прежний баннер аренды); передача по `BroadcastChannel`
+`pix3-project:<id>`: владелец сбрасывает автосохранение, журналирует оставшееся грязным, пишет
+`protected.json`, уходит в просмотр и отпускает lock; нет ответа 3 с → `steal`. Спеки: исходы
+через потребитель пачки, гонки (а)(б)(в)(д)(ж)(и) + ack-выход + 20 прогонов truncate/частичных
+записей скриптом-«агентом» поверх хранилища (`coauthoring-races.spec.ts`), BOM, передача
+владения, плашка. Не сделано: ручная проверка в живом браузере (две вкладки, FSA-папка, реальный
+агент), замер «≤ 3 с / ≤ 2 с» из «Готово, когда», `pix3 check` / `project_status` не читают
+merge-log, живой жест в окне-не-владельце двигает ноду до отказа коммита. Открытые решения:
+частично записанный, но **парсящийся** префикс файла, простоявший окно стабилизации, — законная
+версия (ручные значения защищены `P`, неручные ноды агента могут мигнуть); графы, снятые
+принятием/восстановлением, не освобождаются до выхода записи из истории.
+
+### 11.5 Живая приёмка workspace-пути (2026-09-26)
+
+Прогнано пользователем через Chrome DevTools MCP на реальном `pix3 serve` и редакторе. Первый прогон
+нашёл два блокера (сервер запрещал редактору `.pix3/`, F5 терял аренду), починены в `d2ccfd07`.
+Повторный прогон принят: подключение по токену, HTTP/WebSocket/аренда, автосохранение ручной правки
+на диск, `.pix3/protected.json` переживает F5, владелец после F5 получает `lease … resumed` без
+баннера, внешняя запись поверх ручной правки даёт merge + плашку, ручное значение остаётся на графе
+и диске, `merge-log.jsonl` пишет `kept: human`, «Accept agent's version» и его undo работают, вторая
+вкладка read-only с явным перехватом. Ошибок в `__PIX3_DEBUG__.errors()` нет.
+
+Остаётся по плану: фаза 1 — `pix3 check` (tsc, типы в `.pix3/types/`), `kit`/генерация из
+источников, вход «Работать со своим агентом», бандл CLI; фаза 3 — `pix3 mcp --workspace` с барьером
+§5 D и подтверждением `generate_*`; замеры таймингов и прогон живых агентов по `TRIAL-PROTOCOL.md`.
+
+### 11.6 Состояние на 2026-09-26 — фаза 3, живой канал поверх workspace
+
+Сделано (не закоммичено, живой прогон не проходил): `pix3 mcp --workspace` — stdio MCP-сервер без
+своего порта, находит `pix3 serve` через `.pix3/workspace.json` + пробу `/ws/agent/status` с
+control-секретом, без сервера отвечает `no_workspace_server` и подхватывает сервер на следующем
+вызове (`packages/pix3-cli/src/mcp-workspace.ts`, `workspace-agent/`). Серверный agent lane
+`/ws/agent/{status,tools,call,hash,expect,changes}` + `GET /ws/revision`: только control-секрет,
+bearer и любой `Origin` отклоняются; `409 no_editor` сразу без окна, `504 no_editor_reply`,
+`409 lease_lost`; `expect` отвечает `recovery` (хеш каждого снимка журнала этого пути) и `mergeLog`;
+кольцо 5000 изменений путей по `seq` (внешние и через API) для `changedDuringRun`. Инструменты v1 —
+ровно 14, схемы из окна (`tools_manifest`) со статическим fallback, `expect` у трёх барьерных.
+Барьер §5 D — в MCP-процессе, ответ `{revision, matchesAgent, matchesDisk, changedDuringRun,
+editorChangedSinceAgentWrite, result}`, коды ровно `disk_differs_from_agent`, `sync_timeout`,
+`load_failed`, `pending_external`, `no_editor`, `permission_denied`, `no_workspace_server`.
+Редактор: `WorkspaceAgentToolBridge` (allowlist + `sync_barrier`/`sync_release`/`tools_manifest`,
+выполнение через `AgentToolRegistry.execute`, `__images` → image-блоки, `_meta.pix3 = {playRevision,
+stale}` у наблюдающих, повторно доставленный id отвечается один раз), `AutosaveService.hold`,
+`ProjectSyncService.builtScriptHashes` (и проверка скриптов против сборки теперь и для workspace),
+`ProjectScriptLoaderService.getLastBuildError`, `coauthoring.playRevision`; разрешение `generate_*`
+на подключение (serverSession + lease + процесс `pix3 mcp`), 60 с, лимит 20, отзыв; пилюля
+«Agent: …» в статус-баре с отключением канала. `pix3 new` пишет закреплённый `.mcp.json`, `pix3
+setup [claude|codex]` печатает регистрацию; из checkout репозитория (или `PIX3_CLI_DEV=1`) —
+`node <repo>/packages/pix3-cli/src/index.ts mcp --workspace`.
+
+Отклонения и открытые решения: `editorChangedSinceAgentWrite` — пути `expect`, которые merge-log
+после прогона показывает записанными редактором (любое расхождение `expect` до старта — ошибка
+`disk_differs_from_agent`, как в шаге 1 §5 D); `loaded` — открытые сцены и исходники последней
+сборки, префабы/ассеты, которые игра читает лениво, не сверяются до старта (ловятся только в
+`changedDuringRun`); `game_run` через канал сам стартует play (барьер его останавливает);
+«Журнал на стороне диска» (сервер сам кладёт версии агента в `.pix3/recovery/`) не сделан; `kit
+--update` для MCP-конфигурации не существует (нет `kit`). Не проверено: живой прогон с Claude
+Code/Codex, «20 из 20» из «Готово, когда».
+
+### 11.7 Живая приёмка канала MCP (2026-09-26, координатор через CDP)
+
+Прогнано на реальном `pix3 serve`, редакторе в Chrome пользователя (обратный туннель 9222) и
+`pix3 mcp --workspace` через MCP-клиент. Прошло: подключение и аренда, `project_status`,
+`play_start` без `expect`, запись агента + `play_restart` с верным `expect` (сцена в `revision`,
+граф обновлён), устаревший `expect` → `disk_differs_from_agent` без ложной копии, `stale: true`
+при правке скрипта во время игры, битый YAML → `pending_external`, полная цепочка «ручная правка →
+автосохранение → устаревшая запись агента → merge + плашка + merge-log → барьер с подсказкой про
+merge-log», промпт `generate_asset` (Deny → `permission_denied`, Allow → вызов идёт).
+Найдено и починено: `game_run` стартовал до `SceneRunner.running` (обрыв на кадре 0); отчёты
+редактора `design/tests/reports/` попадали в `changedDuringRun` — теперь отдельное поле
+`editorWroteDuringRun`, сервер помечает origin каждого изменения; сцена навсегда оставалась
+`pendingExternal` после восстановления битого файла до прежних байтов. Плюс отказ `NaN`/`Infinity`
+в `UpdateObjectPropertyOperation`. Повторный прогон после починки: `game_run` 240 кадров PASS с
+верной классификацией изменений, восстановление снимает pending.
+Следующее: `pix3 check`, kit, бандл CLI, прогон живого Claude Code по `TRIAL-PROTOCOL.md`.
+
+### 11.8 Состояние на 2026-09-26 — фаза 1: `pix3 check` и `pix3 kit`
+
+Сделано (не закоммичено): `pix3 check [--json] [--no-hydrate] [--offline] [--project]`
+(`packages/pix3-cli/src/check/`) = validate обоих уровней + `tsc --noEmit` по скриптам через API
+компилятора + последние 10 строк `.pix3/merge-log.jsonl` (человеческими словами: «editor KEPT …
+— `pix3 read <file>`») + версии; коды `E_TYPE`, `E_TYPECHECK_UNAVAILABLE`,
+`W_RUNTIME_VERSION_MISMATCH`, `W_RUNTIME_NOT_INSTALLED`, `W_KIT_OUTDATED`; `--json` отдаёт `files`
+с sha256 **байтов** сцен и скриптов (хеши для `expect`; validate теперь тоже хеширует байты).
+TypeScript не зависимость: проект → соседний install CLI → `~/.pix3/typescript/5.8.3/` (ленивый
+`npm install --prefix`, печатается; `--offline` — ошибка с командой). Типы: `tsconfig.types.json`
+рантайма (только граф `index.ts`, чисто) → `runtime-types/` CLI + `@types/three` без его
+`node_modules`; `lit`/`postprocessing`/spine не нужны (`skipLibCheck`). В проекте без своего
+`tsconfig.json` — `.pix3/types/`, `.pix3/tsconfig.check.json`, корневой `tsconfig.json` с
+`extends`; со своим (DeepCore) — его tsconfig как есть. `pix3 kit [--update]` + `new` через тот же
+шаг: kit генерируется `scripts/build-kit.mjs` из `kit-src/` (проза черновика) + `{{include}}` по
+спеке / node-types-reference / nodes-and-systems / engine-api-map / README CLI + таблица `core:`
+из реестра рантайма; `kit.spec.ts` ловит дрейф (директивы, команды/флаги, 14 инструментов, коды,
+типы нод, свойства таблиц против дескриптора дискового формата, `core:` id, компиляция
+TS-примеров). Спек нашёл и починил: неверную таблицу `InventorySlot2D` и строку quick reference в
+`docs/node-types-reference.md`, «clockwise» у 2D-поворота (на деле против часовой), пробел
+дескриптора — `Label2D` читает `labelOutlineWidth/Color` (read-compat, теперь `W_LEGACY_KEY`, а не
+ложная ошибка). Замеры (упакованный CLI вне репозитория, чистый `HOME`): `new` 0,13 с, первый
+`check` 2,1 с с установкой TypeScript, дальше 1,45 с; все 11 шаблонов зелёные; DeepCore без
+`node_modules` — 230 `E_TYPE` (каскад от отсутствующих модулей) + `W_RUNTIME_NOT_INSTALLED`, после
+`npm install` — зелёный за 4,6 с с `W_RUNTIME_VERSION_MISMATCH` (с реестра пришёл runtime 1.4.1).
+Конфликт §5 C п.2 подтверждён: «build from templates» экспорта пишет свой корневой `tsconfig.json`
+поверх kit'ового — после этого проект считается «со своим tsconfig» (и `--update` его не трогает).
+Не сделано из фазы 1: вход «Работать со своим агентом» в редакторе (редактору нужен тот же kit —
+Vite-glob `packages/pix3-cli/kit/`), `@pix3/cli` в `publish-packages.yml`, бандл CLI в один файл,
+проверка в живом редакторе, что проект с kit открывается и играет без правок (корневой
+`tsconfig.json`, 6 МБ `.pix3/types/`), прогон живых агентов по `TRIAL-PROTOCOL.md` («≤ 30 с»).
+
+### 11.9 Первый прогон внешнего агента на реальном проекте (DeepCore, 2026-09-26)
+
+DeepCore (`../DeepCore`, consumer-игра: сцены в `src/assets/scenes/`, скрипты в `src/scripts/`,
+свой `tsconfig`/`package.json`, свой `AGENTS.md`, события через `CustomEvent`, 3D) открыт через
+workspace, kit установлен `pix3 kit` (свой `AGENTS.md` сохранён → `AGENTS.pix3.md`). Агент-опус
+в роли «чужого агента» с доступом только к папке проекта и CLI, задача «счётчик комбо отдельным
+скриптом + HUD»: **сцена валидна с первой попытки, 0 вопросов, зелёный `check` ≤ 160 с** (из них
+`npm install`, т.к. `node_modules` не было), 25 вызовов. Сквозной цикл подтверждён скриншотом через
+`viewport_screenshot` по MCP: `measurements/trial-deepcore/2026-09-26-combo-hud.jpg`.
+Найдено и починено (`9cd087e8`, `0492a7e6`): раскладка в kit как правило, нет раздела про чужой
+event bus и ручную отписку, каскад из 250 `E_TYPE` без `node_modules` → один
+`E_DEPENDENCIES_MISSING`, ключи опций `juice`/`tween`/`audio`, портретный YAML-пример,
+загруженная версия сцены не считалась принятой для `ack`, пустой `revision` барьера и 30-секундный
+барьер на DeepCore (перечитывание 87 модулей по HTTP) → хеши из сборки и манифеста без чтения
+файлов, ожидание старта рантайма до 30 с с `startupMs`. Движковый пробел: `Script.onDetach`
+не отключал сигналы, подключённые на чужой ноде (в работе).
+Не сделано: живой замер барьера после починки (туннель к Chrome отвалился), раунд 2 прогона с
+MCP-циклом `game_run` + `expect`, замер по протоколу на трёх рецептах.
+
+### 11.10 Раунд 2 прогона (MCP-цикл) и keepalive для агента (2026-09-27)
+
+**Раунд 2 на DeepCore** (доработка комбо: shake/punch/звук + доказательство прогоном): первая
+запись +101 с, зелёный `check` +113 с, первый зелёный `game_run` (`matchesAgent`, `matchesDisk`,
+PASS) +170 с, полное доказательство поведения 11,6 мин; 49 вызовов, 35 по каналу, 0 вопросов.
+Доказано в игре: комбо растёт до 9 под быстрыми тапами, не сбрасывается при паузах < 1,5 с,
+сбрасывается через 1482 мс, punch на x5. Не проверяемо каналом (агент честно указал): слышимость
+звука (синтетический ввод не разблокирует Web Audio), малая тряска камеры (порог 0,5 ед.).
+Починено по итогам (`77ca13ce`, `83e0bf5a`): verify-skill (два паттерна проверки, `holdMs`,
+пространство координат, endpoint-only текст лейбла, `startupMs`, латентности, аудио/тряска),
+тулы (пример координат, `space:'overlay'` для HUD под `CanvasLayer2D`, смена текста = активность,
+описания без упоминаний тулов вне 14, `startupMs` всегда). Спек дрейфа: никаких тулов вне 14.
+
+**Keepalive для агента** (`c46f42c5`, по запросу пользователя): пауза в фоне остаётся для простоя,
+но не блокирует агента. Присутствие агента — heartbeat `POST /ws/agent/presence` от процесса
+`pix3 mcp` + кадр `agent-presence`; keepalive = настройка ∧ (агент подключён ∨ вызов < 5 мин ∨
+игра запущена агентом); в скрытой вкладке циклы тикают от Web Worker (`BackgroundTicker`,
+`SceneRunner.setFrameScheduler`). Замер в скрытой вкладке: `play_restart` 14,6 с при
+`startupMs` 13,5 с (раньше 31–35 с). **Переподключение после перезапуска `serve` в скрытой
+вкладке всё ещё 169 с** — в расследовании.
+Известное ограничение: DeepCore в редакторе держит ~99% CPU в режиме редактирования (не
+разбиралось).
+
+### 11.11 Ответ на внешнее ревью (Gemini) и новые команды CLI (2026-09-27)
+
+Ревью исходило из устаревшего состояния (MCP, барьер, `check`, kit уже сделаны и прошли живые
+прогоны). Из «слепых зон» принято и сделано: **`pix3 smoke`** (`147f8474`) — прогон сцены в Node
+без браузера на `SceneRunner` в manual-time в worker-потоке с таймаутом, скрипты с настоящими
+bare-импортами из `node_modules` проекта, DOM-шим, ошибки хуков с именем скрипта/кадром/стеком,
+snapshot `registerGameDebug`; все шаблоны 120 кадров чисто, DeepCore 600 кадров с Rapier и GLB за
+~1,5 с. **`pix3 tree`** — одна строка на ноду, `--depth/--types/--props/--json`, обзор проекта.
+**SVG на `Sprite2D`** (`b069ea53`) — измерено в headless Chromium: рендерится всюду при
+`xmlns` + px `width`/`height` + Blob `image/svg+xml`; `validate` даёт `E_SVG_INVALID`,
+`E_SVG_NO_SIZE`, `W_SVG_VIEWBOX_ONLY`, `W_SVG_EXTERNAL_REF`; шаблон в kit. Дыры редактора
+(облачный кеш отдаёт `.svg` как `text/plain`, у экспорта нет MIME для `.svg`) — в работе.
+**`pix3 sfx`** — свой jsfxr-подобный синтез в WAV (`@txt2sfx` без Web Audio не считает), шесть
+пресетов, 0,12 с. **Не принято:** YAML-хелперы `pix3 node add/set` — в обоих прогонах сцена валидна
+с первой попытки, остаются запасным ходом по риску №1. `core:*`, `click`/`pressed`, единицы
+вращения — уже закрыты в kit. Переподключение в скрытой вкладке починено (`10795bc7`): keepalive
+держится на время reconnect, шаг ≤ 2 с на worker-таймере; замер 9 с от старта процесса `serve`
+(≈3 с его сканирование) при видимой вкладке, фоновый перемер ожидается.
+
+### 11.12 Закрытие плана по коду (2026-09-27)
+
+Все пункты фаз 1–3 и принятые пункты внешнего ревью реализованы и закоммичены на ветке
+`external-agent-authoring` (30 коммитов, не влита в `main`, не запушена):
+- **Замер по протоколу** (`measurements/trial-recipes-2026-09-27.md`): 3 рецепта × 3 задачи,
+  медиана «просьба → зелёный `check`» **25,4 с**, 9/9 валидны с первой попытки, 0 вопросов;
+  честная поправка на свежую сессию агента ~35–45 с (в допустимых 60 с). Дефекты D1–D9 закрыты
+  (`0d0bf1d5`): `smoke` без аргумента шёл в меню → теперь сцены, затронутые изменениями, иначе все
+  верхнеуровневые с `main` первой; `labelFontSize` max 200; freeze поддеревьев в `GameRules`;
+  тексты рецептов (комбо без рекурсии, флипперы, bloom). D6 (`smoke --input/--until`) — дизайн.
+- **Гонка аренды при перезагрузке** (`da41b044`): сервер передаёт аренду новому сокету с тем же
+  `leaseId`, клиент повторяет `acquire` до 15 с; дубликат вкладки не крадёт аренду.
+- **Вход «Работать со своим агентом»** (`64f4cb14`): kit из редактора байт-в-байт как из CLI
+  (спек дрейфа), экран продолжения, File → Install Agent Kit…, версионный гейт `.mcp.json` по
+  реестру npm (пока `@pix3/cli` не опубликован → `.mcp.json` не пишется, показана инструкция).
+- **Бандл CLI** (`0dd421cc`): холодный `npx` 1,5–2,3 с, 0 runtime-зависимостей, publish-job.
+- **Viewport в режиме правки** (`bc0f5c1c`): DeepCore больше не рисует 60 fps впустую.
+
+Не сделано / требует человека: публикация `@pix3/cli` (Trusted Publisher на npmjs +
+`VITE_PIX3_CLI_CONFIRMED_VERSION` в деплое PWA); фоновый перемер переподключения после
+`10795bc7`/`da41b044`; живой клик по «Work With → Your Own Agent» в браузере; прогон реального
+Claude Code/Codex (не субагента) по протоколу; `smoke --input` (D6); `W_UNUSED_ASSET` на
+`recipe-blank-2d` (шаблон намеренно возит библиотеку форм); влитие ветки в `main`.

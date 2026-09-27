@@ -12,6 +12,9 @@ import {
   Sprite2D,
 } from '@pix3/runtime';
 import { appState, resetAppState } from '@/state';
+import { setTickWorkerFactory } from '@/services/core/background-ticker';
+import { FakeTickWorker, setVisibility } from '@/services/core/background-ticker.test-helpers';
+import { setEditorKeepAlive } from '@/services/core/page-activity';
 
 describe('ViewportRendererService', () => {
   const expectedDefault2DZoom = 1 / 1.25;
@@ -1555,6 +1558,90 @@ describe('ViewportRendererService — parking the on-demand loop', () => {
 
     expect(renderFrame).not.toHaveBeenCalled();
     expect(internals.animationId).toBeUndefined();
+  });
+});
+
+/**
+ * Agent keepalive: in a hidden tab (no rAF) the on-demand loop keeps running from worker ticks, so
+ * an agent's edits and screenshots land; without an agent it parks exactly as before.
+ */
+describe('ViewportRendererService — agent keepalive', () => {
+  let worker: FakeTickWorker;
+
+  afterEach(() => {
+    setEditorKeepAlive(false);
+    setTickWorkerFactory(null);
+    setVisibility('visible');
+    vi.unstubAllGlobals();
+    resetAppState();
+  });
+
+  function makeService() {
+    resetAppState();
+    appState.ui.pauseRenderingOnUnfocus = true;
+    appState.collaboration.accessMode = 'local';
+    worker = new FakeTickWorker();
+    setTickWorkerFactory(() => worker);
+    vi.stubGlobal(
+      'requestAnimationFrame',
+      vi.fn(() => 1)
+    );
+    vi.stubGlobal('cancelAnimationFrame', vi.fn());
+    setVisibility('hidden');
+
+    const service = new ViewportRendererService();
+    const renderFrame = vi.fn();
+    Object.defineProperty(service, 'renderFrame', { value: renderFrame, configurable: true });
+    Object.defineProperty(service, 'cancelPanMomentum', { value: () => {}, configurable: true });
+    const internals = service as unknown as {
+      isPaused: boolean;
+      isWindowFocused: boolean;
+      animationId?: number;
+      renderRequested: boolean;
+      lastRenderedAt: number;
+      handleFocusPause(): void;
+      startRenderLoop(): void;
+    };
+    internals.isWindowFocused = false;
+    return { service, renderFrame, internals };
+  }
+
+  it('keeps the loop running on worker ticks in a hidden tab; requestRender lands on the next tick', () => {
+    const { service, renderFrame, internals } = makeService();
+    setEditorKeepAlive(true);
+    internals.startRenderLoop();
+    expect(renderFrame).toHaveBeenCalledTimes(1);
+    expect(internals.animationId).toBeDefined();
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+
+    // Idle: a worker tick paints nothing (render-on-demand is unchanged)…
+    // (the stubbed renderFrame does not clear the dirty flag itself)
+    internals.renderRequested = false;
+    internals.lastRenderedAt = performance.now() + 60_000;
+    worker.fireAll();
+    expect(renderFrame).toHaveBeenCalledTimes(1);
+    // …a dirty mark paints on the next tick.
+    service.requestRender();
+    worker.fireAll();
+    expect(renderFrame).toHaveBeenCalledTimes(2);
+    service.dispose();
+  });
+
+  it('parks the loop when keepalive goes off, exactly as without an agent', () => {
+    const { renderFrame, internals, service } = makeService();
+    setEditorKeepAlive(true);
+    internals.startRenderLoop();
+    expect(internals.animationId).toBeDefined();
+
+    setEditorKeepAlive(false);
+    internals.handleFocusPause();
+    expect(internals.animationId).toBeUndefined();
+    expect(worker.fireAll()).toBe(0);
+    // Parked: requestRender paints synchronously again.
+    const before = renderFrame.mock.calls.length;
+    service.requestRender();
+    expect(renderFrame.mock.calls.length).toBe(before + 1);
+    service.dispose();
   });
 });
 

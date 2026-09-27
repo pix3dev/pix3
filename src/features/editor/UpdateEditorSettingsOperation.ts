@@ -8,7 +8,9 @@ import type { FlowStageAspect, GameAspectRatio, Navigation2DSettings } from '@/s
 
 export interface UpdateEditorSettingsParams {
   warnOnUnsavedUnload?: boolean;
+  autosaveLocalProjects?: boolean;
   pauseRenderingOnUnfocus?: boolean;
+  keepEditorRunningForAgent?: boolean;
   navigation2D?: Partial<Navigation2DSettings>;
   gameAspectRatio?: GameAspectRatio;
   flowStageAspect?: FlowStageAspect;
@@ -16,7 +18,9 @@ export interface UpdateEditorSettingsParams {
 
 export interface EditorSettingsSnapshot {
   warnOnUnsavedUnload: boolean;
+  autosaveLocalProjects: boolean;
   pauseRenderingOnUnfocus: boolean;
+  keepEditorRunningForAgent: boolean;
   navigation2D: Navigation2DSettings;
   gameAspectRatio: GameAspectRatio;
   flowStageAspect: FlowStageAspect;
@@ -44,8 +48,14 @@ export const loadEditorSettings = (): Partial<EditorSettingsSnapshot> | null => 
       if (typeof parsed.warnOnUnsavedUnload === 'boolean') {
         result.warnOnUnsavedUnload = parsed.warnOnUnsavedUnload;
       }
+      if (typeof parsed.autosaveLocalProjects === 'boolean') {
+        result.autosaveLocalProjects = parsed.autosaveLocalProjects;
+      }
       if (typeof parsed.pauseRenderingOnUnfocus === 'boolean') {
         result.pauseRenderingOnUnfocus = parsed.pauseRenderingOnUnfocus;
+      }
+      if (typeof parsed.keepEditorRunningForAgent === 'boolean') {
+        result.keepEditorRunningForAgent = parsed.keepEditorRunningForAgent;
       }
       if (parsed.navigation2D && typeof parsed.navigation2D === 'object') {
         const nav2D: Partial<Navigation2DSettings> = {};
@@ -97,8 +107,14 @@ export class UpdateEditorSettingsOperation implements Operation<OperationInvokeR
     const prevWarn = snapshot.ui.warnOnUnsavedUnload;
     const nextWarn = this.params.warnOnUnsavedUnload ?? prevWarn;
 
+    const prevAutosave = snapshot.ui.autosaveLocalProjects;
+    const nextAutosave = this.params.autosaveLocalProjects ?? prevAutosave;
+
     const prevPause = snapshot.ui.pauseRenderingOnUnfocus;
     const nextPause = this.params.pauseRenderingOnUnfocus ?? prevPause;
+
+    const prevKeepAlive = snapshot.ui.keepEditorRunningForAgent;
+    const nextKeepAlive = this.params.keepEditorRunningForAgent ?? prevKeepAlive;
 
     const prevNav2D = snapshot.ui.navigation2D;
     const nextNav2D: Navigation2DSettings = {
@@ -114,7 +130,9 @@ export class UpdateEditorSettingsOperation implements Operation<OperationInvokeR
 
     const hasChanges =
       nextWarn !== prevWarn ||
+      nextAutosave !== prevAutosave ||
       nextPause !== prevPause ||
+      nextKeepAlive !== prevKeepAlive ||
       nextNav2D.panSensitivity !== prevNav2D.panSensitivity ||
       nextNav2D.zoomSensitivity !== prevNav2D.zoomSensitivity ||
       nextGameAspectRatio !== prevGameAspectRatio ||
@@ -125,27 +143,41 @@ export class UpdateEditorSettingsOperation implements Operation<OperationInvokeR
     }
 
     state.ui.warnOnUnsavedUnload = nextWarn;
+    state.ui.autosaveLocalProjects = nextAutosave;
     state.ui.pauseRenderingOnUnfocus = nextPause;
+    state.ui.keepEditorRunningForAgent = nextKeepAlive;
     state.ui.navigation2D = nextNav2D;
     state.ui.gameAspectRatio = nextGameAspectRatio;
     state.ui.flowStageAspect = nextFlowStageAspect;
 
     const serialize = (
       w: boolean,
+      a: boolean,
       p: boolean,
+      k: boolean,
       n: Navigation2DSettings,
       g: GameAspectRatio,
       f: FlowStageAspect
     ): EditorSettingsSnapshot => ({
       warnOnUnsavedUnload: w,
+      autosaveLocalProjects: a,
       pauseRenderingOnUnfocus: p,
+      keepEditorRunningForAgent: k,
       navigation2D: n,
       gameAspectRatio: g,
       flowStageAspect: f,
     });
 
     persistEditorSettings(
-      serialize(nextWarn, nextPause, nextNav2D, nextGameAspectRatio, nextFlowStageAspect)
+      serialize(
+        nextWarn,
+        nextAutosave,
+        nextPause,
+        nextKeepAlive,
+        nextNav2D,
+        nextGameAspectRatio,
+        nextFlowStageAspect
+      )
     );
 
     return {
@@ -154,22 +186,42 @@ export class UpdateEditorSettingsOperation implements Operation<OperationInvokeR
         label: 'Update Editor Settings',
         undo: async () => {
           state.ui.warnOnUnsavedUnload = prevWarn;
+          state.ui.autosaveLocalProjects = prevAutosave;
           state.ui.pauseRenderingOnUnfocus = prevPause;
+          state.ui.keepEditorRunningForAgent = prevKeepAlive;
           state.ui.navigation2D = prevNav2D;
           state.ui.gameAspectRatio = prevGameAspectRatio;
           state.ui.flowStageAspect = prevFlowStageAspect;
           persistEditorSettings(
-            serialize(prevWarn, prevPause, prevNav2D, prevGameAspectRatio, prevFlowStageAspect)
+            serialize(
+              prevWarn,
+              prevAutosave,
+              prevPause,
+              prevKeepAlive,
+              prevNav2D,
+              prevGameAspectRatio,
+              prevFlowStageAspect
+            )
           );
         },
         redo: async () => {
           state.ui.warnOnUnsavedUnload = nextWarn;
+          state.ui.autosaveLocalProjects = nextAutosave;
           state.ui.pauseRenderingOnUnfocus = nextPause;
+          state.ui.keepEditorRunningForAgent = nextKeepAlive;
           state.ui.navigation2D = nextNav2D;
           state.ui.gameAspectRatio = nextGameAspectRatio;
           state.ui.flowStageAspect = nextFlowStageAspect;
           persistEditorSettings(
-            serialize(nextWarn, nextPause, nextNav2D, nextGameAspectRatio, nextFlowStageAspect)
+            serialize(
+              nextWarn,
+              nextAutosave,
+              nextPause,
+              nextKeepAlive,
+              nextNav2D,
+              nextGameAspectRatio,
+              nextFlowStageAspect
+            )
           );
         },
       },

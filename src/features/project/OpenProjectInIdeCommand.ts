@@ -35,6 +35,15 @@ export class OpenProjectInIdeCommand extends CommandBase<void, void> {
         scope: 'project',
       };
     }
+    if (context.state.project.backend === 'workspace') {
+      return {
+        canExecute: false,
+        reason:
+          'This project lives on the machine running `pix3 serve`; open it in your VS Code ' +
+          'Remote window there.',
+        scope: 'project',
+      };
+    }
     return { canExecute: true };
   }
 

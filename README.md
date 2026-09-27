@@ -213,7 +213,7 @@ Pix3 includes a node-local signals engine and scene-level groups engine.
 
 - Signals (`NodeBase`):
   - `signal(name)`, `connect(signal, target, method)`, `emit(signal, ...args)`, `disconnect(...)`
-  - Base `Script.onDetach()` auto-cleans listeners via `disconnectAllFromTarget(this)`.
+  - Base `Script.onDetach()` auto-disconnects every signal handler whose target is the script — on its own node and on any other node.
 - Groups (`NodeBase` + `SceneManager`):
   - `addToGroup()`, `removeFromGroup()`, `isInGroup()`
   - `sceneManager.getNodesInGroup(group)`

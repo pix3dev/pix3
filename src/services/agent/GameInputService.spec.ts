@@ -204,6 +204,88 @@ describe('GameInputService', () => {
     expect(events[0].y).toBeCloseTo(185, 3);
   });
 
+  describe('coordinate taps and the CanvasLayer2D band', () => {
+    /**
+     * The runner's two 2D mappings with the Camera2D panned: the world band goes through a camera
+     * offset by (+500, +200), the overlay band (CanvasLayer2D) keeps the identity mapping — exactly
+     * the split `SceneRunner.projectWorldPointToCanvas` makes. The HUD button sits at design
+     * (-800, 400) under a CanvasLayer2D, so its node projection is the overlay one.
+     */
+    const pannedRuntime = () => {
+      const hud = makeLiveNode({
+        nodeId: 'hud-pause',
+        name: 'PauseButton',
+        type: 'Button2D',
+        position: { x: -800, y: 400, z: 0 },
+      });
+      const runtime = makeRuntime([hud]);
+      const logical = (x: number, y: number) => ({
+        x: ((x + 960) / 1920) * 960,
+        y: ((540 - y) / 1080) * 540,
+      });
+      const camera = { x: 500, y: 200 };
+      Object.assign(runtime.runner, {
+        projectWorldPointToCanvas: (x: number, y: number, opts?: { overlay?: boolean }) =>
+          opts?.overlay ? logical(x, y) : logical(x - camera.x, y - camera.y),
+        projectNodeToCanvas: (node: FakeLiveNode) => logical(node.position.x, node.position.y),
+      });
+      // The button's on-canvas bounds (120x60 design units around its centre), in client pixels.
+      const rect = runtime.canvas.getBoundingClientRect();
+      const toClient = (p: { x: number; y: number }) => ({
+        x: rect.left + (p.x / 960) * rect.width,
+        y: rect.top + (p.y / 540) * rect.height,
+      });
+      const topLeft = toClient(logical(-860, 430));
+      const bottomRight = toClient(logical(-740, 370));
+      const hits: boolean[] = [];
+      runtime.canvas.addEventListener('pointerdown', e => {
+        const p = e as PointerEvent;
+        hits.push(
+          p.clientX >= topLeft.x &&
+            p.clientX <= bottomRight.x &&
+            p.clientY >= topLeft.y &&
+            p.clientY <= bottomRight.y
+        );
+      });
+      return { runtime, hits };
+    };
+
+    it("an overlay tap at the HUD button's design position hits it under a panned Camera2D", async () => {
+      const { runtime, hits } = pannedRuntime();
+      const { service } = buildService(runtime);
+
+      const result = await service.run([
+        { type: 'tap', x: -800, y: 400, space: 'overlay', holdMs: 10 },
+      ]);
+
+      expect(result.ok).toBe(true);
+      expect(hits).toEqual([true]);
+    });
+
+    it('a world tap (the default) at the same point follows the camera and misses the HUD', async () => {
+      const { runtime, hits } = pannedRuntime();
+      const { service } = buildService(runtime);
+
+      const result = await service.run([{ type: 'tap', x: -800, y: 400, holdMs: 10 }]);
+
+      expect(result.ok).toBe(true);
+      expect(hits).toEqual([false]);
+    });
+
+    it('refuses an unknown space instead of guessing a mapping', async () => {
+      const { runtime, hits } = pannedRuntime();
+      const { service } = buildService(runtime);
+
+      const result = await service.run([
+        { type: 'tap', x: 0, y: 0, space: 'screen' as unknown as 'world', holdMs: 10 },
+      ]);
+
+      expect(result.ok).toBe(false);
+      expect(JSON.stringify(result)).toMatch(/Unknown `space`/);
+      expect(hits).toEqual([]);
+    });
+  });
+
   it('flags a tap target whose name matches more than one live node', async () => {
     // The exact shape an agent leaves behind: an abandoned scratch node reusing a real node's
     // name. Both ids are generated, so the name is all the caller has to go on.
@@ -660,6 +742,29 @@ describe('GameInputService', () => {
     expect(result.observed?.PlayButton.directionOk).toBe(true);
     expect(result.observed?.PlayButton.activity?.maxScaleDelta).toBeGreaterThan(0.05);
     expect(result.verdict).toMatch(/GAMEPLAY REACTED/);
+  });
+
+  it('counts a changed label text as activity and names it in the verdict', async () => {
+    const combo = makeLiveNode({ nodeId: 'combo', name: 'ComboLabel', type: 'Label2D' });
+    let text = 'Combo x0';
+    Object.assign(combo, { getDisplayText: () => text });
+    const runtime = makeRuntime([combo]);
+    const { service } = buildService(runtime);
+    runtime.canvas.addEventListener('pointerdown', () => {
+      text = 'Combo x2';
+    });
+
+    const result = await service.run([{ type: 'tap', x: 0, y: 0, holdMs: 10 }], {
+      observe: ['ComboLabel'],
+      expect: { ComboLabel: 'activity' },
+      settleMs: 0,
+    });
+
+    expect(result.observed?.ComboLabel.before?.text).toBe('Combo x0');
+    expect(result.observed?.ComboLabel.after?.text).toBe('Combo x2');
+    expect(result.observed?.ComboLabel.directionOk).toBe(true);
+    expect(result.verdict).toMatch(/^GAMEPLAY REACTED/);
+    expect(result.verdict).toContain('text "Combo x0" → "Combo x2"');
   });
 
   it('verdict says NO ACTIVITY when a watched node does nothing', async () => {
