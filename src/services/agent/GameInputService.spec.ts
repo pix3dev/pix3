@@ -505,6 +505,26 @@ describe('GameInputService', () => {
     expect(result.movement?.Rock.moved).toBe(false);
   });
 
+  it('observe() reports size and axis-aligned world bounds for nodes that have a width/height', async () => {
+    const panel = makeLiveNode({
+      nodeId: 'panel-1',
+      name: 'Panel',
+      position: { x: 100, y: -50, z: 0 },
+      scale: { x: 2, y: 1, z: 1 },
+      ...({ width: 200, height: 80 } as object),
+    });
+    const light = makeLiveNode({ nodeId: 'light-1', name: 'Light', type: 'DirectionalLightNode' });
+    const { service } = buildService(makeRuntime([panel, light]));
+
+    const result = await service.observe(['Panel', 'Light']);
+
+    expect(result.nodes?.Panel?.size).toEqual({ width: 200, height: 80 });
+    // Local scale applies when the fake has no world matrix: 200×2 wide, 80×1 tall, centred.
+    expect(result.nodes?.Panel?.bounds).toEqual({ minX: -100, minY: -90, maxX: 300, maxY: -10 });
+    expect(result.nodes?.Light?.size).toBeUndefined();
+    expect(result.nodes?.Light?.bounds).toBeUndefined();
+  });
+
   it('observe() explains a null snapshot: wrong name vs still warming up', async () => {
     // Live nodes exist, but the queried name is wrong → point at scene_tree.
     const present = buildService(makeRuntime([makeLiveNode()])).service;
@@ -780,6 +800,23 @@ describe('GameInputService', () => {
     expect(result.observed?.Idle.moved).toBe(false);
     expect(result.observed?.Idle.after?.childCount).toBe(0);
     expect(result.verdict).toMatch(/NO ACTIVITY/);
+  });
+
+  it('a tap with no reaction names its hold in the verdict, and the default hold is a tap (80 ms)', async () => {
+    const idle = makeLiveNode({ name: 'Idle' });
+    const { service } = buildService(makeRuntime([idle]));
+    const started = Date.now();
+
+    const result = await service.run([{ type: 'tap', target: 'Idle' }], {
+      observe: ['Idle'],
+      settleMs: 0,
+    });
+
+    expect(result.verdict).toMatch(/NO ACTIVITY/);
+    expect(result.verdict).toMatch(/held the pointer down for 80 ms/);
+    expect(result.verdict).toMatch(/holdMs/);
+    // Not a 700 ms hold any more: the whole call is well under half a second.
+    expect(Date.now() - started).toBeLessThan(500);
   });
 });
 

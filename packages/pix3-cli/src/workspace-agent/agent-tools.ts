@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import type { ToolCallResult, ToolContentBlock } from '../call-relay.ts';
 import {
   LaneHttpError,
@@ -29,7 +31,9 @@ import {
  *    hashes of what it has loaded (`sync_barrier`); those are compared with the disk at that
  *    moment, retrying the editor's sync for up to {@link SYNC_BUDGET_MS}. Loader/compiler errors →
  *    `load_failed`; a file that stays unreadable → `pending_external`; hashes that never agree →
- *    `sync_timeout`.
+ *    `sync_timeout` — unless the only disagreement is between the AGENT'S expectation and a disk
+ *    the editor already matches, which is `expectation_stale` at once (retrying cannot restore a
+ *    version somebody overwrote; the agent has to re-read).
  * 3. **After the run**, the verified files are hashed again and the server's change log since the
  *    verification is read (files only, never directories): `changedDuringRun` = what the barrier
  *    could not vouch for — changed by someone other than the editor, or a verified file whose hash
@@ -39,6 +43,13 @@ import {
  *
  * Observing tools do not stop or sync: they report the revision the running game started from and
  * `stale` when the disk moved since.
+ *
+ * **`revision` is compact by default.** A verified map is every open scene, every source the
+ * script build read and the manifest — ~90 entries on a real game — and every answer used to
+ * open with the whole of it. Now an answer carries `{ files, digest, changed, removed? }`: the
+ * count, a digest of the map, and only the entries that differ from the previous answer of THIS
+ * process (the whole map on the first answer). `fullRevision: true` asks for the old plain map;
+ * `project_status` → `editor.playRevision` is the running game's map while it plays.
  */
 
 export const SYNC_BUDGET_MS = 5_000;
@@ -109,6 +120,20 @@ const splitResult = (result: ToolCallResult): { payload: unknown; images: ToolCo
   return { payload, images };
 };
 
+/**
+ * A step-2 difference that is the AGENT'S expectation being out of date rather than the editor
+ * lagging behind the disk: the path is one the agent vouched for, the disk no longer holds that
+ * version, and the editor either matches the disk or never loaded the file at all.
+ */
+const isStaleExpectation = (diff: {
+  agentHash?: string;
+  diskHash: string | null;
+  loadedHash?: string;
+}): boolean =>
+  diff.agentHash !== undefined &&
+  diff.diskHash !== diff.agentHash &&
+  (diff.loadedHash === undefined || diff.loadedHash === diff.diskHash);
+
 const hintFor = (diff: ExpectDiff): string => {
   if (diff.mergeLog) {
     return (
@@ -150,12 +175,61 @@ export interface WorkspaceAgentToolsOptions {
   readonly syncBudgetMs?: number;
 }
 
+/** `revision` as an answer carries it by default (see the class docs). */
+export interface CompactRevision {
+  /** Entries in the full map. */
+  readonly files: number;
+  /** sha256 over the sorted `path\0hash` lines of the full map: equal digests = equal maps. */
+  readonly digest: string;
+  /** Entries new or different since the previous answer of this process (all, the first time). */
+  readonly changed: Record<string, string>;
+  /** Paths the previous answer had that this map no longer holds. Omitted when empty. */
+  readonly removed?: string[];
+}
+
+export const revisionDigest = (map: Readonly<Record<string, string>>): string => {
+  const hash = createHash('sha256');
+  for (const path of Object.keys(map).sort()) hash.update(`${path}\0${map[path]}\n`);
+  return hash.digest('hex');
+};
+
+/** The compact form of `map`, relative to `previous` (null = first answer: everything changed). */
+export const compactRevision = (
+  map: Readonly<Record<string, string>>,
+  previous: Readonly<Record<string, string>> | null
+): CompactRevision => {
+  const changed: Record<string, string> = {};
+  for (const [path, hash] of Object.entries(map)) {
+    if (!previous || previous[path] !== hash) changed[path] = hash;
+  }
+  const removed = previous ? Object.keys(previous).filter(path => !(path in map)) : [];
+  return {
+    files: Object.keys(map).length,
+    digest: revisionDigest(map),
+    changed,
+    ...(removed.length > 0 ? { removed: removed.sort() } : {}),
+  };
+};
+
 export class WorkspaceAgentTools {
   private readonly lane: AgentLaneClient;
   private readonly log: (line: string) => void;
   private readonly syncBudgetMs: number;
   /** Tool schemas advertised by the window, per server session. */
   private advertised: { serverSession: string; tools: unknown[] } | null = null;
+  /** The last full revision map this process answered with — the baseline of the next compact one. */
+  private lastRevision: Record<string, string> | null = null;
+
+  /** `revision` for an answer: compact by default, the plain map on `fullRevision: true`. */
+  private describeRevision(
+    map: Record<string, string> | null,
+    full: boolean
+  ): CompactRevision | Record<string, string> | null {
+    if (!map) return null;
+    const compact = compactRevision(map, this.lastRevision);
+    this.lastRevision = { ...map };
+    return full ? map : compact;
+  }
 
   constructor(lane: AgentLaneClient, options: WorkspaceAgentToolsOptions = {}) {
     this.lane = lane;
@@ -278,7 +352,8 @@ export class WorkspaceAgentTools {
   // --- observing tools --------------------------------------------------------------------------
 
   private async observingTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
-    const result = await this.lane.call(name, args);
+    const { fullRevision, ...input } = args;
+    const result = await this.lane.call(name, input);
     const meta = isRecord(result._meta) && isRecord(result._meta.pix3) ? result._meta.pix3 : {};
     const revision = isRecord(meta.playRevision)
       ? (Object.fromEntries(
@@ -292,7 +367,17 @@ export class WorkspaceAgentTools {
     }
     const { payload, images } = splitResult(result);
     return {
-      content: [{ type: 'text', text: json({ revision, stale, result: payload }) }, ...images],
+      content: [
+        {
+          type: 'text',
+          text: json({
+            revision: this.describeRevision(revision, fullRevision === true),
+            stale,
+            result: payload,
+          }),
+        },
+        ...images,
+      ],
       ...(result.isError ? { isError: true } : {}),
     };
   }
@@ -300,7 +385,7 @@ export class WorkspaceAgentTools {
   // --- barrier tools ----------------------------------------------------------------------------
 
   private async barrierTool(name: string, args: Record<string, unknown>): Promise<McpToolResult> {
-    const { expect: rawExpect, ...input } = args;
+    const { expect: rawExpect, fullRevision, ...input } = args;
     let expect: Record<string, string> | null = null;
     if (rawExpect !== undefined && rawExpect !== null) {
       if (!isRecord(rawExpect)) {
@@ -370,6 +455,38 @@ export class WorkspaceAgentTools {
           }));
         const loadErrors = report.errors.filter(error => error.kind !== 'pending');
         const pending = report.errors.filter(error => error.kind === 'pending');
+        // Step 1 saw the disk hold the agent's versions; if it no longer does and the editor
+        // already matches the disk, waiting changes nothing — someone wrote a newer version
+        // (the editor's merge, a human, another agent). That is the agent's problem to re-read,
+        // not editor lag, so it gets its own code at once instead of a `sync_timeout` in 5 s.
+        if (differing.length > 0 && differing.every(isStaleExpectation) && expect) {
+          const stalePaths = differing.map(diff => diff.path);
+          const post = await this.lane.expect(
+            Object.fromEntries(stalePaths.map(path => [path, expect[path]]))
+          );
+          const byPath = new Map(post.differing.map(diff => [diff.path, diff]));
+          return toolError(
+            'expectation_stale',
+            `The disk holds a newer version of ${stalePaths.length} file(s) than the one you expected — ` +
+              'somebody wrote after your `pix3 check` (the editor merging your write with a ' +
+              "human's edit, a human save, another agent). The editor's files match the disk, " +
+              'so this is not editor lag. Nothing was started: re-read the file(s) (`pix3 read`), ' +
+              're-run `pix3 check --json` and pass the new hashes as `expect`.',
+            {
+              differing: differing.map(diff => {
+                const detail = byPath.get(diff.path);
+                return {
+                  ...diff,
+                  ...(detail?.mergeLog ? { mergeLog: true } : {}),
+                  ...(detail?.recovery ? { recovery: detail.recovery } : {}),
+                  hint: detail
+                    ? hintFor(detail)
+                    : `${diff.path} moved on disk after your write; re-read it.`,
+                };
+              }),
+            }
+          );
+        }
         if (differing.length === 0) {
           if (loadErrors.length > 0) {
             return toolError('load_failed', 'The editor could not load the current files.', {
@@ -424,7 +541,7 @@ export class WorkspaceAgentTools {
       const { payload, images } = splitResult(result);
       const startupMs = startupMsOf(result, payload);
       const envelope = {
-        revision: verified,
+        revision: this.describeRevision(verified, fullRevision === true),
         // Always present: a number when the editor measured a start, null when no start happened
         // (the game was already running) or an editor too old to report one.
         startupMs,

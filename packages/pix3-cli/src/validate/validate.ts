@@ -36,7 +36,13 @@ export interface ValidatedFile {
 }
 
 export type Level2Status =
-  | { readonly state: 'ran'; readonly filesHydrated: number; readonly filesSkipped: number }
+  | {
+      readonly state: 'ran';
+      readonly filesHydrated: number;
+      readonly filesSkipped: number;
+      /** Of `filesSkipped`: scenes with `user:` components left out because the scripts failed to load. */
+      readonly filesSkippedForScripts?: number;
+    }
   | { readonly state: 'disabled' }
   | { readonly state: 'skipped'; readonly reason: string };
 
@@ -201,10 +207,14 @@ export const validateProject = async (options: ValidateOptions): Promise<Validat
     }
     const { targetPlatform } = readManifestInfo(project);
     let hydrated = 0;
+    let skippedForScripts = 0;
     for (const file of cleanFiles) {
       const result = results.get(file);
       if (!result?.parsed) continue;
-      if (skipUserScenes && result.usesUserComponents) continue;
+      if (skipUserScenes && result.usesUserComponents) {
+        skippedForScripts += 1;
+        continue;
+      }
       diagnostics.push(
         ...(await hydrateScene({
           env,
@@ -219,10 +229,22 @@ export const validateProject = async (options: ValidateOptions): Promise<Validat
       );
       hydrated += 1;
     }
-    level2 = { state: 'ran', filesHydrated: hydrated, filesSkipped: targets.length - hydrated };
+    level2 = {
+      state: 'ran',
+      filesHydrated: hydrated,
+      filesSkipped: targets.length - hydrated,
+      ...(skippedForScripts > 0 ? { filesSkippedForScripts: skippedForScripts } : {}),
+    };
     if (targets.length - hydrated > 0) {
       notes.push(
         `Level 2 did not hydrate ${targets.length - hydrated} of ${targets.length} file(s): it runs only on files with no level-1 errors${skipUserScenes ? ' and, while scripts cannot be loaded, without user: components' : ''}.`
+      );
+    }
+    if (scripts.status === 'failed' && skippedForScripts > 0) {
+      // Explicit, because the symptom is silence: a compile error makes every scene/component
+      // diagnostic of those scenes vanish, and "level 2 hydrated 0 file(s)" read as a clean pass.
+      notes.push(
+        `SKIPPED: ${skippedForScripts} scene(s) with user: components were not checked at level 2 because the project scripts do not compile (E_SCRIPT_COMPILE above) — E_UNKNOWN_CONFIG_KEY, E_PROPERTY_TYPE and every other user: component check are missing from this report, not passed. Fix the compile error and run again.`
       );
     }
     if (!userSchemasAvailable && usesUserComponents) {

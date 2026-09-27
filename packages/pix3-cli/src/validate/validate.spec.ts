@@ -541,6 +541,15 @@ describe('level 2: hydration with compiled user scripts', () => {
       line: 2,
     });
     expect(report.notes.join(' ')).toContain('(user: component properties not checked)');
+    // The scene was not checked, and the report says so in so many words instead of "0 hydrated".
+    expect(report.level2).toMatchObject({
+      state: 'ran',
+      filesHydrated: 0,
+      filesSkippedForScripts: 1,
+    });
+    expect(report.notes.some(note => /^SKIPPED: 1 scene\(s\) .*E_SCRIPT_COMPILE/.test(note))).toBe(
+      true
+    );
   });
 
   it('W_SCRIPT_IMPORT: scripts that throw at import (browser globals at top level)', async () => {

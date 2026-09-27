@@ -10,6 +10,7 @@ import {
   NormalBlending,
   Uint32BufferAttribute,
   Vector3,
+  type Plane,
   type Scene,
   type Texture,
 } from 'three';
@@ -73,9 +74,32 @@ interface RunPlan {
   members: Mesh[];
   key: string;
   source: Texture | null; // the shared texture (any member's map) or null
+  /** The members' shared clipping planes (a ScrollContainer2D's viewport), or null. */
+  clippingPlanes: Plane[] | null;
   overlay: boolean;
   order: number; // first member's stamped renderOrder
 }
+
+/**
+ * Stable id per clipping-plane array, for the batch key. `ScrollContainer2D` hands ONE array to
+ * every material under it and mutates the planes in place, so identity is the right notion of
+ * "same clip": two children of one container batch together, children of different containers
+ * (or an unclipped quad) never do. Before this, the batch material carried no planes at all and a
+ * run of untextured quads (ColorRect2D, a flat Button2D skin) scrolled straight out of its
+ * container while the textured singletons around it — passthrough, drawn with their own
+ * material — were clipped: the bug looked like "ScrollContainer2D clips only textured children".
+ */
+const clipIds = new WeakMap<Plane[], number>();
+let nextClipId = 1;
+const clipKeyOf = (planes: Plane[] | null | undefined): string => {
+  if (!planes || planes.length === 0) return '';
+  let id = clipIds.get(planes);
+  if (id === undefined) {
+    id = nextClipId++;
+    clipIds.set(planes, id);
+  }
+  return `:clip${id}`;
+};
 
 /** One pooled batch draw: a Mesh with a growable dynamic geometry. */
 class BatchDraw {
@@ -295,6 +319,7 @@ export class Batch2DSystem {
         members: [entry.mesh],
         key,
         source: material.map,
+        clippingPlanes: material.clippingPlanes?.length ? material.clippingPlanes : null,
         overlay: entry.overlay,
         order: entry.order,
       };
@@ -309,7 +334,8 @@ export class Batch2DSystem {
    * Batch key for a mesh, or null if it must not batch. Batchable = opted-in +
    * effectively visible + non-transparent-zero + a stock MeshBasicMaterial with
    * normal blending. Runs group by texture SOURCE (so all views of one atlas
-   * sheet — and multiple instances of the same raw texture — merge) + band.
+   * sheet — and multiple instances of the same raw texture — merge) + band + the
+   * clipping planes the material carries (see {@link clipKeyOf}).
    */
   private keyFor(entry: OrderedMesh2D): string | null {
     if (!entry.visible) {
@@ -331,7 +357,7 @@ export class Batch2DSystem {
       return null;
     }
     const sourceKey = material.map ? material.map.source.uuid : 'nomap';
-    return `${entry.overlay ? 'o' : 'm'}:${sourceKey}`;
+    return `${entry.overlay ? 'o' : 'm'}:${sourceKey}${clipKeyOf(material.clippingPlanes)}`;
   }
 
   private materialFor(run: RunPlan): MeshBasicMaterial {
@@ -345,6 +371,11 @@ export class Batch2DSystem {
         color: 0xffffff,
         map: run.source ? this.batchMapFor(run.source) : null,
       });
+      // The key carries the planes' identity, so a batch material clips exactly like its members.
+      if (run.clippingPlanes) {
+        material.clippingPlanes = run.clippingPlanes;
+        material.clipIntersection = false;
+      }
       this.materials.set(run.key, material);
     }
     return material;

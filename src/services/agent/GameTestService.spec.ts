@@ -136,6 +136,7 @@ function makeSpec(over: Partial<NormalizedRunSpec> = {}): NormalizedRunSpec {
     fixedDeltaSec: 1 / 60,
     maxWallMs: 20_000,
     pauseOnOutcome: true,
+    settleMs: 0,
     ...over,
   };
 }
@@ -437,6 +438,60 @@ describe('runGameTestLoop — outcomes', () => {
     expect(result.outcome?.kind).toBe('timeout');
     expect(result.outcome?.detail).toContain('wall-clock budget');
     expect(runner.frames).toBeLessThan(3600);
+  });
+});
+
+describe('runGameTestLoop — real time before and around the loop', () => {
+  it("settleMs waits in the runner's CURRENT mode before switching to manual, and reports it", async () => {
+    const runner = makeRunner({ startMode: 'realtime' });
+    const slept: number[] = [];
+    let modeWhenSleeping = '';
+    const deps = makeDeps(runner, {
+      sleep: async ms => {
+        slept.push(ms);
+        modeWhenSleeping = runner.getTimeMode().mode;
+      },
+    });
+
+    const result = await runGameTestLoop(deps, makeSpec({ settleMs: 1500 }));
+
+    expect(slept).toEqual([1500]);
+    expect(modeWhenSleeping).toBe('realtime');
+    expect(runner.modeHistory).toEqual(['manual', 'realtime']);
+    expect(result.time?.settledMs).toBeTypeOf('number');
+  });
+
+  it('validateSpec clamps settleMs to 0..30000 and defaults it to 0', () => {
+    const none = validateSpec({ until: [{ kind: 'frames', n: 5 }] });
+    expect('spec' in none && none.spec.settleMs).toBe(0);
+    const huge = validateSpec({ until: [{ kind: 'frames', n: 5 }], settleMs: 99_999 });
+    expect('spec' in huge && huge.spec.settleMs).toBe(30_000);
+  });
+
+  it('notes OUTRAN REAL TIME when the loop stepped far faster than real time and game state never moved', async () => {
+    // 1 ms per clock read: 120 frames (2 s of game) take a handful of ms of wall time.
+    const runner = makeRunner();
+    const deps = makeDeps(runner, { sampleGameState: stateSource({ ready: false }) });
+    const spec = makeSpec({ until: [{ kind: 'frames', n: 120 }], maxFrames: 200 });
+
+    const result = await runGameTestLoop(deps, spec);
+
+    expect(result.verdict).toMatch(/OUTRAN REAL TIME/);
+    expect(result.notes?.some(note => /settleMs/.test(note) && /WASM/.test(note))).toBe(true);
+  });
+
+  it('does not raise the outran note when the game state changed during the run', async () => {
+    const runner = makeRunner();
+    const state = { score: 0 };
+    runner.onTick = () => {
+      state.score += 1;
+    };
+    const deps = makeDeps(runner, { sampleGameState: stateSource(state) });
+    const spec = makeSpec({ until: [{ kind: 'frames', n: 120 }], maxFrames: 200 });
+
+    const result = await runGameTestLoop(deps, spec);
+
+    expect(result.verdict).not.toMatch(/OUTRAN REAL TIME/);
   });
 });
 

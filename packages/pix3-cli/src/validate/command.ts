@@ -100,7 +100,11 @@ export const formatHumanReport = (report: ValidateReport): string => {
   for (const note of report.notes) out += `note: ${note}\n`;
   const level2 =
     report.level2.state === 'ran'
-      ? `level 2 hydrated ${report.level2.filesHydrated} file(s)`
+      ? `level 2 hydrated ${report.level2.filesHydrated} file(s)${
+          report.level2.filesSkippedForScripts
+            ? `, ${report.level2.filesSkippedForScripts} SKIPPED (scripts do not compile — user: components unchecked)`
+            : ''
+        }`
       : report.level2.state === 'disabled'
         ? 'level 2 off'
         : `level 2 skipped: ${report.level2.reason}`;

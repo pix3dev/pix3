@@ -4312,6 +4312,17 @@ describe('AgentToolRegistry', () => {
     const errs = (await registry.execute('read_errors')) as Array<{ message: string }>;
     expect(errs.some(e => e.message.includes('agent-tool-registry-test-error'))).toBe(true);
   });
+
+  it('read_errors {since} returns only errors captured after the cursor', async () => {
+    const registry = buildRegistry();
+    clearErrors();
+    console.error('read-errors-old');
+    const cursor = Date.now() + 1;
+    const errs = (await registry.execute('read_errors', { since: cursor })) as Array<{
+      message: string;
+    }>;
+    expect(errs.some(e => e.message.includes('read-errors-old'))).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -6,6 +6,7 @@ import { dirname, join } from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 
 import {
+  formatGameSnapshot,
   formatSmokeHuman,
   formatSmokeSetHuman,
   runSmoke,
@@ -98,6 +99,25 @@ const asReport = (outcome: SmokeOutcome): SmokeReport => {
 };
 
 describe('pix3 smoke', () => {
+  it('prints the game snapshot whole: one line when short, pretty-printed when long, capped far out', () => {
+    expect(formatGameSnapshot({ ready: true, gold: 0 })).toBe('{"ready":true,"gold":0}');
+    const long = {
+      ready: true,
+      gold: 0,
+      droppables: { active: 0, sleeping: 0 },
+      cascade: { active: false, blocksDestroyed: 0, maxClusterSize: 0, totalFallenBlocks: 0 },
+      lootMultiplier: 1.5,
+      inventory: { pickaxe: 'iron', bombs: 3, upgrades: ['speed', 'depth'] },
+    };
+    const pretty = formatGameSnapshot(long);
+    // Nothing is cut: every key of the snapshot is there, each on its own indented line.
+    expect(pretty).toContain('    "lootMultiplier": 1.5');
+    expect(pretty).toContain('"upgrades"');
+    expect(pretty).not.toContain('…');
+    const huge = formatGameSnapshot({ blob: 'x'.repeat(5000) });
+    expect(huge).toMatch(/… \(\d+ more characters; pix3 smoke --json has it whole\)/);
+  });
+
   it('runs a clean scene: no errors, every frame stepped, node counts and timings', async () => {
     const root = project({
       'scenes/main.pix3scene': scene(component('user:Ticker')),
@@ -375,6 +395,29 @@ describe('pix3 smoke', () => {
         reason: expect.stringContaining('scripts/util.ts'),
       });
       expect(pick(['pix3project.yaml', 'scripts/MenuFlow.ts'])).toMatchObject({ mode: 'all' });
+      // A linked package copy or a dependency is not project code: it neither widens the run to
+      // everything nor counts as a change (`.yalc/**` alone = nothing changed).
+      expect(
+        pick([
+          '.yalc/@pix3/runtime/src/nodes/Node2D.ts',
+          'node_modules/x/index.js',
+          'scripts/MenuFlow.ts',
+        ])
+      ).toMatchObject({
+        mode: 'changed',
+        scenes: ['scenes/menu.pix3scene'],
+        changed: ['scripts/MenuFlow.ts'],
+      });
+      expect(pick(['.yalc/@pix3/runtime/src/nodes/Node2D.ts'])).toMatchObject({
+        mode: 'all',
+        reason: expect.stringContaining('nothing changed'),
+      });
+      // A unit test next to the scripts is not game code either: it neither reaches a scene nor
+      // counts as an orphan script that widens the run.
+      expect(pick(['scripts/GameBoom.spec.ts', 'scripts/MenuFlow.ts'])).toMatchObject({
+        mode: 'changed',
+        scenes: ['scenes/menu.pix3scene'],
+      });
       expect(
         selectScenesFor({ projectRoot: root, changedFiles: ['scripts/MenuFlow.ts'], all: true })
       ).toMatchObject({

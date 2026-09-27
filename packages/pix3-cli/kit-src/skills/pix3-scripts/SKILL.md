@@ -133,7 +133,11 @@ before children's.
 - `visible`, `name`, `id`, `children`, `parentNode`, `findById(id)`, `findByName(name)`,
   `adoptChild(child)`, `queueFree()` (safe inside `onUpdate`), `getComponent(Class)`,
   `addComponent(c)`, `removeComponent(c)`.
-- 2D node props as fields: `width`, `height`, `opacity`, `zIndex`, `blendMode`.
+- 2D node props as fields: `width`, `height`, `opacity`, `zIndex`, `blendMode`. Assigning
+  `width`/`height` resizes the drawn mesh on `Sprite2D`, `ColorRect2D`, `Button2D`, `Label2D`,
+  `Group2D` … (the same setter the inspector uses). One trap that looks like "it did not resize":
+  a `Sprite2D` created without `width`/`height` takes the texture's natural size when the texture
+  loads — set both, or set them after the load.
   `Label2D.setText(text)`; `Bar2D.maxValue`, `Bar2D.setValue(v)`; `Slider2D.value`,
   `Checkbox2D.checked`. Check types with `instanceof Label2D` (import the class).
 - **Assigning a display property redraws immediately** — no `setText` / `updateLabel` call

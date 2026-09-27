@@ -52,7 +52,7 @@ allowed), 1 = at least one error, 2 = could not run. Diagnostics are one list, v
 ```text
 {
   "ok": true, "projectRoot": "…", "errorCount": 0, "warningCount": 2,
-  "level2": { "state": "ran", "filesHydrated": 5, "filesSkipped": 0 },
+  "level2": { "state": "ran", "filesHydrated": 5, "filesSkipped": 0, "filesSkippedForScripts?": 0 },
   "files": [{ "file": "scenes/main.pix3scene", "sha256": "<hex of the raw bytes>" }],
   "diagnostics": [{ "severity", "code", "file", "line?", "nodeId?", "path?", "message", "fix?" }],
   "notes": [],
@@ -67,6 +67,16 @@ allowed), 1 = at least one error, 2 = could not run. Diagnostics are one list, v
 `files` holds every scene validated and every script type-checked, hashed over the **raw bytes** —
 the hashes `expect` (barrier tools) and `pix3 ack --sha256` take. `typecheck.errors` counts the
 `E_TYPE` / `E_TYPECHECK_UNAVAILABLE` entries of `diagnostics`.
+
+**A compile error hides level 2.** When the scripts do not compile (`E_SCRIPT_COMPILE`), level 2
+skips every scene with `user:` components — their `E_UNKNOWN_CONFIG_KEY` / `E_PROPERTY_TYPE` /
+component checks are *missing*, not passed. The report says so: `level2.filesSkippedForScripts`,
+a `SKIPPED: N scene(s) …` note, and the human summary line reads `level 2 hydrated 0 file(s), N
+SKIPPED (scripts do not compile — user: components unchecked)`. Fix the compile error and run again.
+
+**Merge-log notes.** An `ack-unknown` entry (a `pix3 read` / `pix3 ack` of bytes the editor never
+recorded) prints as a `note:` only while its hash is the file's *current* version; one about a
+version the disk no longer holds is history and is not printed (it stays in `mergeLog` of `--json`).
 
 **Which tsconfig.** A project with its **own** root `tsconfig.json` (a Vite project, or one the
 editor's *build from templates* turned into one) is checked with it, as is, against its own
@@ -156,7 +166,11 @@ several run, one after another from one bundle, a line each (`src/smoke/select-s
 1. In a git work tree with uncommitted changes (staged, unstaged or untracked): the **top-level**
    scenes those changes reach — the scene itself, a prefab / `scenes/ui/` overlay it instances, a
    script exporting a class it attaches as `user:X`, a `res://` file it names. `--changed` forces
-   this (exit 2 without git or without changes).
+   this (exit 2 without git or without changes). Changes under `node_modules/`, `.yalc/` (a linked
+   package copy), `.git/`, `.pix3/`, `dist/`, `.vite/`, `.cache/` are not project changes and are
+   ignored, and a `*.spec.ts` / `*.test.ts` next to the scripts is not game code — a consumer
+   project's `.yalc/@pix3/runtime/**` and its unit tests used to read as hundreds of changed
+   scripts that reach no scene and widen every run to everything.
 2. Otherwise — no git, nothing changed, a changed scene/script that reaches no top-level scene (a
    helper module, an unused prefab), or a changed `pix3project.yaml` — **every** top-level scene
    (not instanced by another, not under `prefabs/` / `ui/`), `scenes/main.pix3scene` first (the
@@ -182,7 +196,9 @@ empty, PLAY is never pressed, and a game whose `onStart` throws used to smoke gr
 Exit 0 = no errors (warnings allowed), 1 = errors, 2 = could not run (with several scenes, the
 worst run decides): `E_SMOKE_NO_PROJECT`,
 `E_SMOKE_NO_SCENE`, `E_SMOKE_BUNDLE`, `E_SMOKE_UNSUPPORTED` (no esbuild), `E_SMOKE_TIMEOUT`,
-`E_SMOKE_CRASH`. `--json` prints `{ ok, scene, frames, framesRequested, firstFrameOk, errors:
+`E_SMOKE_CRASH`. The human report prints the `game` snapshot whole — on one line when it is short, pretty-printed
+and indented otherwise, cut only past 4 000 characters (`--json` always carries it whole).
+`--json` prints `{ ok, scene, frames, framesRequested, firstFrameOk, errors:
 [{ code, frame, script?, nodeId?, nodeName?, phase?, message, stack?, domAccess? }], warnings,
 nodes: { start, end }, timingsMs: { compile, load, firstFrame, step: { total, mean, p95, max },
 total }, scripts, domMissing, notes, game, logs }` — `game` is the `registerGameDebug` provider's
@@ -203,7 +219,7 @@ scenes/main.pix3scene — 12 nodes
 Group2D#game-root "Game Root" size=1080x1920 layout=stretch/stretch  components=[user:GameRules, user:TouchRules]
   CanvasLayer2D#hud "HUD" size=1080x1920 layout=stretch/stretch  components=[user:ScoreHud]
     Label2D#score-label "Score Label" text="SCORE 0" pos=(-340,850) layout=left/top
-    Group2D#result-overlay "Result Overlay" ↳ instance res://scenes/ui/result.pix3scene (1 override) hidden
+    Group2D#result-overlay "Result Overlay" ↳ instance res://scenes/ui/result.pix3scene (1 property) hidden
 ```
 
 `--depth N` stops N levels below the roots (cut subtrees end in `… +K below`); `--types A,B` keeps
@@ -212,8 +228,10 @@ ancestors as `·` context lines; `--props` adds, under each node, the properties
 the node type's defaults (read from a bare instance of the runtime class, through the disk-format
 table — the one step that loads the runtime bundle); `--json` gives the same as nested
 `{ id, type, name, depth, position?, size?, layout?, hidden?, text?, groups?, components,
-instance?: { path, rootType?, rootName?, overrides }, props?, children }`. Override count =
-instance-root properties + every `overrides.byLocalId.*.properties` key.
+instance?: { path, rootType?, rootName?, overrides, properties }, props?, children }`. On an instance
+`overrides` counts every `overrides.byLocalId.*.properties` key (edits to nodes inside the prefab)
+and `properties` the instance node's own `properties` keys (applied to the prefab root); the line
+prints `(2 overrides, 1 property)`, or `(no overrides)` when both are 0.
 
 `pix3 tree` with no scene is the project overview: manifest facts, the `user:` scripts, and every
 scene/prefab/overlay with its node count, node types, components and instances (entry scene
@@ -626,7 +644,12 @@ raw bytes of every file the agent wrote.
    MCP process gives this call 100 s. These hashes (plus `expect`) are compared with `/ws/agent/hash` at that moment;
    a mismatch retries the editor's sync for up to ~5 s. Then: loader/compiler errors →
    `load_failed` (`{file, line, message, kind}`); a file that stays unreadable →
-   `pending_external`; hashes that never agree → `sync_timeout` with the differing paths. The
+   `pending_external`; hashes that never agree → `sync_timeout` with the differing paths — except
+   when every difference is an `expect` path whose disk version moved on *after* step 1 while the
+   editor already holds what the disk holds (`loadedHash === diskHash !== agentHash`): that is the
+   agent's expectation being stale (the editor merged the write with a human edit, a human saved,
+   another agent wrote), retrying cannot bring the old bytes back, and it answers
+   `expectation_stale` at once. The
    window then starts the game (`game_run` starts play itself; `play_restart` of a stopped game is
    a start) and answers only once the game is actually running: up to 30 s, as soon as it runs,
    failing fast (`load_failed` with the play-mode error) when play mode stops instead; `startupMs`
@@ -642,7 +665,8 @@ The answer of a barrier tool:
 
 ```json
 {
-  "revision": { "<path>": "<sha256 of the verified version>" },
+  "revision": { "files": 91, "digest": "<sha256 of the whole map>",
+                "changed": { "<path>": "<sha256 of the verified version>" }, "removed?": ["<path>"] },
   "startupMs": 8123,
   "matchesAgent": true,
   "matchesDisk": true,
@@ -653,9 +677,15 @@ The answer of a barrier tool:
 }
 ```
 
-`startupMs` is always present: the milliseconds from the start request until the game was
-running, or `null` when no start happened (the game was already running, so there was nothing to
-measure). `matchesAgent` is `null` (with `agentExpectations: "none"`) without `expect`; `matchesDisk` is
+`revision` is **compact by default**: the verified map (every open scene, every source the build
+read, the manifest — ~90 entries on a real game) used to open every answer in full. Now `files` is
+its size, `digest` a sha256 over its sorted `path\0hash` lines (equal digests = equal maps), and
+`changed` holds only the entries that are new or different since the **previous answer of this
+`pix3 mcp` process** (the whole map on the first answer; `removed` names paths that dropped out).
+Pass `fullRevision: true` to any barrier or observing tool for the plain `{ "<path>": "<sha256>" }`
+map, or read `editor.playRevision` from `project_status` while the game plays. `startupMs` is
+always present: the milliseconds from the start request until the game was running, or `null`
+when no start happened (the game was already running, so there was nothing to measure). `matchesAgent` is `null` (with `agentExpectations: "none"`) without `expect`; `matchesDisk` is
 whether every verified hash still matched the disk at the final check; `changedDuringRun` is what
 the barrier did not verify: every file changed meanwhile by someone other than the editor, plus
 every verified file whose hash moved between the two checks with no editor write on record
@@ -671,9 +701,10 @@ lazily.
 
 **Observing tools** (`play_status`, `game_input`, `game_observe`, `viewport_screenshot`,
 `read_errors`, `read_logs`) neither stop nor sync: `{ revision, stale, result }`, where `revision` is
-what the running game was verified against (`null` when play was not started through the barrier)
-and `stale: true` when the editor saw an external change during play or a `revision` path's disk
-hash moved since. Other tools (`project_status`, `play_stop`, `get_selection`, `generate_*`) answer
+what the running game was verified against (compact, as above; `null` when play was not started
+through the barrier) and `stale: true` when the editor saw an external change during play or a
+`revision` path's disk hash moved since. `read_errors` takes `since` (epoch ms) like `read_logs`;
+every entry carries its `at`. Other tools (`project_status`, `play_stop`, `get_selection`, `generate_*`) answer
 with the editor's result as is. `project_status` without a window answers
 `{ connected: false, server, editor: null, message }` (not an error).
 
@@ -682,7 +713,8 @@ with the editor's result as is. `project_status` without a window answers
 | Code | When |
 | --- | --- |
 | `disk_differs_from_agent` | Step 1: the disk does not hold the `expect` versions (`differing[]` with `recovery`, `mergeLog`, `hint`). |
-| `sync_timeout` | Step 2: the editor's loaded hashes did not match the disk within ~5 s (`differing[]` with `loadedHash` / `agentHash` / `diskHash`). |
+| `expectation_stale` | Step 2, at once: the disk moved past an `expect` version after step 1 and the editor already matches the disk (`differing[]` with `diskHash` / `agentHash` / `loadedHash`, plus `mergeLog` / `recovery` / `hint` as in step 1). Somebody wrote a newer version — re-read it, re-run `pix3 check --json`, pass the new hashes. Not editor lag. |
+| `sync_timeout` | Step 2: the editor's loaded hashes did not match the disk within ~5 s (`differing[]` with `loadedHash` / `agentHash` / `diskHash`) — the editor is still catching up with a write. |
 | `load_failed` | Step 2: the loader or the script compiler failed on the current files, or an open scene has no verified version (`errors[]`). At the start: the game was not running within 30 s, or play mode stopped (`result` carries it, with `startupMs`). |
 | `pending_external` | Step 2: a file stays unreadable (partial / invalid write); the editor keeps its last good version. |
 | `no_editor` | No window holds the lease, it did not answer (`reason: "no_reply"`), or it lost the lease mid-call (`reason: "lease_lost"`). |

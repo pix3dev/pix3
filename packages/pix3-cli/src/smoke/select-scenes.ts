@@ -3,7 +3,7 @@ import { realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 
 import { PROJECT_MANIFEST_FILE } from '../manifest.ts';
-import { ProjectFiles, toProjectPath } from '../validate/project.ts';
+import { IGNORED_DIRECTORIES, ProjectFiles, toProjectPath } from '../validate/project.ts';
 
 /**
  * Which scenes `pix3 smoke` runs when it is not given one.
@@ -43,8 +43,17 @@ const USER_COMPONENT = /\buser:([A-Za-z_$][\w$]*)/g;
 const EXPORTED_CLASS = /\bexport\s+(?:default\s+)?(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/g;
 const PREFAB_OR_UI = /(^|\/)(prefabs?|ui)\//i;
 
+/** Game code: a script module, not a declaration file and not a unit test (`*.spec.ts` / `*.test.ts`). */
 const isScript = (file: string): boolean =>
-  /\.(ts|mts|js|mjs)$/.test(file) && !file.endsWith('.d.ts');
+  /\.(ts|mts|js|mjs)$/.test(file) && !/\.(d|spec|test)\.(ts|mts|js|mjs)$/.test(file);
+/**
+ * A changed file inside a folder that is never project content (`node_modules/`, `.yalc/`, …):
+ * `git status` lists it when it is not git-ignored — a consumer project keeps `.yalc/@pix3/runtime`
+ * in the tree — and its hundreds of `.ts` files then read as "changed scripts that reach no
+ * scene", turning every `--changed` run into a run of everything.
+ */
+export const isIgnoredProjectPath = (file: string): boolean =>
+  file.split('/').some(segment => IGNORED_DIRECTORIES.has(segment));
 /** Files that change what a run does: a scene or a script. */
 const isCode = (file: string): boolean => file.endsWith('.pix3scene') || isScript(file);
 
@@ -201,8 +210,9 @@ export const selectSmokeScenes = (
   });
   if (options.all) return everything('--all: every top-level scene');
 
-  const changed =
+  const reported =
     options.changedFiles !== undefined ? options.changedFiles : gitChangedFiles(project.root);
+  const changed = reported === null ? null : reported.filter(file => !isIgnoredProjectPath(file));
   if (changed === null) {
     if (options.changedOnly) {
       return { error: '--changed needs git and a project inside a git work tree.' };

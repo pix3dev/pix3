@@ -356,6 +356,23 @@ const trimStack = (stack: string | undefined, root: string, maxLines: number): s
 
 const plural = (count: number, word: string): string => `${count} ${word}${count === 1 ? '' : 's'}`;
 
+/** Longest `game` snapshot printed by the human report; `--json` always carries it whole. */
+const SNAPSHOT_HUMAN_LIMIT = 4000;
+
+export const formatGameSnapshot = (snapshot: unknown): string => {
+  const compact = JSON.stringify(snapshot) ?? 'null';
+  if (compact.length <= 120) return compact;
+  const pretty = JSON.stringify(snapshot, null, 2) ?? 'null';
+  const shown =
+    pretty.length > SNAPSHOT_HUMAN_LIMIT
+      ? `${pretty.slice(0, SNAPSHOT_HUMAN_LIMIT)}\n… (${pretty.length - SNAPSHOT_HUMAN_LIMIT} more characters; pix3 smoke --json has it whole)`
+      : pretty;
+  return `\n${shown
+    .split('\n')
+    .map(line => `    ${line}`)
+    .join('\n')}`;
+};
+
 export const formatSmokeHuman = (outcome: SmokeOutcome, root: string): string => {
   if (isSmokeFailure(outcome)) {
     return `pix3 smoke${outcome.scene ? ` ${outcome.scene}` : ''}: could not run — ${outcome.code}: ${outcome.reason}\n`;
@@ -373,9 +390,11 @@ export const formatSmokeHuman = (outcome: SmokeOutcome, root: string): string =>
     `  compile ${t.compile} ms · load+onStart ${t.load} ms · frame 1 ${t.firstFrame} ms · step mean ${t.step.mean} / p95 ${t.step.p95} / max ${t.step.max} ms · total ${t.total} ms`
   );
   if (report.game) {
-    const snapshot = JSON.stringify(report.game.snapshot) ?? 'null';
+    // The snapshot is the one line of the report that says what the game DID (score, phase,
+    // ready flag); it used to be cut at 160 characters, which on a real game ended mid-key.
+    // Printed whole, pretty when it does not fit a line, capped only far beyond any HUD.
     lines.push(
-      `  game "${report.game.name}" snapshot: ${snapshot.length > 160 ? `${snapshot.slice(0, 159)}…` : snapshot}`
+      `  game "${report.game.name}" snapshot: ${formatGameSnapshot(report.game.snapshot)}`
     );
   }
   if (report.errors.length > 0) {

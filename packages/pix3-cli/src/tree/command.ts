@@ -33,7 +33,7 @@ import {
 export const TREE_USAGE = `Usage: pix3 tree [scene] [--depth N] [--types A,B] [--props] [--json] [--project <dir>]
 
   One line per node — type#id "name", position, size, anchor layout, components, prefab
-  instances (↳ instance res://… (N overrides)) — indented by depth. Read this instead of the
+  instances (↳ instance res://… (N overrides, M properties)) — indented by depth. Read this instead of the
   whole .pix3scene when you need to find your way around a scene.
 
   scene          .pix3scene (res://, project-relative or a path). Without one: every scene and

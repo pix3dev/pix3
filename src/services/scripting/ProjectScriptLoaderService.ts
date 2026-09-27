@@ -22,6 +22,7 @@ import { isEditorActive, onEditorKeepAliveChange } from '@/services/core/page-ac
 import { keepaliveTimer } from '@/services/core/background-ticker';
 import { ensureRapierLoaded } from '@/core/lazy-rapier';
 import { sha256 } from '@/services/project/external-merge/hash';
+import { clearScriptBuildErrors } from '@/core/agent-introspection';
 
 /**
  * ProjectScriptLoaderService
@@ -411,6 +412,9 @@ export class ProjectScriptLoaderService {
         appState.project.scriptRefreshSignal++;
       }
       appState.project.scriptsStatus = status;
+      // A build that succeeded supersedes every captured build failure: `read_errors` otherwise
+      // kept answering with a syntax error the agent had already fixed.
+      if (status === 'ready') clearScriptBuildErrors();
     };
 
     try {

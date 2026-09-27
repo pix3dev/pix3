@@ -54,7 +54,7 @@ describe('pix3 tree on the tapper recipe', () => {
       '    Label2D#score-label "Score Label" text="SCORE 0" pos=(-340,850) layout=left/top'
     );
     expect(lines).toContain(
-      '    Group2D#result-overlay "Result Overlay" ↳ instance res://scenes/ui/result.pix3scene (1 override) hidden'
+      '    Group2D#result-overlay "Result Overlay" ↳ instance res://scenes/ui/result.pix3scene (1 property) hidden'
     );
   });
 
@@ -104,7 +104,12 @@ describe('pix3 tree on the tapper recipe', () => {
     expect(all.find(n => n.id === 'result-overlay')).toMatchObject({
       type: 'Group2D',
       hidden: true,
-      instance: { path: 'res://scenes/ui/result.pix3scene', rootType: 'Group2D', overrides: 1 },
+      instance: {
+        path: 'res://scenes/ui/result.pix3scene',
+        rootType: 'Group2D',
+        overrides: 0,
+        properties: 1,
+      },
     });
   });
 
@@ -163,6 +168,7 @@ root:
         properties:
           transform:
             position: [100, 200]
+          visible: true
         overrides:
           byLocalId:
             hp:
@@ -175,14 +181,15 @@ root:
     );
   });
 
-  it('shows each instance with its prefab, root type and override count', async () => {
+  it('shows each instance with its prefab, root type, and overrides apart from own properties', async () => {
     const { code, out } = await run(dir, ['scenes/level.pix3scene']);
     expect(code).toBe(0);
     expect(out.split('\n')).toEqual([
       'scenes/level.pix3scene — 3 nodes',
       'Group2D#world "World"',
-      '  Sprite2D#enemy-a "Enemy A" ↳ instance res://scenes/prefabs/enemy.pix3scene (3 overrides) pos=(100,200)',
-      '  Instance#enemy-b ↳ instance res://scenes/prefabs/missing.pix3scene (0 overrides)',
+      // 2 keys under overrides.byLocalId.hp.properties; 1 key (transform) in the instance's own block.
+      '  Sprite2D#enemy-a "Enemy A" ↳ instance res://scenes/prefabs/enemy.pix3scene (2 overrides, 2 properties) pos=(100,200)',
+      '  Instance#enemy-b ↳ instance res://scenes/prefabs/missing.pix3scene (no overrides)',
       '',
     ]);
   });
@@ -195,7 +202,8 @@ root:
       path: 'res://scenes/prefabs/enemy.pix3scene',
       rootType: 'Sprite2D',
       rootName: 'Enemy',
-      overrides: 3,
+      overrides: 2,
+      properties: 2,
     });
   });
 

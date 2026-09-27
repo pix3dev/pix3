@@ -1,5 +1,6 @@
 import type { Json } from '@/core/agent-introspection';
 import type { GameRunOutcome, GameRunResult } from '@/services/agent/GameTestService';
+import { keyForCode } from '@/services/agent/key-for-code';
 import type {
   NondeterminismReport,
   NondeterminismSource,
@@ -491,14 +492,6 @@ export class DomTraceInputSink implements TraceInputSink {
     }
     this.canvas.dispatchEvent(event);
   }
-}
-
-/** `KeyboardEvent.key` for a code, good enough for the games this drives. */
-function keyForCode(code: string): string {
-  if (code.startsWith('Key')) return code.slice(3).toLowerCase();
-  if (code.startsWith('Digit')) return code.slice(5);
-  if (code === 'Space') return ' ';
-  return code;
 }
 
 export interface TraceFeeder {

@@ -1,4 +1,5 @@
 import { Quaternion, Vector3 } from 'three';
+import { keepaliveTimer } from '@/services/core/background-ticker';
 import { injectable, inject } from '@/fw/di';
 import { appState } from '@/state';
 import { errors as capturedErrors, safeSerialize, type Json } from '@/core/agent-introspection';
@@ -13,6 +14,7 @@ import {
   type SceneRunner,
 } from '@pix3/runtime';
 import { renderabilityNote, type RenderabilityNote } from '@/services/agent/renderability-note';
+import { keyForCode } from '@/services/agent/key-for-code';
 import {
   NodeWatchRecorder,
   type NodeActivity,
@@ -90,7 +92,11 @@ export interface GameInputStep {
    * it exposes one, else 1/60 s.
    */
   frames?: number;
-  /** tap: how long the pointer stays down (default 700 — Button2D needs a real press). */
+  /**
+   * tap: how long the pointer stays down (default {@link DEFAULT_TAP_HOLD_MS} — a tap, i.e. a
+   * few ticks: long enough for a Button2D to see the press on one tick and the release on a
+   * later one, short enough that a game distinguishing tap from hold still reads it as a tap).
+   */
   holdMs?: number;
 }
 
@@ -169,6 +175,18 @@ export interface LiveNodeSnapshot {
    * proves the pointer landed on the control's bounds at all.
    */
   control?: { enabled: boolean; hovering: boolean; pressed: boolean };
+  /**
+   * The node's own `width`/`height` (design pixels, before scale), for the 2D nodes that have
+   * them (Sprite2D, ColorRect2D, Group2D, every UIControl2D, …). Absent otherwise.
+   */
+  size?: { width: number; height: number };
+  /**
+   * Axis-aligned world-space rectangle the node's `size` covers once its world scale is applied,
+   * centred on `worldPosition` (round3). A cheap reading, not a render measurement: rotation is
+   * ignored and a non-centre anchor shifts the drawn quad by up to half its size. Enough to tell
+   * "is this on screen / does it overlap that" without a screenshot. Present with `size`.
+   */
+  bounds?: { minX: number; minY: number; maxX: number; maxY: number };
 }
 
 /**
@@ -459,7 +477,13 @@ export interface GameObserveResult {
 
 const MAX_TOTAL_MS = 15_000;
 const MAX_SAMPLE_MS = 5_000;
-const DEFAULT_TAP_HOLD_MS = 700;
+/**
+ * A tap, not a hold. It was 700 ms ("Button2D needs a real press") until a field test showed a
+ * game whose input layer distinguishes the two read every default tap as a long press and did
+ * nothing — the tap had turned into a hold nobody asked for. `UIControl2D` polls the pointer per
+ * tick, so a press needs one tick down and a later tick up: ~5 ticks at 60 fps is plenty.
+ */
+const DEFAULT_TAP_HOLD_MS = 80;
 const DEFAULT_KEY_HOLD_MS = 500;
 const DEFAULT_DRAG_MS = 300;
 const DEFAULT_HOVER_MS = 800;
@@ -505,7 +529,16 @@ const MAX_SCANNED_NODES = 4000;
 const OBSERVED_POLLS_NOTE =
   'observedPolls is an OBSERVATION, not proof that input was handled: it lists the names the game passed to getAxis/getButton during the window. Proof is an assert on the effect.';
 
-const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
+/**
+ * Real-time wait that is not throttled in a hidden tab while an agent keeps the editor alive
+ * (`keepaliveTimer` runs off a worker then). A plain `setTimeout` is clamped to >=1 s — and to one
+ * wake-up a minute under Chrome's intensive throttling — in a background tab, which stretched a
+ * 3-tap script to ~40 s of wall time and let longer ones time out as `no_editor`.
+ */
+const sleep = (ms: number): Promise<void> =>
+  new Promise(resolve => {
+    keepaliveTimer(resolve, ms);
+  });
 const isNonEmptyString = (value: string | undefined): value is string =>
   typeof value === 'string' && value.length > 0;
 const round3 = (n: number): number => Math.round(n * 1000) / 1000;
@@ -572,6 +605,72 @@ const readDisplayText = (node: unknown): string | null => {
     ? `${value.slice(0, MAX_SNAPSHOT_TEXT_CHARS)}…`
     : value;
 };
+
+/**
+ * The tail of a NO ACTIVITY verdict when the script tapped: how long the pointer stayed down, so
+ * a game that tells a tap from a hold (mining on hold, shooting on tap) is not debugged as dead
+ * when the press simply fell on the wrong side of its threshold. Frame-denominated taps are
+ * reported in frames, since their wall time depends on the runner.
+ */
+const describeTapHolds = (steps: readonly GameInputStep[] | undefined): string => {
+  const taps = (steps ?? []).filter(step => step.type === 'tap');
+  if (taps.length === 0) return '';
+  const holds = [
+    ...new Set(
+      taps.map(step =>
+        typeof step.frames === 'number' && Number.isFinite(step.frames) && step.frames >= 0
+          ? `${step.frames} frame(s)`
+          : `${Math.max(0, step.holdMs ?? DEFAULT_TAP_HOLD_MS)} ms`
+      )
+    ),
+  ];
+  return ` The ${taps.length === 1 ? 'tap' : `${taps.length} taps`} held the pointer down for ${holds.join(' / ')}: a game that distinguishes a tap from a hold may have read that as the other one — pass \`holdMs\` (or \`frames\`) to match what it expects.`;
+};
+
+/**
+ * `size` + `bounds` of a snapshot for a node that has a finite `width`/`height` (see
+ * {@link LiveNodeSnapshot}); nothing for a node without them (Node3D, Group without a size, …).
+ * World scale is read through `getWorldScale` when the node has one, else the local scale — a
+ * spec fake has no matrix world, and a live node always has the method.
+ */
+const sizeAndBounds = (
+  node: {
+    width?: unknown;
+    height?: unknown;
+    scale: { x: number; y: number };
+    getWorldScale?: (target: Vector3) => Vector3;
+  },
+  world: { x: number; y: number }
+): Pick<LiveNodeSnapshot, 'size' | 'bounds'> => {
+  const { width, height } = node;
+  if (
+    typeof width !== 'number' ||
+    typeof height !== 'number' ||
+    !Number.isFinite(width) ||
+    !Number.isFinite(height)
+  ) {
+    return {};
+  }
+  let scaleX = node.scale.x;
+  let scaleY = node.scale.y;
+  if (typeof node.getWorldScale === 'function') {
+    const worldScale = node.getWorldScale(scratchWorldScale);
+    scaleX = worldScale.x;
+    scaleY = worldScale.y;
+  }
+  const halfW = Math.abs(width * scaleX) / 2;
+  const halfH = Math.abs(height * scaleY) / 2;
+  return {
+    size: { width: round3(width), height: round3(height) },
+    bounds: {
+      minX: round3(world.x - halfW),
+      minY: round3(world.y - halfH),
+      maxX: round3(world.x + halfW),
+      maxY: round3(world.y + halfH),
+    },
+  };
+};
+const scratchWorldScale = new Vector3();
 
 /**
  * Name (or id) of the nearest ancestor that is hidden, or null when the whole chain up to the root
@@ -767,14 +866,6 @@ const describeInteractionArg = (
     ...(typeof ui.min === 'number' ? { min: ui.min } : {}),
     ...(typeof ui.max === 'number' ? { max: ui.max } : {}),
   };
-};
-
-/** Best-effort `key` value for a `code` (InputService latches both, scripts poll `code`). */
-const keyForCode = (code: string): string => {
-  if (code.startsWith('Key') && code.length === 4) return code.slice(3).toLowerCase();
-  if (code.startsWith('Digit') && code.length === 6) return code.slice(5);
-  if (code === 'Space') return ' ';
-  return code;
 };
 
 /**
@@ -2005,6 +2096,7 @@ export class GameInputService {
       childCount: children.length,
       visibleChildCount: children.reduce((n, child) => n + (child.visible !== false ? 1 : 0), 0),
       ...(control !== null ? { control } : {}),
+      ...sizeAndBounds(node, world),
     };
   }
 
@@ -2451,7 +2543,8 @@ export class GameInputService {
     // answer to the question this line always provoked ("did the input reach
     // gameplay?"), and guessing at it cost whole turns before.
     const polls = this.describePollMismatch(inputContext?.input, inputContext?.steps);
-    return `NO ACTIVITY: no watched node moved/scaled/faded, no children spawned/shown, no text changed, no component or game state changed, ${errs}.${offScreenTail}${polls} If the game should have reacted, the input may not have reached gameplay (menu overlay? wrong target/coords? paused?) — check read_logs / read_errors and scene_tree.${dropped}`;
+    const taps = describeTapHolds(inputContext?.steps);
+    return `NO ACTIVITY: no watched node moved/scaled/faded, no children spawned/shown, no text changed, no component or game state changed, ${errs}.${offScreenTail}${polls}${taps} If the game should have reacted, the input may not have reached gameplay (menu overlay? wrong target/coords? paused?) — check read_logs / read_errors and scene_tree.${dropped}`;
   }
 
   /** Roots + their direct children (by nodeId) — the default when no names are given. */

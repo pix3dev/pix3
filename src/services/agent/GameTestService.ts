@@ -1,4 +1,5 @@
 import { injectable, inject } from '@/fw/di';
+import { keepaliveTimer } from '@/services/core/background-ticker';
 import { appState } from '@/state';
 import { errors as capturedErrors, safeSerialize, type Json } from '@/core/agent-introspection';
 import { GamePlaySessionService } from '@/services/play/GamePlaySessionService';
@@ -201,6 +202,13 @@ const MAX_MAX_FRAMES = 3600;
 /** Wall-clock ceiling. A manual loop is CPU-bound, so this is the real runaway guard. */
 const DEFAULT_MAX_WALL_MS = 20_000;
 const MAX_MAX_WALL_MS = 60_000;
+/** Cap of `settleMs` — a real-time wait before the loop, so it is bounded like the wall budget. */
+const MAX_SETTLE_MS = 30_000;
+/**
+ * A run this much faster than real time, whose game state never moved, gets the "outran real
+ * time" note: the game may still be waiting on something real time delivers (see `settleMs`).
+ */
+const OUTRAN_REAL_TIME_FACTOR = 4;
 /**
  * Ticks between yields to the host event loop. The loop is synchronous per tick;
  * without a yield a 600-frame run blocks the main thread outright and the editor
@@ -261,6 +269,15 @@ export interface GameRunSpec {
   maxWallMs?: number;
   /** Leave the game paused on the outcome frame so it can be inspected. Default true. */
   pauseOnOutcome?: boolean;
+  /**
+   * Wall-clock milliseconds to let the game run in its CURRENT time mode (normally realtime)
+   * before the stepped loop starts (default 0, cap {@link MAX_SETTLE_MS}). The loop steps the
+   * game far faster than real time — 600 frames in well under a second — so anything the game
+   * awaits in real time (a WASM physics module, assets, a fetch, a timer-based init) is still
+   * pending when the last frame runs; a game whose `onStart` awaits Rapier reported `ready:false`
+   * and an empty scene for the whole run. `settleMs` gives that init the real time it needs.
+   */
+  settleMs?: number;
   /**
    * Turn the run into a monkey run: random input from the seeded stream, judged by
    * invariants instead of by an understanding of the game (§5.2, `game-monkey.ts`).
@@ -360,6 +377,8 @@ export interface GameRunTimeReport {
   restoredMode: RuntimeTimeMode;
   /** Whether the game was left paused on the outcome frame. */
   leftPaused: boolean;
+  /** Real time the game was given before the loop (`settleMs`), when any was asked for. */
+  settledMs?: number;
 }
 
 export interface GameRunGameReport {
@@ -594,6 +613,11 @@ export interface GameRunLoopDeps {
   now: () => number;
   /** Hand the main thread back so the editor can breathe mid-run. */
   yieldToHost: () => Promise<void>;
+  /**
+   * Wait this much real time with the game in its current mode (`settleMs`). Optional: a host
+   * without it skips the settle and the report says so.
+   */
+  sleep?: (ms: number) => Promise<void>;
   /**
    * Called immediately before `stepFrames(1)` executes `frame`, i.e. in the gap
    * between two ticks. This is the seam trace replay feeds input through
@@ -1655,6 +1679,7 @@ export class GameTestService {
         ...(typeof record.pauseOnOutcome === 'boolean'
           ? { pauseOnOutcome: record.pauseOnOutcome }
           : {}),
+        ...(typeof record.settleMs === 'number' ? { settleMs: record.settleMs } : {}),
         ...(record.input !== undefined ? { input: record.input } : {}),
       },
     };
@@ -1689,6 +1714,8 @@ export class GameTestService {
       // A macrotask, not a microtask: a microtask queue drain never lets the host
       // paint or deliver events, so the editor would still look frozen.
       yieldToHost: () => new Promise<void>(resolve => setTimeout(resolve, 0)),
+      // keepaliveTimer: not throttled in a hidden tab while an agent keeps the editor alive.
+      sleep: ms => new Promise<void>(resolve => void keepaliveTimer(resolve, ms)),
     };
   }
 }
@@ -2416,6 +2443,7 @@ export interface NormalizedRunSpec {
   fixedDeltaSec: number;
   maxWallMs: number;
   pauseOnOutcome: boolean;
+  settleMs: number;
   monkey?: NormalizedMonkeySpec;
   control?: NegativeControlSpec;
   bot?: NormalizedBotSpec;
@@ -2468,6 +2496,7 @@ export function validateSpec(spec: GameRunSpec): { spec: NormalizedRunSpec } | {
       fixedDeltaSec: spec.fixedDeltaSec ?? DEFAULT_FIXED_DELTA_SEC,
       maxWallMs: clampInt(spec.maxWallMs, DEFAULT_MAX_WALL_MS, 100, MAX_MAX_WALL_MS),
       pauseOnOutcome: spec.pauseOnOutcome !== false,
+      settleMs: clampInt(spec.settleMs, 0, 0, MAX_SETTLE_MS),
       ...(spec.monkey ? { monkey: spec.monkey } : {}),
       ...(spec.control ? { control: spec.control } : {}),
       ...(spec.bot ? { bot: spec.bot } : {}),
@@ -2498,9 +2527,28 @@ export async function runGameTestLoop(
   const { runner } = deps;
   const previousMode = runner.getTimeMode();
   const wasPaused = runner.paused;
+  const notes: string[] = [];
+  // The settle runs BEFORE the clock of the run starts and before the mode switch: the game
+  // keeps whatever mode it had (realtime, for a game the barrier just started), so a pending
+  // real-time init can land. Under a paused or manual runner nothing ticks; the wait still lets
+  // fetches and WASM instantiation resolve, but the note says frames did not advance.
+  let settledMs: number | undefined;
+  if (spec.settleMs > 0) {
+    if (deps.sleep) {
+      const settleStart = deps.now();
+      await deps.sleep(spec.settleMs);
+      settledMs = Math.round(deps.now() - settleStart);
+      if (previousMode.mode === 'manual' || wasPaused) {
+        notes.push(
+          `settleMs ${spec.settleMs}: the game was ${wasPaused ? 'paused' : "in 'manual' time"} during the settle, so no frame advanced in it — only pending promises (assets, WASM) could resolve.`
+        );
+      }
+    } else {
+      notes.push(`settleMs ${spec.settleMs} was ignored: this runtime cannot wait in real time.`);
+    }
+  }
   const startedAt = deps.now();
   const errorsBefore = deps.errorCount();
-  const notes: string[] = [];
 
   let core: LoopCore;
   let leftPaused = wasPaused;
@@ -2576,7 +2624,10 @@ export async function runGameTestLoop(
     fixedDeltaSec: spec.fixedDeltaSec,
     restoredMode: previousMode.mode,
     leftPaused,
+    ...(settledMs !== undefined ? { settledMs } : {}),
   };
+  const outran = outranRealTimeNote(core, wallMs, spec);
+  if (outran) notes.push(outran);
   // Read AFTER the teardown above, so a summary the policy logs from its `end` hook
   // is in the report. `done()` cannot arrive that late — the session refuses a
   // verdict once teardown has begun, because a verdict after the outcome could not
@@ -2585,9 +2636,13 @@ export async function runGameTestLoop(
   const botReport = deps.bot?.report();
   const outcome = resolveBotOutcome(resolveMonkeyOutcome(core.outcome, core.monkey), botReport);
 
+  const verdict = composeVerdict(outcome, spec, core.unmetNotes, newErrors.length, botReport);
   return {
     ok: true,
-    verdict: composeVerdict(outcome, spec, core.unmetNotes, newErrors.length, botReport),
+    verdict:
+      outran && outcome.kind !== 'precondition-already-met'
+        ? `${verdict} OUTRAN REAL TIME: the game's state never changed while the run stepped far faster than a player would experience it — see notes.`
+        : verdict,
     outcome,
     metrics: {
       frames: outcome.frame,
@@ -2609,6 +2664,34 @@ export async function runGameTestLoop(
     ...(core.monkey ? { monkey: core.monkey } : {}),
     ...(botReport ? { bot: botReport } : {}),
   };
+}
+
+/**
+ * The note for a run that stepped far more game time than wall time passed while the game's own
+ * state never moved (or the game exposes none). It is a hint, not a verdict: the loop cannot see
+ * a pending promise, but "600 frames in 300 ms and nothing changed" is exactly what a game still
+ * awaiting its physics WASM or its atlas looks like from here — measured on a field test where
+ * `ready:false` and an empty screenshot were read as a dead game for several turns.
+ */
+function outranRealTimeNote(
+  core: LoopCore,
+  wallMs: number,
+  spec: NormalizedRunSpec
+): string | null {
+  const gameTimeMs = core.outcome.gameTimeMs;
+  if (gameTimeMs < 1000) return null;
+  if (wallMs * OUTRAN_REAL_TIME_FACTOR > gameTimeMs) return null;
+  const game = core.game;
+  if (game?.changed && Object.keys(game.changed).length > 0) return null;
+  const factor = wallMs > 0 ? Math.round(gameTimeMs / wallMs) : Infinity;
+  const stateNote = game
+    ? `the game's own state (${game.provider}) did not change between frame 0 and the outcome`
+    : 'the game registers no GameDebugProvider, so its readiness cannot be read';
+  const settle =
+    spec.settleMs > 0
+      ? `The ${spec.settleMs} ms settle before the loop was not enough — raise it`
+      : 'Give it real time first: `settleMs` on this call (e.g. 2000), or a game_input [{type:"wait", ms}] in realtime before the run';
+  return `This run stepped ${(gameTimeMs / 1000).toFixed(1)} s of game time in ${wallMs} ms of wall time (~${Number.isFinite(factor) ? factor : '∞'}× real time) and ${stateNote}. Anything the game awaits in REAL time — a physics WASM module, assets, a fetch, a timer-based init — may not have completed within it, so an empty scene or a \`ready: false\` here is not yet evidence of a bug. ${settle}, and assert readiness (e.g. until: [{kind: "gameState", path: "ready", op: "eq", value: true}]) before asserting gameplay.`;
 }
 
 /**

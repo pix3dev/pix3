@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { NodeBase } from '@pix3/runtime';
 import {
   clearErrors,
+  clearScriptBuildErrors,
   clearScriptDiagnosticErrors,
   componentToDTO,
   errors,
@@ -104,6 +105,54 @@ describe('agent-introspection', () => {
     expect(captured.some(e => e.message.includes('smoke-test-error'))).toBe(true);
     clearErrors();
     expect(errors()).toEqual([]);
+  });
+});
+
+describe('errors(since)', () => {
+  it('returns only the entries captured after the cursor', () => {
+    installErrorCapture();
+    clearErrors();
+    console.error('before-the-cursor');
+    const cursor = errors().at(-1)?.at ?? 0;
+    // A later capture must be strictly after the cursor: fake the clock past it.
+    const later = errors().at(-1);
+    if (later) later.at = cursor - 5;
+    console.error('after-the-cursor');
+    const newest = errors().at(-1);
+    if (newest) newest.at = cursor + 5;
+
+    const recent = errors(cursor).map(entry => entry.message);
+    expect(recent).toHaveLength(1);
+    expect(recent[0]).toContain('after-the-cursor');
+    expect(errors()).toHaveLength(2);
+    clearErrors();
+  });
+});
+
+describe('clearScriptBuildErrors', () => {
+  beforeEach(() => {
+    clearErrors();
+  });
+
+  it('retires build failures in the shape the loader logs them, keeping runtime and type errors', () => {
+    installErrorCapture();
+    console.error(
+      '[Pix3 ERROR] Failed to compile scripts Error: scripts/HudBehavior.ts:12:7: Expected ";" but found "const"'
+    );
+    console.error(
+      '[Pix3 ERROR] Script build did not finish within 60 s and was abandoned; it runs again on the next change or compile.'
+    );
+    console.error(
+      "[Pix3 ERROR] scripts/TicTacToe.ts:87:9 — Type 'unknown' is not assignable to type 'string'. (ts2322)"
+    );
+    console.error('[Pix3 ERROR] TypeError: btn.setText is not a function');
+
+    clearScriptBuildErrors();
+
+    const remaining = errors().map(entry => entry.message);
+    expect(remaining).toHaveLength(2);
+    expect(remaining[0]).toContain('ts2322');
+    expect(remaining[1]).toContain('btn.setText');
   });
 });
 

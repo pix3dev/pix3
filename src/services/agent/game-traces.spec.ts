@@ -107,6 +107,7 @@ function makeSpec(over: Partial<NormalizedRunSpec> = {}): NormalizedRunSpec {
     fixedDeltaSec: 1 / 60,
     maxWallMs: 20_000,
     pauseOnOutcome: false,
+    settleMs: 0,
     ...over,
   };
 }

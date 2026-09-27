@@ -110,11 +110,17 @@ When you see one:
 Without step 1 the editor keeps restoring the human's value on every write you make, even if
 you write the same number the human chose.
 
-`check` prints `note: … read confirmation for a version the editor has not recorded — ignored`
-as a note, not a merge-log line: your `pix3 read` named bytes the editor has no record of
-having loaded or written (e.g. a version that was on disk only between two of its polls).
-Nothing was lost and nothing is protected by it; no action unless a KEPT line follows. (`pix3 ack <file> --sha256 <hash>` confirms a
+`check` prints `note: … read confirmation for a version the editor has not recorded — ignored
+(harmless …)` as a note, not a merge-log line: your `pix3 read` named bytes the editor has no
+record of having loaded or written (e.g. a version that was on disk only between two of its
+polls). Nothing was lost and nothing is protected by it; no action unless a KEPT line follows,
+and it stops printing once the file changes. (`pix3 ack <file> --sha256 <hash>` confirms a
 version whose hash you took from `pix3 check --json` without printing it again.)
+
+**A compile error hides level 2.** With `E_SCRIPT_COMPILE` in the list, every scene with `user:`
+components is skipped at level 2 — `check` says `SKIPPED: N scene(s) …` and the summary line
+reads `level 2 hydrated 0 file(s), N SKIPPED`. Their config/property errors are *missing*, not
+passed: fix the compile error, run `check` again, and only then read the rest.
 
 ## 3. Live channel — run the game yourself
 
@@ -139,6 +145,11 @@ The loop after a batch of edits:
 4. `disk_differs_from_agent` with `mergeLog: true` → the editor merged your file with a human
    edit: `pix3 read` it (section 2). With `recovery` → someone overwrote it; the named file under
    `.pix3/recovery/` holds your version. Otherwise write the file again.
+5. `expectation_stale` → the disk held your version when the call started, then moved on
+   (the editor merged your write, a human saved, another agent wrote) and the editor already
+   holds the new bytes. Not editor lag, and nothing started: `pix3 read` the file, re-run
+   `pix3 check --json`, pass the new hashes. `sync_timeout` is the other case — the editor is
+   still catching up with a write; call again when the writes are done.
 
 ### Two ways to prove behaviour
 
@@ -152,7 +163,15 @@ causes the behaviour:
   `fail` (any one ends it as a failure), e.g. `until:
   [{ kind: "nodeProperty", name: "ScoreLabel", path: "text", op: "contains", value: "10" }]`,
   `fail: [{ kind: "newErrors" }]` (a script threw). Read `verdict`, then the result's
-  `newErrors` count, then `read_errors` when it is not 0.
+  `newErrors` count, then `read_errors` when it is not 0 (pass `since`, the epoch ms you noted
+  before the run, or old errors come back too).
+  **`game_run` outruns real time**: it steps hundreds of frames in a fraction of a second, so a
+  game whose `onStart` awaits something real (a physics WASM module, assets, a fetch) is still
+  initialising when the run ends — an empty screenshot or `ready: false` there is not a bug yet.
+  Give it real time with `settleMs` (e.g. `2000`) and assert readiness first
+  (`until: [{ kind: "gameState", path: "ready", op: "eq", value: true }]`); the report's
+  `notes`/`verdict` say `OUTRAN REAL TIME` when a run stepped far faster than real time and the
+  game's state never changed.
 - **(b) Input-driven behaviour** (taps, keys, combos): `play_start` or `play_restart` with
   `expect` (the barrier, once) → one or more `game_input` calls → `game_observe` / `read_logs`.
   `game_input` and `game_observe` are observing tools: they neither stop nor resync, so the
@@ -168,9 +187,11 @@ causes the behaviour:
   camera; a node under a `CanvasLayer2D` (a HUD) is pinned to the screen instead, so for HUD and
   buttons prefer `target: "<node name or id>"`, which projects the node's live position the
   right way for either.
-- **`tap` holds the pointer down 700 ms by default** (so a `Button2D` sees a real press). For
-  fast repeated hits — a combo window, a rhythm check — pass `holdMs` (e.g. `holdMs: 50`) and a
-  short `wait` between taps; `frames` instead of `ms` / `holdMs` counts game ticks.
+- **`tap` holds the pointer down 80 ms by default** — a tap (a `Button2D` sees the press on one
+  tick and the release on a later one). A game that tells a tap from a **hold** (mine while the
+  finger is down, charge a shot) needs `holdMs` set to what it expects — the old 700 ms default
+  read as a hold and produced "no activity"; a NO ACTIVITY verdict now names the hold it used.
+  `frames` instead of `ms` / `holdMs` counts game ticks.
 - **One call is capped at 15 s** of requested time (holds + drags + waits); longer answers
   `Input script too long` — split it into several `game_input` calls.
 - **Input goes through the engine's `InputService`**: `PointerEvent`s on the game canvas and
@@ -184,9 +205,16 @@ causes the behaviour:
   `matchesAgent` / `agentExpectations`, `matchesDisk`, `changedDuringRun`,
   `editorWroteDuringRun`, `editorChangedSinceAgentWrite` and `result` (the editor tool's own
   answer). **Observing answers** are `{ revision, stale, result }`.
-- `revision` is the running game's file → hash map: every open scene, every script the build
-  read, `pix3project.yaml` — it can run to hundreds of lines. Check `stale` and the match
-  flags; never paste `revision` into a report.
+- `revision` describes the running game's verified files (every open scene, every script the
+  build read, `pix3project.yaml`) **compactly**: `{ files, digest, changed }` — the count, a
+  digest of the whole map, and only the entries that changed since the previous answer of your
+  `pix3 mcp` process (all of them on the first answer). `fullRevision: true` on any barrier or
+  observing call returns the whole `{ path: sha256 }` map; `project_status` →
+  `editor.playRevision` has it too while the game plays. Check `stale` and the match flags;
+  never paste `revision` into a report.
+- `game_observe` nodes carry `size` (`{ width, height }`) and `bounds` (axis-aligned world
+  rectangle, rotation ignored) for 2D nodes that have a width/height — enough to tell "on
+  screen / overlapping" without a screenshot.
 - **Labels and HUD text.** An observed node reports its rendered `text` only at the window's
   **start and end** — `observed.<node>.before.text` / `.after.text` in `game_input`,
   `nodes.<node>.text` (and `movement.<node>.before` / `.after` with `sampleMs` or `frames`) in

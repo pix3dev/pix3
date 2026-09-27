@@ -23,8 +23,10 @@ export interface TreeInstance {
   /** The prefab's own root type/name, when the prefab file could be read. */
   readonly rootType?: string;
   readonly rootName?: string;
-  /** Override properties: instance-root keys + every `overrides.byLocalId.*.properties` key. */
+  /** Overrides of nodes INSIDE the prefab: every `overrides.byLocalId.*.properties` key. */
   readonly overrides: number;
+  /** The instance node's own `properties` keys (applied to the prefab root). */
+  readonly properties: number;
 }
 
 export interface TreeNode {
@@ -176,16 +178,27 @@ const nonDefaultProps = (
   return out;
 };
 
-const countOverrides = (definition: Record<string, unknown>): number => {
-  let count = isRecord(definition.properties) ? Object.keys(definition.properties).length : 0;
+/**
+ * The two counts an instance line shows, kept apart: `overrides` reaches into the prefab
+ * (`overrides.byLocalId`), `properties` is the instance node's own block. They used to be one
+ * number, so an instance with `properties: { visible: false }` and no `overrides:` block read
+ * "(1 override)" — and an agent went looking for an override block that did not exist.
+ */
+const countInstanceEdits = (
+  definition: Record<string, unknown>
+): { overrides: number; properties: number } => {
+  const properties = isRecord(definition.properties)
+    ? Object.keys(definition.properties).length
+    : 0;
+  let overrides = 0;
   const byLocalId = isRecord(definition.overrides) ? definition.overrides.byLocalId : undefined;
   if (isRecord(byLocalId)) {
     for (const entry of Object.values(byLocalId)) {
-      count +=
+      overrides +=
         isRecord(entry) && isRecord(entry.properties) ? Object.keys(entry.properties).length : 1;
     }
   }
-  return count;
+  return { overrides, properties };
 };
 
 const prefabRoot = (
@@ -307,7 +320,7 @@ export const buildTree = (
               path: instancePath,
               ...(root.type ? { rootType: root.type } : {}),
               ...(root.name ? { rootName: root.name } : {}),
-              overrides: countOverrides(definition),
+              ...countInstanceEdits(definition),
             },
           }
         : {}),
@@ -351,7 +364,14 @@ export const formatNodeLine = (node: TreeNode): string => {
     node.name !== undefined && node.name !== node.id ? `${head} ${quote(node.name)}` : head
   );
   if (node.instance) {
-    parts.push(`↳ instance ${node.instance.path} (${plural(node.instance.overrides, 'override')})`);
+    const { overrides, properties } = node.instance;
+    const edits = [
+      ...(overrides > 0 ? [plural(overrides, 'override')] : []),
+      ...(properties > 0 ? [`${properties} ${properties === 1 ? 'property' : 'properties'}`] : []),
+    ];
+    parts.push(
+      `↳ instance ${node.instance.path} (${edits.length > 0 ? edits.join(', ') : 'no overrides'})`
+    );
   }
   if (node.text !== undefined) parts.push(`text=${quote(node.text, 28)}`);
   if (node.position && node.position.some(v => v !== 0))

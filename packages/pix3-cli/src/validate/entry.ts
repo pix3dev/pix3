@@ -25,7 +25,13 @@ export interface BundledValidateReport {
   readonly errorCount: number;
   readonly warningCount: number;
   readonly level2:
-    | { readonly state: 'ran'; readonly filesHydrated: number; readonly filesSkipped: number }
+    | {
+        readonly state: 'ran';
+        readonly filesHydrated: number;
+        readonly filesSkipped: number;
+        /** Of `filesSkipped`: scenes with `user:` components left out because the scripts failed to load. */
+        readonly filesSkippedForScripts?: number;
+      }
     | { readonly state: 'disabled' }
     | { readonly state: 'skipped'; readonly reason: string };
   readonly notes: readonly string[];

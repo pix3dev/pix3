@@ -301,7 +301,7 @@ export const describeMergeLogEntry = (entry: Record<string, unknown>, now: Date)
     case 'ack-applied':
       return `${prefix}your read confirmation was applied (released ${Array.isArray(entry.released) ? entry.released.length : 0} protected value(s))`;
     case 'ack-unknown':
-      return `${prefix}read confirmation for a version the editor has not recorded — ignored`;
+      return `${prefix}read confirmation for a version the editor has not recorded — ignored (harmless: nothing is protected by it and there is nothing to do; it stops showing once the file changes)`;
     case 'accept-agent':
       return `${prefix}the human accepted your version`;
     case 'keep-mine':
@@ -313,6 +313,16 @@ export const describeMergeLogEntry = (entry: Record<string, unknown>, now: Date)
     default:
       return `${prefix}${String(entry.event ?? 'entry')}`;
   }
+};
+
+/** An `ack-unknown` entry whose `hash` is not the file's current version any more. */
+const isAboutSupersededVersion = (
+  entry: Record<string, unknown>,
+  currentHashes: ReadonlyMap<string, string>
+): boolean => {
+  if (typeof entry.hash !== 'string' || typeof entry.file !== 'string') return false;
+  const current = currentHashes.get(entry.file);
+  return current !== undefined && current !== entry.hash;
 };
 
 const formatDiagnostic = (d: CheckDiagnostic): string => {
@@ -340,8 +350,14 @@ export const formatCheckHuman = (report: CheckReport, now: Date): string => {
   if (hidden > 0) out += `… ${hidden} more (pix3 check --json lists them all)\n`;
   for (const note of report.notes) out += `note: ${note}\n`;
   // An ignored read confirmation needs no action (the editor simply had no record of that
-  // version), so it is a note, not a line in the list an agent is told to act on.
-  const informational = report.mergeLog.filter(entry => INFORMATIONAL_EVENTS.has(entry.event));
+  // version), so it is a note, not a line in the list an agent is told to act on — and only while
+  // it is about the file's CURRENT bytes: the log is a ring the entry sits in for a long time, and
+  // one about a version the disk no longer holds is history, not a note to repeat on every run.
+  const currentHashes = new Map(report.files.map(file => [file.file, file.sha256]));
+  const informational = report.mergeLog.filter(
+    entry =>
+      INFORMATIONAL_EVENTS.has(entry.event) && !isAboutSupersededVersion(entry, currentHashes)
+  );
   const actionable = report.mergeLog.filter(entry => !INFORMATIONAL_EVENTS.has(entry.event));
   for (const entry of informational) out += `note: ${describeMergeLogEntry(entry, now)}\n`;
   if (actionable.length > 0) {
@@ -356,7 +372,11 @@ export const formatCheckHuman = (report: CheckReport, now: Date): string => {
       : 'typecheck did not run';
   const level2 =
     report.level2.state === 'ran'
-      ? `level 2 hydrated ${report.level2.filesHydrated} file(s)`
+      ? `level 2 hydrated ${report.level2.filesHydrated} file(s)${
+          report.level2.filesSkippedForScripts
+            ? `, ${report.level2.filesSkippedForScripts} SKIPPED (scripts do not compile — user: components unchecked)`
+            : ''
+        }`
       : report.level2.state === 'disabled'
         ? 'level 2 off'
         : `level 2 skipped: ${report.level2.reason}`;

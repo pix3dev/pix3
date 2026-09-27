@@ -1,5 +1,14 @@
 import { describe, it, expect } from 'vitest';
-import { Mesh, MeshBasicMaterial, Scene, Texture, AdditiveBlending, type Blending } from 'three';
+import {
+  Mesh,
+  MeshBasicMaterial,
+  Plane,
+  Scene,
+  Texture,
+  Vector3,
+  AdditiveBlending,
+  type Blending,
+} from 'three';
 import { SHARED_UNIT_QUAD_GEOMETRY } from './shared-quad-geometry';
 import { Batch2DSystem, BATCHABLE_2D_KEY, type OrderedMesh2D } from './batch-2d';
 
@@ -12,8 +21,12 @@ function makeMesh(opts: {
   visible?: boolean;
   blending?: Blending;
   opacity?: number;
+  clippingPlanes?: Plane[];
 }): OrderedMesh2D {
   const material = new MeshBasicMaterial({ transparent: true, depthTest: false });
+  if (opts.clippingPlanes) {
+    material.clippingPlanes = opts.clippingPlanes;
+  }
   if (opts.source !== undefined && opts.source !== null) {
     material.map = opts.source;
   }
@@ -130,6 +143,32 @@ describe('Batch2DSystem segmentation', () => {
     expect((a.mesh.material as MeshBasicMaterial).visible).toBe(true);
     expect((b.mesh.material as MeshBasicMaterial).visible).toBe(true);
     expect(system.stats.batches).toBe(0);
+  });
+
+  it('keeps a ScrollContainer2D clip: clipped quads batch only with each other, on a clipping batch material', () => {
+    // One shared array per container, as ScrollContainer2D.applyClippingPlanes hands it out.
+    const viewport = [
+      new Plane(new Vector3(1, 0, 0), 0),
+      new Plane(new Vector3(-1, 0, 0), 0),
+      new Plane(new Vector3(0, 1, 0), 0),
+      new Plane(new Vector3(0, -1, 0), 0),
+    ];
+    const scene = new Scene();
+    const system = new Batch2DSystem(scene);
+    // Two untextured quads inside the container (a ColorRect2D and a flat Button2D skin) …
+    const rectA = makeMesh({ clippingPlanes: viewport });
+    const rectB = makeMesh({ clippingPlanes: viewport });
+    // … followed by two untextured quads outside it.
+    const hudA = makeMesh({});
+    const hudB = makeMesh({});
+    system.update([rectA, rectB, hudA, hudB]);
+
+    // Same source ('nomap') but different clips: two batches, never one.
+    expect(system.stats.batches).toBe(2);
+    expect(system.stats.passthrough).toBe(0);
+    const [clipped, unclipped] = system.activeBatchMeshes;
+    expect((clipped.material as MeshBasicMaterial).clippingPlanes).toBe(viewport);
+    expect((unclipped.material as MeshBasicMaterial).clippingPlanes).toBeNull();
   });
 
   it('preserves paint order: batch block sorts before a later passthrough', () => {

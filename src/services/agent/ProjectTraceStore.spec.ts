@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   ProjectBotStore,
   ProjectReportStore,
+  REPORT_GITIGNORE,
   ProjectRoutineStore,
   ProjectTraceStore,
   type TraceProjectStorage,
@@ -213,7 +214,39 @@ describe('ProjectReportStore', () => {
     await store.save('0001-run-pass-f5.json', '{"formatVersion":1}');
 
     expect(storage.createDirectory).toHaveBeenCalledWith(REPORT_DIRECTORY);
-    expect(Object.keys(storage.files)).toEqual([`${REPORT_DIRECTORY}/0001-run-pass-f5.json`]);
+    expect(Object.keys(storage.files).sort()).toEqual([
+      `${REPORT_DIRECTORY}/.gitignore`,
+      `${REPORT_DIRECTORY}/0001-run-pass-f5.json`,
+    ]);
+  });
+
+  it("keeps reports out of git with a * .gitignore, written once and never over the user's", async () => {
+    const storage = makeStorage();
+    const store = new ProjectReportStore(storage as unknown as TraceProjectStorage);
+
+    await store.save('0001-run-pass-f5.json', '{}');
+    await store.save('0002-run-pass-f5.json', '{}');
+    expect(storage.files[`${REPORT_DIRECTORY}/.gitignore`]).toBe(REPORT_GITIGNORE);
+    expect(
+      storage.writeTextFile.mock.calls.filter(([path]) => path.endsWith('.gitignore'))
+    ).toHaveLength(1);
+
+    const custom = makeStorage({ [`${REPORT_DIRECTORY}/.gitignore`]: '!keep.json\n' });
+    await new ProjectReportStore(custom as unknown as TraceProjectStorage).save(
+      '0001-a.json',
+      '{}'
+    );
+    expect(custom.files[`${REPORT_DIRECTORY}/.gitignore`]).toBe('!keep.json\n');
+  });
+
+  it('still saves the report when the .gitignore cannot be written', async () => {
+    const storage = makeStorage();
+    storage.writeTextFile.mockImplementationOnce(async () => {
+      throw Object.assign(new Error('denied'), { code: 'permission-denied' });
+    });
+    const store = new ProjectReportStore(storage as unknown as TraceProjectStorage);
+    await store.save('0001-run-pass-f5.json', '{}');
+    expect(storage.files[`${REPORT_DIRECTORY}/0001-run-pass-f5.json`]).toBe('{}');
   });
 
   it('lists NAMES only, and only the .json ones', async () => {

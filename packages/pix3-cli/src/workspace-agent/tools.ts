@@ -58,6 +58,7 @@ export const WORKSPACE_TOOL_NAMES: readonly string[] = [
  */
 export const BARRIER_ERROR_CODES = [
   'disk_differs_from_agent',
+  'expectation_stale',
   'sync_timeout',
   'load_failed',
   'pending_external',
@@ -83,11 +84,23 @@ export const EXPECT_SCHEMA: JsonSchema = {
 const BARRIER_NOTE =
   ' Runs through the sync barrier first: checks `expect` against the disk, stops play, makes the ' +
   'editor load the current files and verifies its hashes against the disk, then starts; the ' +
-  'answer carries `revision`, `startupMs`, `matchesAgent`, `matchesDisk` and `changedDuringRun`.';
+  'answer carries `revision` (compact: file count, digest, and only the entries that changed ' +
+  "since this process's previous answer — `fullRevision: true` for the whole map), `startupMs`, " +
+  '`matchesAgent`, `matchesDisk` and `changedDuringRun`.';
 
 const OBSERVING_NOTE =
   ' Does not stop or resync the game: the answer carries the `revision` the running game started ' +
-  'from and `stale: true` when the disk moved since (use play_restart to pick new files up).';
+  'from (compact, as on barrier answers; `fullRevision: true` for the whole map) and ' +
+  '`stale: true` when the disk moved since (use play_restart to pick new files up).';
+
+/** `fullRevision` — added to every barrier and observing tool's schema. */
+export const FULL_REVISION_SCHEMA: JsonSchema = {
+  type: 'boolean',
+  description:
+    'Answer with the whole `revision` map ({path: sha256} of every verified file) instead of the ' +
+    'compact form (file count, digest, and only the entries that changed since the previous ' +
+    'answer of this MCP process). Default false.',
+};
 
 const FALLBACK: Record<string, McpToolSpec> = {
   project_status: {
@@ -164,8 +177,13 @@ const FALLBACK: Record<string, McpToolSpec> = {
   read_errors: {
     name: 'read_errors',
     description:
-      'Recent runtime errors captured in the editor (console.error, window errors, rejections).',
-    inputSchema: EMPTY,
+      'Recent runtime errors captured in the editor (console.error, window errors, rejections), ' +
+      'each with an epoch-ms `at`; `since` (epoch ms) returns only newer ones.',
+    inputSchema: {
+      type: 'object',
+      properties: { since: { type: 'number' } },
+      additionalProperties: false,
+    },
   },
   read_logs: {
     name: 'read_logs',
@@ -245,10 +263,10 @@ const FALLBACK: Record<string, McpToolSpec> = {
 const asSchema = (value: unknown): JsonSchema | null =>
   value && typeof value === 'object' && !Array.isArray(value) ? (value as JsonSchema) : null;
 
-/** A barrier tool's schema with `expect` added (whatever else the window says it takes). */
-const withExpect = (schema: JsonSchema): JsonSchema => {
+/** A schema with the channel's own arguments added (whatever else the window says it takes). */
+const withChannelArgs = (schema: JsonSchema, extra: Record<string, JsonSchema>): JsonSchema => {
   const properties = asSchema(schema.properties) ?? {};
-  return { ...schema, type: 'object', properties: { ...properties, expect: EXPECT_SCHEMA } };
+  return { ...schema, type: 'object', properties: { ...properties, ...extra } };
 };
 
 /**
@@ -276,11 +294,18 @@ export const buildToolList = (fromWindow: readonly unknown[] | null): McpToolSpe
       return {
         name,
         description: base.description + BARRIER_NOTE,
-        inputSchema: withExpect(base.inputSchema),
+        inputSchema: withChannelArgs(base.inputSchema, {
+          expect: EXPECT_SCHEMA,
+          fullRevision: FULL_REVISION_SCHEMA,
+        }),
       };
     }
     if (OBSERVING_TOOLS.has(name)) {
-      return { ...base, description: base.description + OBSERVING_NOTE };
+      return {
+        ...base,
+        description: base.description + OBSERVING_NOTE,
+        inputSchema: withChannelArgs(base.inputSchema, { fullRevision: FULL_REVISION_SCHEMA }),
+      };
     }
     return base;
   });

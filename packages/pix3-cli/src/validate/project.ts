@@ -5,8 +5,19 @@ import { parse as parseYaml } from 'yaml';
 
 import { isRecord } from './yaml-doc.ts';
 
-/** Folders that are never project content. */
-const IGNORED_DIRECTORIES = new Set(['node_modules', '.git', '.pix3', 'dist', '.vite', '.cache']);
+/**
+ * Folders that are never project content: dependencies (`node_modules`, and `.yalc` — a local
+ * copy of a linked package, `@pix3/runtime` in a consumer project), tooling state, build output.
+ */
+export const IGNORED_DIRECTORIES: ReadonlySet<string> = new Set([
+  'node_modules',
+  '.yalc',
+  '.git',
+  '.pix3',
+  'dist',
+  '.vite',
+  '.cache',
+]);
 
 export const SCENE_EXTENSION = '.pix3scene';
 

@@ -177,6 +177,9 @@ its colour from `color`). On a `GeometryMesh` the stack lives at `material.effec
 ```
 
 - `instance:` **replaces** `type:`. The instanced file must contain **exactly one** root node.
+- The instance node's `name` **replaces the prefab root's name** in the loaded scene (its `id`
+  stays the instance's own id). `findByName('Result Overlay')` finds the instance above, not
+  the name written in `result.pix3scene`; omit `name` to keep the prefab's.
 - Instance `properties` are applied to the prefab's root through its **schema names**:
   `visible`, `opacity`, `width`, `layoutEnabled`, `horizontalAlign`, … plus a `transform` block
   (`position`, `rotation`, `scale`). The `layout:` / `flow:` blocks of a plain node are not read

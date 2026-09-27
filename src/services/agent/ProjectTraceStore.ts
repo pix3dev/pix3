@@ -205,7 +205,14 @@ export class ProjectRoutineStore implements RoutineStore {
  * `{offset, limit}` through the ordinary filesystem tools — and a parser here would
  * be a second, drifting definition of a document that has exactly one writer.
  */
+/** Content of `design/tests/reports/.gitignore`: the whole directory is local run output. */
+export const REPORT_GITIGNORE =
+  '# Written by Pix3: game_run protocols are local scratch, rotated to the newest few.\n*\n';
+
 export class ProjectReportStore implements RunProtocolStore {
+  /** Set once the directory's `.gitignore` is known to exist (checked once per store). */
+  private gitignoreEnsured = false;
+
   constructor(private readonly storage: TraceProjectStorage) {}
 
   async list(): Promise<string[]> {
@@ -232,7 +239,33 @@ export class ProjectReportStore implements RunProtocolStore {
     } catch {
       /* fall through to the write, whose error is the useful one */
     }
+    await this.ensureGitignore();
     await this.storage.writeTextFile(reportFilePath(name), text);
+  }
+
+  /**
+   * Reports are local scratch: the directory keeps only the newest few and rotation deletes by
+   * name, so a report that got committed would later show up as a deleted tracked file (seen on
+   * a real project: `D design/tests/reports/0001-…json` after a routine run). A `*` .gitignore
+   * keeps them out of `git status` and out of commits. An existing file is left as the user
+   * wrote it; a failure here never blocks the report itself.
+   */
+  private async ensureGitignore(): Promise<void> {
+    if (this.gitignoreEnsured) return;
+    const path = `${REPORT_DIRECTORY}/.gitignore`;
+    try {
+      await this.storage.readTextFile(path);
+      this.gitignoreEnsured = true;
+      return;
+    } catch (error) {
+      if (!isNotFound(error)) return;
+    }
+    try {
+      await this.storage.writeTextFile(path, REPORT_GITIGNORE);
+      this.gitignoreEnsured = true;
+    } catch {
+      /* best effort */
+    }
   }
 
   async delete(name: string): Promise<void> {

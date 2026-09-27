@@ -360,8 +360,15 @@ export function installErrorCapture(): void {
   });
 }
 
-/** Snapshot of the captured runtime errors (newest last). */
-export function errors(): CapturedError[] {
+/**
+ * Snapshot of the captured runtime errors (newest last). With `since` (epoch ms), only the ones
+ * captured after that instant — the same cursor `read_logs` takes, so an agent can note the time
+ * before an action and read only what that action produced instead of the session's whole tail.
+ */
+export function errors(since?: number): CapturedError[] {
+  if (typeof since === 'number' && Number.isFinite(since)) {
+    return errorBuffer.filter(entry => entry.at > since);
+  }
   return [...errorBuffer];
 }
 
@@ -392,6 +399,27 @@ const SCRIPT_DIAGNOSTIC_PATTERN = /(?:^|\s)(?:src\/)?scripts\/[^\s]+\.ts:\d+:\d+
 export function clearScriptDiagnosticErrors(): void {
   for (let i = errorBuffer.length - 1; i >= 0; i--) {
     if (SCRIPT_DIAGNOSTIC_PATTERN.test(errorBuffer[i].message)) {
+      errorBuffer.splice(i, 1);
+    }
+  }
+}
+
+/**
+ * What the script loader logs when a build fails (`ProjectScriptLoaderService`): the esbuild
+ * failure, and the watchdog abandoning a build. Both describe the sources as they were at that
+ * build, so the next successful build makes them history — yet they stayed in the ring, and
+ * `read_errors` kept answering with a syntax error the agent had fixed several edits earlier.
+ */
+const SCRIPT_BUILD_FAILURE_PATTERN =
+  /(?:^|\]\s)Failed to compile scripts\b|Script build did not finish within/;
+
+/**
+ * Retire every captured build failure, keeping type diagnostics (a build that compiles can still
+ * fail the type-check) and genuine runtime errors. Called by the loader after a successful build.
+ */
+export function clearScriptBuildErrors(): void {
+  for (let i = errorBuffer.length - 1; i >= 0; i--) {
+    if (SCRIPT_BUILD_FAILURE_PATTERN.test(errorBuffer[i].message)) {
       errorBuffer.splice(i, 1);
     }
   }

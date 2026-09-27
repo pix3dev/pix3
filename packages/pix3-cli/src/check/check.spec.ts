@@ -196,16 +196,31 @@ describe('merge log', () => {
 
   it('prints an ignored read confirmation as a note, not as a merge-log line', async () => {
     const root = newRecipe();
+    const current = sha256(join(root, 'scenes', 'main.pix3scene'));
+    writeFileSync(
+      join(root, '.pix3', 'merge-log.jsonl'),
+      `${JSON.stringify({ at: new Date().toISOString(), file: 'scenes/main.pix3scene', event: 'ack-unknown', hash: current })}\n`
+    );
+    const human = formatCheckHuman(await check(root, false), new Date());
+    expect(human).toMatch(
+      /^note: .*scenes\/main\.pix3scene {2}read confirmation for a version the editor has not recorded — ignored \(harmless/m
+    );
+    expect(human).not.toContain('merge-log (newest');
+    expect(human).not.toContain('never saw');
+  }, 60_000);
+
+  it('drops an ignored read confirmation about a version the file no longer holds', async () => {
+    // Measured on a real project: the same 17-hour-old note on every run, about bytes long gone.
+    const root = newRecipe();
     writeFileSync(
       join(root, '.pix3', 'merge-log.jsonl'),
       `${JSON.stringify({ at: new Date().toISOString(), file: 'scenes/main.pix3scene', event: 'ack-unknown', hash: 'abc' })}\n`
     );
-    const human = formatCheckHuman(await check(root, false), new Date());
-    expect(human).toMatch(
-      /^note: .*scenes\/main\.pix3scene {2}read confirmation for a version the editor has not recorded — ignored$/m
-    );
-    expect(human).not.toContain('merge-log (newest');
-    expect(human).not.toContain('never saw');
+    const report = await check(root, false);
+    const human = formatCheckHuman(report, new Date());
+    expect(human).not.toContain('read confirmation');
+    // The JSON tail is the raw log: still there for whoever wants the history.
+    expect(report.mergeLog).toHaveLength(1);
   }, 60_000);
 
   it('describes a rejected version', () => {

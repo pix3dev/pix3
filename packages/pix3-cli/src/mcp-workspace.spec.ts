@@ -172,6 +172,11 @@ describe('pix3 mcp --workspace', () => {
     for (const name of ['play_start', 'play_restart', 'game_run']) {
       const tool = tools.find(t => t.name === name);
       expect(Object.keys(tool?.inputSchema.properties ?? {})).toContain('expect');
+      expect(Object.keys(tool?.inputSchema.properties ?? {})).toContain('fullRevision');
+    }
+    for (const name of ['play_status', 'game_observe', 'read_errors']) {
+      const tool = tools.find(t => t.name === name);
+      expect(Object.keys(tool?.inputSchema.properties ?? {})).toContain('fullRevision');
     }
     expect(tools.some(t => /set_property|create_node|fs_write/.test(t.name))).toBe(false);
   }, 20_000);
@@ -244,7 +249,8 @@ describe('pix3 mcp --workspace', () => {
     });
     expect(reply.isError).toBe(false);
     expect(reply.body).toMatchObject({
-      revision: { 'scenes/main.pix3scene': sha(scene) },
+      // Compact: the count, a digest, and (on the first answer) every entry as `changed`.
+      revision: { files: 1, changed: { 'scenes/main.pix3scene': sha(scene) } },
       matchesAgent: true,
       matchesDisk: true,
       changedDuringRun: [],
@@ -252,11 +258,54 @@ describe('pix3 mcp --workspace', () => {
       editorChangedSinceAgentWrite: [],
       result: { verdict: 'PASS frame 12' },
     });
+    expect((reply.body.revision as { digest: string }).digest).toMatch(/^[0-9a-f]{64}$/);
     expect(calls.map(c => c.name)).toEqual(['sync_barrier', 'game_run', 'sync_release']);
     // `expect` is the MCP process's business; the editor tool gets the rest.
     expect(calls[1].input).toEqual({ until: [{ kind: 'frames', n: 10 }] });
     expect(calls[0].agent).toMatchObject({ name: 'spec-client', verified: false });
   }, 20_000);
+
+  it('revision is compact: only what changed since this process’s previous answer; fullRevision: true = the map', async () => {
+    const server = await startServer();
+    let scene = 'root: [v1]\n';
+    write('scenes/main.pix3scene', scene);
+    write('scripts/a.ts', 'export const a = 1;\n');
+    const loaded = () => ({
+      'scenes/main.pix3scene': sha(scene),
+      'scripts/a.ts': sha('export const a = 1;\n'),
+    });
+    await openWindow(
+      server,
+      barrierWindow(loaded, () => textResult({ verdict: 'PASS' }))
+    );
+    const client = await startMcp();
+
+    const first = await callTool(client, 'play_start');
+    expect(first.body.revision).toMatchObject({ files: 2, changed: loaded() });
+    const digest1 = (first.body.revision as { digest: string }).digest;
+
+    // Nothing changed: the second answer names no entry, and the digest is the same.
+    const second = await callTool(client, 'play_start');
+    expect(second.body.revision).toEqual({ files: 2, digest: digest1, changed: {} });
+
+    // One file changed: only that entry comes back, with a new digest.
+    scene = 'root: [v2]\n';
+    write('scenes/main.pix3scene', scene);
+    await new Promise(resolve => setTimeout(resolve, 100));
+    const third = await callTool(client, 'play_start');
+    expect(third.body.revision).toMatchObject({
+      files: 2,
+      changed: { 'scenes/main.pix3scene': sha(scene) },
+    });
+    expect((third.body.revision as { digest: string }).digest).not.toBe(digest1);
+    expect(Object.keys((third.body.revision as { changed: object }).changed)).toEqual([
+      'scenes/main.pix3scene',
+    ]);
+
+    // On request, the whole map as before.
+    const full = await callTool(client, 'play_start', { fullRevision: true });
+    expect(full.body.revision).toEqual(loaded());
+  }, 30_000);
 
   it('without expect: agentExpectations none', async () => {
     const server = await startServer();
@@ -453,6 +502,52 @@ describe('pix3 mcp --workspace', () => {
     expect(calls.filter(c => c.name === 'sync_release')).toHaveLength(barriers);
   }, 20_000);
 
+  it('expectation_stale (at once, not sync_timeout) when the disk moved past the agent’s version and the editor matches the disk', async () => {
+    const server = await startServer();
+    const mine = 'root: [agent]\n';
+    const theirs = 'root: [human]\n';
+    write('scenes/main.pix3scene', mine);
+    let barriers = 0;
+    const calls = await openWindow(server, name => {
+      if (name === 'sync_barrier') {
+        barriers += 1;
+        // Between the agent's expect check and the editor's barrier, somebody wrote the file —
+        // the editor (or a human) — and the editor holds exactly what the disk now holds.
+        write('scenes/main.pix3scene', theirs);
+        return textResult({
+          loaded: { 'scenes/main.pix3scene': sha(theirs) },
+          errors: [],
+          holdId: `h${barriers}`,
+        });
+      }
+      if (name === 'sync_release') return textResult({ released: true });
+      return textResult({});
+    });
+    const client = await startMcp();
+    const startedAt = Date.now();
+    const reply = await callTool(client, 'game_run', {
+      until: [{ kind: 'frames', n: 1 }],
+      expect: { 'scenes/main.pix3scene': sha(mine) },
+    });
+    expect(reply.isError).toBe(true);
+    expect(reply.body.error).toBe('expectation_stale');
+    expect(String(reply.body.message)).toMatch(/newer version/);
+    expect(reply.body.differing).toEqual([
+      expect.objectContaining({
+        path: 'scenes/main.pix3scene',
+        diskHash: sha(theirs),
+        agentHash: sha(mine),
+        loadedHash: sha(theirs),
+        hint: expect.stringMatching(/overwritten|re-read|moved on disk/),
+      }),
+    ]);
+    // Fail fast: no ~5 s of retries, one barrier, no start.
+    expect(Date.now() - startedAt).toBeLessThan(4_000);
+    expect(barriers).toBe(1);
+    expect(calls.some(c => c.name === 'game_run')).toBe(false);
+    expect(calls.at(-1)?.name).toBe('sync_release');
+  }, 20_000);
+
   it('load_failed and pending_external from the editor’s barrier errors', async () => {
     const server = await startServer();
     let mode: 'compile' | 'pending' = 'compile';
@@ -498,10 +593,12 @@ describe('pix3 mcp --workspace', () => {
     const client = await startMcp();
     const reply = await callTool(client, 'viewport_screenshot');
     expect(reply.body).toMatchObject({
-      revision: { 'scenes/main.pix3scene': sha('old') },
+      revision: { files: 1, changed: { 'scenes/main.pix3scene': sha('old') } },
       stale: true,
       result: { ok: true, view: 'game' },
     });
+    const full = await callTool(client, 'viewport_screenshot', { fullRevision: true });
+    expect(full.body.revision).toEqual({ 'scenes/main.pix3scene': sha('old') });
     expect(reply.content.find(block => block.type === 'image')).toMatchObject({
       data: 'iVBORw0KGgo=',
       mimeType: 'image/png',
