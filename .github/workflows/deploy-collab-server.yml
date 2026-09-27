@@ -20,13 +20,13 @@ concurrency:
 jobs:
   deploy:
     name: Build and deploy collab backend
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, cloud, deploy, home]
     timeout-minutes: 30
     environment: production
 
     env:
-      DEPLOY_HOST: cloud.pix3.dev
-      DEPLOY_PORT: ${{ secrets.COLLAB_DEPLOY_PORT }}
+      DEPLOY_HOST: 192.168.1.209
+      DEPLOY_PORT: 22
       DEPLOY_USER: ${{ secrets.COLLAB_DEPLOY_USER }}
       DEPLOY_PATH: ${{ secrets.COLLAB_DEPLOY_PATH }}
 
@@ -185,9 +185,8 @@ jobs:
 
           ln -sfn "${APP_DIR}" "${DEPLOY_ROOT}/current"
 
-          export XDG_RUNTIME_DIR="/run/user/$(id -u)"
-          systemctl --user restart pix3-collab-server
-          systemctl --user --no-pager --full status pix3-collab-server | head -n 20
+          sudo systemctl restart pix3-collab-server
+          sudo systemctl --no-pager --full status pix3-collab-server | head -n 20
 
           ls -1dt "${DEPLOY_ROOT}"/releases/* | tail -n +6 | xargs -r rm -rf
           EOF
