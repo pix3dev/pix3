@@ -48,6 +48,8 @@ const SWEEP_SKIPPED_DIRS = new Set([
   '.cache',
   'coverage',
 ]);
+/** Parallel reads during the pre-launch scan (each is a round trip on a `pix3 serve` workspace). */
+const SCAN_READ_CONCURRENCY = 12;
 /** Minimum path depth for a directory-prefix include (avoids broad roots like textures/). */
 const MIN_DIR_PREFIX_SEGMENTS = 4;
 
@@ -99,6 +101,17 @@ interface ClassifiedInputs {
   sizeMap: Map<string, number | null>;
 }
 
+interface SceneScan {
+  eligible: string[];
+  ineligible: string[];
+  anims: string[];
+}
+
+interface ScriptScan {
+  images: string[];
+  dirPrefixes: string[];
+}
+
 interface DecodedFrame {
   resourcePath: string;
   bitmap: ImageBitmap;
@@ -126,6 +139,13 @@ export class TextureAtlasService {
 
   @inject(AtlasCacheStore)
   private readonly cache!: AtlasCacheStore;
+
+  /**
+   * Per-file scan results with the workspace manifest sha256 they were computed from; reused only
+   * while the manifest still reports that hash. Other backends have no hash without a read and
+   * are scanned fresh every launch.
+   */
+  private readonly scanMemo = new Map<string, { hash: string; result: unknown }>();
 
   /**
    * Prepare and install the atlas on `assetLoader` before `startScene`. Idempotent
@@ -213,28 +233,20 @@ export class TextureAtlasService {
     const eligible = new Set<string>();
     const ineligible = new Set<string>();
     const animPaths = new Set<string>();
+    const paths = [...sizeMap.keys()];
 
-    for (const [path] of sizeMap) {
-      if (SCENE_EXTENSIONS.some(ext => path.endsWith(ext))) {
-        try {
-          const parsed = parseYaml(await this.fs.readTextFile(path)) as { root?: unknown };
-          this.classifyNodes(parsed?.root, eligible, ineligible, animPaths);
-        } catch {
-          // Skip unparseable scenes/prefabs.
-        }
-      }
+    const scenePaths = paths.filter(path => SCENE_EXTENSIONS.some(ext => path.endsWith(ext)));
+    for (const scan of await this.scanFiles(scenePaths, text => this.scanScene(text))) {
+      scan?.eligible.forEach(ref => eligible.add(ref));
+      scan?.ineligible.forEach(ref => ineligible.add(ref));
+      scan?.anims.forEach(ref => animPaths.add(ref));
     }
 
     // Animation resources: their frame textures belong to AnimatedSprite2D → eligible.
-    for (const animPath of animPaths) {
-      try {
-        const text = await this.fs.readTextFile(stripRes(animPath));
-        for (const ref of matchAll(text, IMAGE_REF_PATTERN)) {
-          eligible.add(ref);
-        }
-      } catch {
-        // Missing animation resource — its sprite falls back to un-atlased.
-      }
+    // A missing animation resource just leaves its sprite un-atlased.
+    const animFiles = [...animPaths].map(stripRes);
+    for (const refs of await this.scanFiles(animFiles, text => matchAll(text, IMAGE_REF_PATTERN))) {
+      refs?.forEach(ref => eligible.add(ref));
     }
 
     // Project scripts: literal res:// image refs are sprite textures; res://
@@ -242,31 +254,20 @@ export class TextureAtlasService {
     // template-literal frame paths (`res://…/bridge1/${i}.png`) reveal
     // dynamically-loaded sprites that static image refs miss — include every
     // image under those directories so the enemy/effect textures atlas + batch.
+    const scriptPaths = paths.filter(
+      path =>
+        path.endsWith('.ts') &&
+        !path.endsWith('.spec.ts') &&
+        !path.endsWith('.d.ts') &&
+        SCRIPT_DIRECTORIES.some(dir => path === dir || path.startsWith(`${dir}/`))
+    );
     const dirPrefixes = new Set<string>();
-    for (const [path] of sizeMap) {
-      if (!path.endsWith('.ts') || path.endsWith('.spec.ts') || path.endsWith('.d.ts')) {
-        continue;
-      }
-      if (!SCRIPT_DIRECTORIES.some(dir => path === dir || path.startsWith(`${dir}/`))) {
-        continue;
-      }
-      try {
-        const text = await this.fs.readTextFile(path);
-        for (const ref of matchAll(text, IMAGE_REF_PATTERN)) {
-          eligible.add(ref);
-        }
-        for (const raw of matchAll(text, RES_REF_PATTERN)) {
-          const prefix = this.dirPrefixOf(raw);
-          if (prefix) {
-            dirPrefixes.add(prefix);
-          }
-        }
-      } catch {
-        // Ignore unreadable scripts.
-      }
+    for (const scan of await this.scanFiles(scriptPaths, text => this.scanScript(text))) {
+      scan?.images.forEach(ref => eligible.add(ref));
+      scan?.dirPrefixes.forEach(prefix => dirPrefixes.add(prefix));
     }
     for (const prefix of dirPrefixes) {
-      for (const [file] of sizeMap) {
+      for (const file of paths) {
         if (file.startsWith(prefix) && IMAGE_EXT_PATTERN.test(file)) {
           eligible.add(`res://${file}`);
         }
@@ -277,23 +278,16 @@ export class TextureAtlasService {
     // `.atlas` file and assume a standalone, full-[0,1] texture. The loader reads
     // pages straight off disk (bypassing loadTexture), so this is belt-and-braces
     // — and it also keeps large skeleton sheets out of the shared atlas.
-    for (const [path] of sizeMap) {
-      if (!path.toLowerCase().endsWith('.atlas')) {
-        continue;
-      }
-      try {
-        const text = await this.fs.readTextFile(path);
-        for (const pageName of parseSpineAtlasPageNames(text)) {
-          // A page name may itself be absolute/schemed (hand-edited atlas), which
-          // resolveSpinePagePath passes through — so normalize instead of blindly
-          // prefixing, or the entry would read `res://res://…` and match nothing.
-          const pagePath = resolveSpinePagePath(path, pageName);
-          ineligible.add(`res://${stripRes(pagePath)}`);
-        }
-      } catch {
-        // Unreadable atlas — nothing to exclude.
-      }
-    }
+    const spinePaths = paths.filter(path => path.toLowerCase().endsWith('.atlas'));
+    const spineScans = await this.scanFiles(spinePaths, (text, path) =>
+      // A page name may itself be absolute/schemed (hand-edited atlas), which
+      // resolveSpinePagePath passes through — so normalize instead of blindly
+      // prefixing, or the entry would read `res://res://…` and match nothing.
+      parseSpineAtlasPageNames(text).map(
+        pageName => `res://${stripRes(resolveSpinePagePath(path, pageName))}`
+      )
+    );
+    spineScans.forEach(pages => pages?.forEach(page => ineligible.add(page)));
 
     const include: string[] = [];
     const excluded: string[] = [];
@@ -305,6 +299,58 @@ export class TextureAtlasService {
       }
     }
     return { include, excluded, sizeMap };
+  }
+
+  private scanScene(text: string): SceneScan {
+    const eligible = new Set<string>();
+    const ineligible = new Set<string>();
+    const anims = new Set<string>();
+    const parsed = parseYaml(text) as { root?: unknown };
+    this.classifyNodes(parsed?.root, eligible, ineligible, anims);
+    return { eligible: [...eligible], ineligible: [...ineligible], anims: [...anims] };
+  }
+
+  private scanScript(text: string): ScriptScan {
+    const dirPrefixes: string[] = [];
+    for (const raw of matchAll(text, RES_REF_PATTERN)) {
+      const prefix = this.dirPrefixOf(raw);
+      if (prefix) {
+        dirPrefixes.push(prefix);
+      }
+    }
+    return { images: matchAll(text, IMAGE_REF_PATTERN), dirPrefixes };
+  }
+
+  /**
+   * Read and scan `paths` with bounded concurrency, results index-aligned; an
+   * unreadable or unscannable file yields null. On a `pix3 serve` workspace every
+   * read is a network round trip, so a sequential sweep of a real project's
+   * scenes + scripts cost >10 s of every launch. Files whose manifest sha256 is
+   * unchanged since the last scan are not read at all.
+   */
+  private async scanFiles<T>(
+    paths: readonly string[],
+    scan: (text: string, path: string) => T
+  ): Promise<Array<T | null>> {
+    return mapWithConcurrency(paths, SCAN_READ_CONCURRENCY, async path => {
+      const contentHash = this.fs.getManifestContentHash(path);
+      const memo = this.scanMemo.get(path);
+      if (memo && typeof contentHash === 'string' && memo.hash === contentHash) {
+        return memo.result as T | null;
+      }
+      let result: T | null;
+      try {
+        result = scan(await this.fs.readTextFile(path), path);
+      } catch {
+        result = null;
+      }
+      if (typeof contentHash === 'string') {
+        this.scanMemo.set(path, { hash: contentHash, result });
+      } else {
+        this.scanMemo.delete(path);
+      }
+      return result;
+    });
   }
 
   /**
@@ -591,6 +637,24 @@ function matchAll(text: string, pattern: RegExp): string[] {
     return [];
   }
   return text.match(pattern) ?? [];
+}
+
+/** `Promise.all(items.map(fn))` with at most `limit` calls in flight; results stay index-aligned. */
+async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    while (next < items.length) {
+      const index = next++;
+      results[index] = await fn(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
 }
 
 /**
