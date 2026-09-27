@@ -724,6 +724,20 @@ Polled + per-frame input, unified across pointer/keyboard: `getAxis(name)`,
 `getButton(name)`, `pointerEvents` / `keyEvents` (this frame), `pointerPosition`,
 `wheelDelta`, `isPointerDown`, `isHoveringUI`. Depth-counted `lock()`/`unlock()`
 (used by the Cutscene Director) silences the whole polled surface at once.
+
+**Wheel vs zoom.** `wheelDelta` (`Vector2`, per frame) holds the plain scroll
+wheel only. Wheel events carrying `ctrlKey` or `metaKey` — a trackpad pinch,
+which every browser reports as `wheel` + `ctrlKey`, and desktop Ctrl/⌘ + wheel —
+are accumulated in `wheelZoomDelta` (`Vector2`, same units; positive `y` = pinch
+in / wheel down = zoom out) and **not** in `wheelDelta`, so a `ScrollContainer2D`
+or a game that scrolls on `wheelDelta` does not scroll while the player pinches.
+Shift/Alt-modified wheel stays in `wheelDelta` (Shift + wheel is the browser's
+horizontal scroll). `wheelModifiers` (`{ ctrl, meta, shift, alt }`, one stable
+object) reports which modifiers any wheel event of the frame carried. All three
+reset on every frame and are zeroed by `lock()`/`detach()`. The canvas listener
+already calls `preventDefault()` on every wheel event, so Ctrl/⌘ + wheel zooms
+the game, never the page. Camera zoom:
+`camera.zoom *= Math.exp(-this.input.wheelZoomDelta.y * 0.01)`.
 Pointer events come from the DOM Pointer Events API, so **mouse and touch are
 already unified** — design every interaction for both (tap = click; don't rely
 on hover). `scene.getPointer2DWorldPosition()` converts the current pointer to

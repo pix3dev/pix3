@@ -120,6 +120,137 @@ describe('InputService lock (Cutscene Director input freeze)', () => {
   });
 });
 
+describe('InputService wheel modifiers (Ctrl/⌘ + wheel, trackpad pinch)', () => {
+  let input: InputService;
+  let canvas: HTMLCanvasElement;
+
+  // happy-dom's WheelEvent extends UIEvent, not MouseEvent, so the modifier
+  // flags of the init are dropped; stamp them on the way a browser would.
+  const wheel = (init: WheelEventInit): WheelEvent => {
+    const event = new WheelEvent('wheel', init);
+    for (const flag of ['ctrlKey', 'metaKey', 'shiftKey', 'altKey'] as const) {
+      Object.defineProperty(event, flag, { value: init[flag] ?? false });
+    }
+    canvas.dispatchEvent(event);
+    return event;
+  };
+
+  beforeEach(() => {
+    input = new InputService();
+    canvas = document.createElement('canvas');
+    document.body.appendChild(canvas);
+    input.attach(canvas);
+  });
+
+  afterEach(() => {
+    input.detach();
+    canvas.remove();
+  });
+
+  it('keeps an unmodified wheel in wheelDelta with every modifier flag false (unchanged behaviour)', () => {
+    wheel({ deltaX: 3, deltaY: 40 });
+    wheel({ deltaY: 20 });
+    input.beginFrame();
+    expect(input.wheelDelta.x).toBe(3);
+    expect(input.wheelDelta.y).toBe(60);
+    expect(input.wheelZoomDelta.x).toBe(0);
+    expect(input.wheelZoomDelta.y).toBe(0);
+    expect(input.wheelModifiers).toEqual({ ctrl: false, meta: false, shift: false, alt: false });
+  });
+
+  it('routes a ctrl-wheel (trackpad pinch) into wheelZoomDelta and NOT into wheelDelta', () => {
+    // Browsers report a pinch as `wheel` + ctrlKey; a game scrolling on wheelDelta
+    // must not scroll while the player pinches.
+    wheel({ deltaY: -12, ctrlKey: true });
+    wheel({ deltaY: -8, ctrlKey: true });
+    input.beginFrame();
+    expect(input.wheelDelta.y).toBe(0);
+    expect(input.wheelZoomDelta.y).toBe(-20);
+    expect(input.wheelModifiers.ctrl).toBe(true);
+    expect(input.wheelModifiers.meta).toBe(false);
+  });
+
+  it('treats ⌘ + wheel like ctrl-wheel (zoom) and flags meta', () => {
+    wheel({ deltaY: 100, metaKey: true });
+    input.beginFrame();
+    expect(input.wheelDelta.y).toBe(0);
+    expect(input.wheelZoomDelta.y).toBe(100);
+    expect(input.wheelModifiers.meta).toBe(true);
+    expect(input.wheelModifiers.ctrl).toBe(false);
+  });
+
+  it('keeps shift/alt-modified wheel in wheelDelta (a scroll, not a zoom) and only flags them', () => {
+    wheel({ deltaX: 50, shiftKey: true });
+    wheel({ deltaY: 10, altKey: true });
+    input.beginFrame();
+    expect(input.wheelDelta.x).toBe(50);
+    expect(input.wheelDelta.y).toBe(10);
+    expect(input.wheelZoomDelta.y).toBe(0);
+    expect(input.wheelModifiers.shift).toBe(true);
+    expect(input.wheelModifiers.alt).toBe(true);
+    expect(input.wheelModifiers.ctrl).toBe(false);
+  });
+
+  it('splits a mixed frame: plain events scroll, ctrl events zoom, both flags reported', () => {
+    wheel({ deltaY: 30 });
+    wheel({ deltaY: -5, ctrlKey: true });
+    input.beginFrame();
+    expect(input.wheelDelta.y).toBe(30);
+    expect(input.wheelZoomDelta.y).toBe(-5);
+    expect(input.wheelModifiers.ctrl).toBe(true);
+  });
+
+  it('resets wheelZoomDelta and the flags on the next frame', () => {
+    wheel({ deltaY: -5, ctrlKey: true, shiftKey: true });
+    input.beginFrame();
+    expect(input.wheelZoomDelta.y).toBe(-5);
+    expect(input.wheelModifiers.ctrl).toBe(true);
+    input.beginFrame();
+    expect(input.wheelZoomDelta.y).toBe(0);
+    expect(input.wheelModifiers).toEqual({ ctrl: false, meta: false, shift: false, alt: false });
+  });
+
+  it('exposes one stable wheelModifiers object (safe to hold a reference across frames)', () => {
+    const ref = input.wheelModifiers;
+    wheel({ deltaY: 1, ctrlKey: true });
+    input.beginFrame();
+    expect(ref.ctrl).toBe(true);
+    input.beginFrame();
+    expect(ref.ctrl).toBe(false);
+    expect(input.wheelModifiers).toBe(ref);
+  });
+
+  it('prevents the default of a ctrl-wheel so the browser page does not zoom', () => {
+    const event = new WheelEvent('wheel', { deltaY: -10, ctrlKey: true, cancelable: true });
+    const prevented = vi.spyOn(event, 'preventDefault');
+    canvas.dispatchEvent(event);
+    expect(prevented).toHaveBeenCalled();
+  });
+
+  it('clears the zoom delta and flags on lock and accumulates nothing while locked', () => {
+    wheel({ deltaY: -10, ctrlKey: true });
+    input.beginFrame();
+    expect(input.wheelZoomDelta.y).toBe(-10);
+
+    input.lock();
+    expect(input.wheelZoomDelta.y).toBe(0);
+    expect(input.wheelModifiers.ctrl).toBe(false);
+
+    wheel({ deltaY: -10, ctrlKey: true });
+    input.beginFrame();
+    expect(input.wheelZoomDelta.y).toBe(0);
+    expect(input.wheelModifiers.ctrl).toBe(false);
+  });
+
+  it('clears the zoom delta and flags on detach', () => {
+    wheel({ deltaY: -10, ctrlKey: true });
+    input.beginFrame();
+    input.detach();
+    expect(input.wheelZoomDelta.y).toBe(0);
+    expect(input.wheelModifiers.ctrl).toBe(false);
+  });
+});
+
 describe('InputService pointer capture (synthetic events)', () => {
   it('swallows a NotFoundError from set/releasePointerCapture and still tracks the pointer', () => {
     const input = new InputService();

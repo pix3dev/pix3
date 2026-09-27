@@ -46,6 +46,45 @@ export interface InputKeyFrameEvent {
 }
 
 /**
+ * Which keyboard modifiers were held on the wheel events of the current frame.
+ * A flag is `true` when **any** wheel event accumulated this frame carried it;
+ * with several events of mixed modifiers in one frame more than one flag can
+ * be set (the deltas themselves are still split by {@link InputService.wheelDelta}
+ * vs {@link InputService.wheelZoomDelta}).
+ */
+export interface WheelModifierFlags {
+  readonly ctrl: boolean;
+  readonly meta: boolean;
+  readonly shift: boolean;
+  readonly alt: boolean;
+}
+
+/** Internal, mutable counterpart of {@link WheelModifierFlags}. */
+interface MutableWheelModifierFlags {
+  ctrl: boolean;
+  meta: boolean;
+  shift: boolean;
+  alt: boolean;
+}
+
+const createWheelModifierFlags = (): MutableWheelModifierFlags => ({
+  ctrl: false,
+  meta: false,
+  shift: false,
+  alt: false,
+});
+
+const clearWheelModifiers = (flags: MutableWheelModifierFlags): void => {
+  flags.ctrl = false;
+  flags.meta = false;
+  flags.shift = false;
+  flags.alt = false;
+};
+
+/** True for the wheel events a browser reports as a zoom gesture: a trackpad pinch (`ctrlKey`) or Ctrl/⌘ + wheel. */
+const isZoomWheelEvent = (event: WheelEvent): boolean => event.ctrlKey || event.metaKey;
+
+/**
  * What the game asked the input layer for during a recording window.
  *
  * Deliberately named "observed **polls**": it records only that `getAxis` /
@@ -120,7 +159,33 @@ export class InputService {
    */
   public activePointerId: number | null = null;
 
+  /**
+   * Scroll wheel delta accumulated over the last frame, **excluding** zoom
+   * gestures: wheel events that carry `ctrlKey` or `metaKey` (a trackpad pinch,
+   * Ctrl/⌘ + wheel) go to {@link wheelZoomDelta} instead, so a game that scrolls
+   * on this value does not scroll while the player pinches. Shift/Alt-modified
+   * wheel events still land here (Shift + wheel is the browser's horizontal
+   * scroll); read {@link wheelModifiers} to tell them apart.
+   */
   public wheelDelta = new Vector2();
+
+  /**
+   * Delta of the zoom-modified wheel events of the last frame (`ctrlKey` — which
+   * is how every browser reports a trackpad pinch — or `metaKey`), in the same
+   * units as {@link wheelDelta}. Positive `y` is a pinch-in / wheel-down, i.e. a
+   * zoom **out** by the usual convention. Zero on frames without such an event.
+   */
+  public wheelZoomDelta = new Vector2();
+
+  /** Mutable backing object of {@link wheelModifiers}; declared first so the alias below sees it. */
+  private readonly currentWheelModifiers = createWheelModifierFlags();
+
+  /**
+   * Modifier keys held on this frame's wheel events (see {@link WheelModifierFlags}).
+   * Reset every frame; all `false` when no wheel event happened.
+   */
+  public readonly wheelModifiers: WheelModifierFlags = this.currentWheelModifiers;
+
   public pointerEvents: readonly InputPointerFrameEvent[] = [];
   public keyEvents: readonly InputKeyFrameEvent[] = [];
 
@@ -140,6 +205,8 @@ export class InputService {
   private readonly activePointers = new Map<number, TrackedPointer>();
 
   private readonly pendingWheelDelta = new Vector2();
+  private readonly pendingWheelZoomDelta = new Vector2();
+  private readonly pendingWheelModifiers = createWheelModifierFlags();
   private pendingPointerEvents: InputPointerFrameEvent[] = [];
   private pendingKeyEvents: InputKeyFrameEvent[] = [];
 
@@ -176,6 +243,10 @@ export class InputService {
     this.hoveredUIPointers.clear();
     this.wheelDelta.copy(this.pendingWheelDelta);
     this.pendingWheelDelta.set(0, 0);
+    this.wheelZoomDelta.copy(this.pendingWheelZoomDelta);
+    this.pendingWheelZoomDelta.set(0, 0);
+    Object.assign(this.currentWheelModifiers, this.pendingWheelModifiers);
+    clearWheelModifiers(this.pendingWheelModifiers);
     this.pointerEvents = this.pendingPointerEvents;
     this.pendingPointerEvents = [];
     this.keyEvents = this.pendingKeyEvents;
@@ -256,8 +327,7 @@ export class InputService {
     }
     this.pendingPointerEvents = [];
     this.pendingKeyEvents = [];
-    this.pendingWheelDelta.set(0, 0);
-    this.wheelDelta.set(0, 0);
+    this.clearWheelState();
     // Cancel *after* emptying the queues: dropping the queued gesture is the
     // point of the lock, but a control holding a finger still has to hear that
     // the finger went away, or it stays pressed for as long as the lock lasts.
@@ -483,8 +553,7 @@ export class InputService {
     this.element = null;
     this.isPointerDown = false;
     this.activePointerId = null;
-    this.wheelDelta.set(0, 0);
-    this.pendingWheelDelta.set(0, 0);
+    this.clearWheelState();
     this.pointerEvents = [];
     this.pendingPointerEvents = [];
     this.keyEvents = [];
@@ -678,14 +747,34 @@ export class InputService {
 
   private onWheel = (event: WheelEvent): void => {
     // Still swallow the gesture while locked (the page must not scroll behind
-    // a cutscene), but accumulate nothing.
+    // a cutscene), but accumulate nothing. Unconditional on purpose: it is also
+    // what stops a Ctrl/⌘ + wheel or trackpad pinch from zooming the page
+    // instead of the game (the listener is registered `passive: false`).
     event.preventDefault();
     if (this.lockDepth > 0) {
       return;
     }
-    this.pendingWheelDelta.x += event.deltaX;
-    this.pendingWheelDelta.y += event.deltaY;
+    // Zoom gestures are routed away from `wheelDelta` so nothing scrolls while
+    // the player pinches; everything else (plain, Shift, Alt) scrolls as before.
+    const target = isZoomWheelEvent(event) ? this.pendingWheelZoomDelta : this.pendingWheelDelta;
+    target.x += event.deltaX;
+    target.y += event.deltaY;
+    const modifiers = this.pendingWheelModifiers;
+    if (event.ctrlKey) modifiers.ctrl = true;
+    if (event.metaKey) modifiers.meta = true;
+    if (event.shiftKey) modifiers.shift = true;
+    if (event.altKey) modifiers.alt = true;
   };
+
+  /** Zero every current and pending wheel value (lock / detach). */
+  private clearWheelState(): void {
+    this.wheelDelta.set(0, 0);
+    this.pendingWheelDelta.set(0, 0);
+    this.wheelZoomDelta.set(0, 0);
+    this.pendingWheelZoomDelta.set(0, 0);
+    clearWheelModifiers(this.currentWheelModifiers);
+    clearWheelModifiers(this.pendingWheelModifiers);
+  }
 
   private onKeyDown = (event: KeyboardEvent): void => {
     if (this.lockDepth > 0) {

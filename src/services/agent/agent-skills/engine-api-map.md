@@ -128,7 +128,10 @@ what this map does not name, and say in one line what you were missing.
 ## `this.input` (`InputService`) — pointer and touch are already unified
 
 - Per frame: `input.pointerEvents` → `{ type: 'down' | 'move' | 'up' | 'cancel', pointerId,
-  x, y }[]` (`cancel` is never a completed tap); `input.keyEvents`; `input.wheelDelta`.
+  x, y }[]` (`cancel` is never a completed tap); `input.keyEvents`; `input.wheelDelta` (plain
+  scroll wheel only); `input.wheelZoomDelta` (Ctrl/⌘ + wheel and trackpad pinch — use it for
+  camera zoom, it is excluded from `wheelDelta`); `input.wheelModifiers` (`{ ctrl, meta, shift,
+  alt }`). The canvas already `preventDefault()`s every wheel event, so ctrl-wheel never zooms the page.
 - Polled: `input.isPointerDown` (any finger), `input.pointerPosition` (primary finger,
   canvas space — convert with `scene.getPointer2DWorldPosition()`), `input.getActivePointers()`,
   `input.getPointer(id)`, `input.pointerDownCount`, `input.isPointerOverUI(pointerId)` (gate
