@@ -25,7 +25,14 @@
  * method: a test replays the end flow without hunting for buttons, and one real
  * tap proves the binding once.
  */
-import { Button2D, Label2D, Script, registerGameDebug, type PropertySchema } from '@pix3/runtime';
+import {
+  Button2D,
+  Label2D,
+  NodeBase,
+  Script,
+  registerGameDebug,
+  type PropertySchema,
+} from '@pix3/runtime';
 
 type WinMode = 'score' | 'time' | 'survive';
 
@@ -60,8 +67,8 @@ export class GameRules extends Script {
       loseText: 'GAME OVER',
       retryButton: 'retry-button',
       gameScene: 'res://scenes/main.pix3scene',
-      // Comma-separated node ids frozen (all their components disabled) on game
-      // over. Add your mechanic's nodes here as you build them — a spawner that
+      // Comma-separated node ids frozen on game over: every component on the node
+      // and on everything under it is disabled. Add your mechanic's nodes here as you build them — a spawner that
       // keeps running behind the result screen is the classic leak.
       freezeNodes: '',
     };
@@ -249,16 +256,22 @@ export class GameRules extends Script {
     this.setNodeVisible(String(this.config.resultNode ?? ''), true);
     this.setButtonEnabled(String(this.config.retryButton ?? ''), true);
 
+    // A freeze node freezes its whole subtree: the spawners' own components AND
+    // every instance they spawned under themselves (a chaser's script, a pickup's
+    // pop-in), so nothing keeps moving over the result card.
     for (const id of String(this.config.freezeNodes ?? '').split(',')) {
-      const node = this.findNode(id.trim());
-      if (!node) continue;
-      for (const component of node.components) {
-        // Only remember what WE switched off: reviving everything on reset would
-        // silently enable a component the scene author had left disabled.
-        if (!component.enabled) continue;
-        component.enabled = false;
-        this.frozen.push(component);
-      }
+      const root = this.findNode(id.trim());
+      if (!root) continue;
+      root.traverse(object => {
+        if (!(object instanceof NodeBase)) return;
+        for (const component of object.components) {
+          // Only remember what WE switched off: reviving everything on reset would
+          // silently enable a component the scene author had left disabled.
+          if (!component.enabled) continue;
+          component.enabled = false;
+          this.frozen.push(component);
+        }
+      });
     }
     this.node?.emit(won ? 'game-won' : 'game-lost', this.score);
   }

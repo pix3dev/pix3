@@ -398,6 +398,9 @@ export const runSmokeJob = async (
     const sceneLoader = new SceneLoader(assetLoader, registry, disk);
     const sceneManager = new SceneManager(sceneLoader);
     const canvas = document.createElement('canvas') as HTMLCanvasElement;
+    // In a page the canvas sits in a container; the engine hangs its flash/fade overlays off
+    // `canvas.parentElement`, and without one `juice.flash` warns on every call.
+    document.body.appendChild(canvas);
     let postProcessSkipped = false;
     // Never settles: the effect composer never becomes ready, so it never renders (see above).
     setPostprocessingModuleLoader(() => new Promise<never>(() => {}));

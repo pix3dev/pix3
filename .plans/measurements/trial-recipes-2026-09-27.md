@@ -188,3 +188,14 @@ try); `winMode: survive` spelled right from the recipe tunables; `Key_Space` voc
 
 Raw logs: scratch `trial3/times.log`, `*.check1.json`, `*.smoke.json` (session scratchpad, not in
 the repo).
+
+## D6 proposal — `pix3 smoke --input <steps.json>` / `--until` (design only, not implemented)
+
+1. **Surface.** `pix3 smoke <scene> --input steps.json [--until '<predicate>']`, where `steps.json` is exactly the `steps` array `game_input` takes (`GameInputStep`: `tap`/`key`/`keys`/`drag`/`wait`/`hover`/`invoke`, design-space coords, `target` by id/name), and `--until` is `game_run`'s predicate shape (a `registerGameDebug` snapshot path + op + value, e.g. `phase == "over"`). The same file then runs headless and live — an agent writes it once.
+2. **Report.** Per step: frame it ran on, the target's projected point (or "could not project"), and after it the watched ids (`--watch brick-3,star`) as `{ exists, position, visible }`; `until` → `{ met: true, frame }` or `met: false` at the frame budget (exit 1 with `E_SMOKE_UNTIL`, a new code the kit drift spec must learn).
+3. **What `GameInputService` needs to run under the shim.** It lives in the editor (`src/services/agent/GameInputService.ts`) behind DI, `appState.ui.isPlaying` and `GamePlaySessionService`; the step executor has to move into a host-free module (`@pix3/runtime/testing`, next to `createHeadlessGame`) taking `{ runner, canvas, windowRef, stepFrames(n) }` — the editor keeps the DI wrapper, smoke calls the module directly.
+4. `wait` must advance the **manual clock** (`runner` in `mode: 'manual'`, N × 1/60 s) instead of wall-clock `setTimeout`; tap/drag need `runner.projectNodeToCanvas`, i.e. an active Camera2D and a canvas with `width`/`height` + `getBoundingClientRect` (the shim canvas already has both, sized to the manifest viewport).
+5. Events: the shim already defines `PointerEvent`/`KeyboardEvent` classes and an `EventTarget`-backed canvas/window, so `dispatchPointer` / `window.dispatchEvent(new KeyboardEvent(...))` reach the runtime `InputService` unchanged; `setPointerCapture` is stubbed. Missing today: `pointerId`/`clientX` defaults on the shim event classes (they copy `init`, which is enough if the executor passes them).
+6. `invoke` (the `Interactive` descriptor path) is DOM-free and ports as is; `hover` needs nothing beyond pointermove.
+7. Cheapest first slice: `key`/`keys`/`wait` + `--until` (covers A2 dash, B3 flippers); then `tap` by `target` (T2/T3 taps, combo), then `drag`.
+8. Non-goals: pixels, audio, reachability journal (editor-only proofs stay editor-only — a headless tap is not a human-reachable proof).

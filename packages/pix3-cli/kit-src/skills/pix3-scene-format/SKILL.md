@@ -224,7 +224,7 @@ Never put a full-screen dimmer/panel inline in `main.pix3scene`.
 | `set_component_property` | edit the component's `config` |
 | `create_node` / `add_component` | add the node / component entry to the YAML |
 | `fs_write` (+ `overwrite: true`) | write the file |
-| `play_start`, `game_input`, `game_observe`, `game_run` | the same tools over the live channel when it is connected (`pix3-verify`); otherwise `pix3 check`, then ask the human to press Play and tell them what to look for |
+| `play_start`, `game_input`, `game_observe`, `game_run` | the same tools over the live channel when it is connected (`pix3-verify`); otherwise `pix3 check`, then `pix3 smoke <the scene you changed>`, then ask the human to press Play and tell them what to look for |
 
 Values out of a tunable's `min`/`max` load as written (`pix3 validate` warns); the script's
 schema `setValue` may clamp them.

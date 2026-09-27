@@ -68,8 +68,18 @@ schema clamps out-of-range values rather than rejecting them.
   Set `gridSnap` on the spawner (e.g. 220) and raise `spawnHeight` to get a mole
   grid instead of a band.
 - **Combos / multipliers.** A new script on `hud` that listens for
-  `touch-scored` on `game-root`, counts hits inside a time window and re-emits
-  `touch-scored` with a bigger amount. `GameRules` needs no change.
+  `touch-scored` on `game-root`, counts hits inside a time window, and adds
+  only the **extra** points: `game-root.emit('touch-scored', amount * (m - 1), x, y)`
+  under a re-entrancy guard (`if (this.emitting) return; this.emitting = true;
+  try { emit(...) } finally { this.emitting = false; }`). `GameRules` already
+  counted the base `amount` and needs no change. Show the multiplier through a
+  signal of its own (`combo-changed`), never through `touch-scored`.
+  **The trap:** a listener on `touch-scored` that emits `touch-scored` on the
+  same node is called again by its own emit — without the guard, the first tap
+  recurses until the stack overflows (and re-emitting the *full* amount would
+  double-count the base). No offline check sees it: `pix3 check` and
+  `pix3 smoke` are green, because smoke taps nothing. Say so, and have the human
+  tap three targets in a row.
 - **A third type.** Copy a prefab, give its `core:Hitbox2D` a new group, add a
   node with a third `Spawner` (`create_node` + `add_component`), and append
   `<group>:score:5` to `touchRules`.
@@ -86,7 +96,8 @@ wholesale rewrites).
 
 The result overlay and RETRY are **owned by `GameRules`**: it hides the overlay on
 start and keeps `retry-button` **disabled**, then `finish(won)` shows the overlay,
-writes the result text, enables RETRY and freezes the gameplay nodes. For a custom
+writes the result text, enables RETRY and freezes the `freezeNodes` subtrees
+(every component on them and on what they spawned). For a custom
 win/lose condition call `finish(true|false)` on that component — do NOT show the
 overlay yourself. A hand-rolled ending leaves RETRY on screen with its handler bound
 and `enabled: false`, i.e. a button that can never be pressed (`game_observe` reports

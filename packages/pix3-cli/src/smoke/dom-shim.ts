@@ -133,6 +133,23 @@ const makeElementFactory = (
     const isCanvas = tag === 'canvas';
     const classes = new Set<string>();
     const attributes = new Map<string, string>();
+    // Children know their parent (the engine hangs its flash/fade overlays off
+    // `canvas.parentElement`), so appending sets it on the child and removing clears it.
+    let self: object | null = null;
+    const adopt = (child: object): object => {
+      if (child && typeof child === 'object') {
+        Reflect.set(child, 'parentElement', self);
+        Reflect.set(child, 'parentNode', self);
+      }
+      return child;
+    };
+    const release = (child: object): object => {
+      if (child && typeof child === 'object' && Reflect.get(child, 'parentElement') === self) {
+        Reflect.set(child, 'parentElement', null);
+        Reflect.set(child, 'parentNode', null);
+      }
+      return child;
+    };
     const element: Record<string, unknown> = {
       tagName: tag.toUpperCase(),
       nodeName: tag.toUpperCase(),
@@ -168,21 +185,26 @@ const makeElementFactory = (
       getContext: (kind: string) => (isCanvas && kind === '2d' ? createStub2DContext() : null),
       appendChild: (child: object) => {
         children.push(child);
-        return child;
+        return adopt(child);
       },
       removeChild: (child: object) => {
         const index = children.indexOf(child);
         if (index >= 0) children.splice(index, 1);
-        return child;
+        return release(child);
       },
       insertBefore: (child: object) => {
         children.push(child);
-        return child;
+        return adopt(child);
       },
-      append: (...nodes: object[]) => void children.push(...nodes),
-      prepend: (...nodes: object[]) => void children.unshift(...nodes),
-      remove: () => {},
-      contains: () => false,
+      append: (...nodes: object[]) => void children.push(...nodes.map(adopt)),
+      prepend: (...nodes: object[]) => void children.unshift(...nodes.map(adopt)),
+      remove: () => {
+        const parent = element.parentElement;
+        const removeChild =
+          parent && typeof parent === 'object' ? Reflect.get(parent, 'removeChild') : undefined;
+        if (typeof removeChild === 'function') (removeChild as (child: object) => void)(self ?? {});
+      },
+      contains: (other: unknown) => other === self || children.includes(other as object),
       setAttribute: (name: string, value: string) => void attributes.set(name, String(value)),
       getAttribute: (name: string) => attributes.get(name) ?? null,
       removeAttribute: (name: string) => void attributes.delete(name),
@@ -198,7 +220,8 @@ const makeElementFactory = (
       requestPointerLock: () => {},
       animate: () => ({ cancel: () => {}, finished: Promise.resolve() }),
     };
-    return recording(element, `<${tag}>`, recorder);
+    self = recording(element, `<${tag}>`, recorder);
+    return self;
   };
   return create;
 };

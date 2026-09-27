@@ -15,18 +15,21 @@ import {
   type SmokeJob,
   type SmokeOutcome,
   type SmokeReport,
+  type SmokeRunSet,
 } from './report.ts';
+import { selectSmokeScenes, type SmokeSelection } from './select-scenes.ts';
 
 /**
- * `pix3 smoke [scene] [--frames N] [--timeout S] [--json] [--project <dir>]` — run the game headless
- * in Node for N fixed 1/60 s frames and report what threw.
+ * `pix3 smoke [scene] [--changed|--all] [--frames N] [--timeout S] [--json] [--project <dir>]` —
+ * run the game headless in Node for N fixed 1/60 s frames and report what threw. With no scene it
+ * runs several, one after another (`select-scenes.ts` decides which).
  *
  * This file is plain Node (no runtime import): it resolves the project and the scene, then runs the
  * game in a worker thread from the smoke bundle (`entry.ts`, `worker.ts`, `smoke.ts`) under a
  * wall-clock timeout. Exit codes: 0 = ran clean, 1 = at least one error, 2 = could not run.
  */
 
-export const SMOKE_USAGE = `Usage: pix3 smoke [scene] [--frames N] [--timeout S] [--json] [--project <dir>]
+export const SMOKE_USAGE = `Usage: pix3 smoke [scene] [--changed | --all] [--frames N] [--timeout S] [--json] [--project <dir>]
 
   Run the game headless in Node — no browser, no editor: the project's scripts compiled, the scene
   loaded by the real loader, N frames of 1/60 s stepped by the real SceneRunner. Reports every
@@ -34,8 +37,14 @@ export const SMOKE_USAGE = `Usage: pix3 smoke [scene] [--frames N] [--timeout S]
   unhandled rejections, missing res:// files and per-frame step time. Nothing is rendered; audio,
   input and network are inert.
 
-  scene          .pix3scene to run (res://, project-relative or a path). Default: the manifest's
-                 defaultExportScenePath, else scenes/main.pix3scene, else the only top-level scene.
+  scene          .pix3scene to run (res://, project-relative or a path) — the surest way to test
+                 the game: pix3 smoke scenes/main.pix3scene. With no scene, several run one after
+                 another, a line each: in a git repo with uncommitted changes, the top-level scenes
+                 those changes reach (the scene, a prefab/overlay it instances, a user: script it
+                 attaches); otherwise — or when a changed scene/script reaches none — every
+                 top-level scene (not a prefab, not scenes/ui), scenes/main.pix3scene first.
+  --changed      only the scenes changed files reach (needs git; exit 2 when nothing changed)
+  --all          every top-level scene, whatever git says
   --frames N     frames to step (default 120 = 2 s of game time)
   --timeout S    wall-clock limit in seconds (default 20) → exit 2, E_SMOKE_TIMEOUT
   --json         machine-readable report
@@ -52,6 +61,8 @@ export interface SmokeIo {
 
 interface SmokeArgs {
   readonly scene?: string;
+  readonly changed: boolean;
+  readonly all: boolean;
   readonly frames: number;
   readonly timeoutSec: number;
   readonly json: boolean;
@@ -67,6 +78,8 @@ const parseSmokeArgs = (argv: readonly string[]): SmokeArgs | { error: string } 
   let frames = DEFAULT_FRAMES;
   let timeoutSec = DEFAULT_TIMEOUT_SEC;
   let json = false;
+  let changed = false;
+  let all = false;
   let project: string | undefined;
   let help = false;
   const valueOf = (arg: string, index: number): { value?: string; next: number } => {
@@ -78,6 +91,8 @@ const parseSmokeArgs = (argv: readonly string[]): SmokeArgs | { error: string } 
     const arg = argv[i];
     const name = arg.split('=')[0];
     if (arg === '--json') json = true;
+    else if (arg === '--changed') changed = true;
+    else if (arg === '--all') all = true;
     else if (arg === '--help' || arg === '-h') help = true;
     else if (name === '--frames' || name === '--timeout' || name === '--project') {
       const { value, next } = valueOf(arg, i);
@@ -95,7 +110,12 @@ const parseSmokeArgs = (argv: readonly string[]): SmokeArgs | { error: string } 
     else if (scene === undefined) scene = arg;
     else return { error: `one scene at a time (got ${scene} and ${arg})` };
   }
-  return { scene, frames, timeoutSec, json, project, help };
+  if (changed && all) return { error: '--changed and --all exclude each other' };
+  if (scene !== undefined && (changed || all))
+    return {
+      error: `${changed ? '--changed' : '--all'} picks the scenes; drop ${scene} or the flag`,
+    };
+  return { scene, changed, all, frames, timeoutSec, json, project, help };
 };
 
 const failure = (code: SmokeFailureCode, reason: string, scene?: string): SmokeFailure => ({
@@ -136,71 +156,47 @@ const readManifest = (root: string): ManifestBits => {
   }
 };
 
-const INSTANCE_LINE = /^\s*(?:-\s+)?instance:\s*["']?(?:res:\/\/)?([^"'\s#]+)/gm;
-
-/** Scenes no other scene instances, outside prefabs/ and ui/ folders — the ones a game starts in. */
-const topLevelScenes = (project: ProjectFiles): string[] => {
-  const scenes = project.scenes();
-  const instanced = new Set<string>();
-  for (const scene of scenes) {
-    let text: string;
-    try {
-      text = project.readText(scene);
-    } catch {
-      continue;
-    }
-    for (const match of text.matchAll(INSTANCE_LINE)) instanced.add(match[1].replace(/^\/+/, ''));
-  }
-  return scenes.filter(scene => !instanced.has(scene) && !/(^|\/)(prefabs?|ui)\//i.test(scene));
-};
-
-/** Project-relative scene path from the argument / manifest / convention, or a failure. */
+/** Project-relative path of the scene the argument names, or a failure. */
 export const resolveSmokeScene = (
   project: ProjectFiles,
   cwd: string,
-  requested: string | undefined,
-  manifestDefault: string | undefined
+  requested: string
 ): string | SmokeFailure => {
-  if (requested !== undefined) {
-    const candidates: string[] = [];
-    const stripped = requested.replace(/^res:\/\//i, '').replace(/^\/+/, '');
-    candidates.push(stripped.split(sep).join('/'));
-    const fromCwd = project.relativeOf(isAbsolute(requested) ? requested : resolve(cwd, requested));
-    if (fromCwd) candidates.push(fromCwd);
-    const found = candidates.find(candidate => project.has(candidate));
-    if (!found)
-      return failure(
-        'E_SMOKE_NO_SCENE',
-        `${requested} is not a file in the project (${project.root}).`
-      );
-    if (!found.endsWith('.pix3scene'))
-      return failure('E_SMOKE_NO_SCENE', `${found} is not a .pix3scene.`);
-    return found;
-  }
-  if (manifestDefault) {
-    if (project.has(manifestDefault)) return manifestDefault;
+  const candidates: string[] = [];
+  const stripped = requested.replace(/^res:\/\//i, '').replace(/^\/+/, '');
+  candidates.push(stripped.split(sep).join('/'));
+  const fromCwd = project.relativeOf(isAbsolute(requested) ? requested : resolve(cwd, requested));
+  if (fromCwd) candidates.push(fromCwd);
+  const found = candidates.find(candidate => project.has(candidate));
+  if (!found)
     return failure(
       'E_SMOKE_NO_SCENE',
-      `pix3project.yaml names defaultExportScenePath ${manifestDefault}, which does not exist.`
+      `${requested} is not a file in the project (${project.root}).`
     );
-  }
-  if (project.has('scenes/main.pix3scene')) return 'scenes/main.pix3scene';
-  const top = topLevelScenes(project);
-  if (top.length === 1) return top[0];
-  if (project.scenes().length === 0)
-    return failure('E_SMOKE_NO_SCENE', 'the project has no .pix3scene files.');
-  return failure(
-    'E_SMOKE_NO_SCENE',
-    `no default scene (no defaultExportScenePath, no scenes/main.pix3scene) and ${top.length === 0 ? 'no' : top.length} top-level scene${top.length === 1 ? '' : 's'}${top.length > 0 ? ` (${top.join(', ')})` : ''} — name one: pix3 smoke <scene>.`
-  );
+  if (!found.endsWith('.pix3scene'))
+    return failure('E_SMOKE_NO_SCENE', `${found} is not a .pix3scene.`);
+  return found;
 };
 
 export interface RunSmokeOptions {
   readonly projectRoot: string;
-  readonly scene?: string;
   readonly frames?: number;
   readonly timeoutSec?: number;
   readonly cwd?: string;
+}
+
+export interface RunOneSmokeOptions extends RunSmokeOptions {
+  /** The scene to run (res://, project-relative or a path). */
+  readonly scene: string;
+}
+
+export interface RunSmokeSetOptions extends RunSmokeOptions {
+  /** `--changed`: only the scenes changed files reach. */
+  readonly changedOnly?: boolean;
+  /** `--all`: every top-level scene. */
+  readonly all?: boolean;
+  /** Test seam for the git answer (null = no git); default asks git. */
+  readonly changedFiles?: readonly string[] | null;
 }
 
 /** Run one smoke job in a worker from the bundle in `bundleDir`. */
@@ -252,41 +248,90 @@ const runInWorker = (bundleDir: string, job: SmokeJob, timeoutSec: number): Prom
     );
   });
 
-/** Resolve the scene and run the game headless; the outcome is the report (or why it could not run). */
-export const runSmoke = async (options: RunSmokeOptions): Promise<SmokeOutcome> => {
-  const root = resolve(options.projectRoot);
+interface Prepared {
+  readonly root: string;
+  readonly project: ProjectFiles;
+  readonly manifest: ManifestBits;
+}
+
+const prepare = (projectRoot: string): Prepared | SmokeFailure => {
+  const root = resolve(projectRoot);
   if (!existsSync(root) || !statSync(root).isDirectory()) {
     return failure('E_SMOKE_NO_PROJECT', `${root} is not a folder.`);
   }
-  const project = new ProjectFiles(root);
-  const manifest = readManifest(root);
-  const scene = resolveSmokeScene(
-    project,
-    options.cwd ?? root,
-    options.scene,
-    manifest.defaultScene
-  );
-  if (typeof scene !== 'string') return scene;
-  const job: SmokeJob = {
-    projectRoot: root,
-    scene,
-    frames: options.frames ?? DEFAULT_FRAMES,
-    viewport: manifest.viewport,
-    localization: manifest.localization,
-    esbuildSpecifier: resolveEsbuild(),
-    fallbackResolveDir: cliPackageRoot(),
-  };
+  return { root, project: new ProjectFiles(root), manifest: readManifest(root) };
+};
+
+const jobFor = (prepared: Prepared, scene: string, options: RunSmokeOptions): SmokeJob => ({
+  projectRoot: prepared.root,
+  scene,
+  frames: options.frames ?? DEFAULT_FRAMES,
+  viewport: prepared.manifest.viewport,
+  localization: prepared.manifest.localization,
+  esbuildSpecifier: resolveEsbuild(),
+  fallbackResolveDir: cliPackageRoot(),
+});
+
+/** Run each scene in its own worker, one after another, from one smoke bundle. */
+const runScenes = async (
+  prepared: Prepared,
+  scenes: readonly string[],
+  options: RunSmokeOptions
+): Promise<SmokeOutcome[]> => {
+  const timeoutSec = options.timeoutSec ?? DEFAULT_TIMEOUT_SEC;
   try {
-    return await withSmokeBundle(dir =>
-      runInWorker(dir, job, options.timeoutSec ?? DEFAULT_TIMEOUT_SEC)
-    );
+    return await withSmokeBundle(async dir => {
+      const outcomes: SmokeOutcome[] = [];
+      for (const scene of scenes) {
+        outcomes.push(await runInWorker(dir, jobFor(prepared, scene, options), timeoutSec));
+      }
+      return outcomes;
+    });
   } catch (error) {
-    return failure(
-      'E_SMOKE_BUNDLE',
-      `could not build or load the smoke bundle: ${error instanceof Error ? error.message : String(error)}`,
-      scene
-    );
+    const reason = `could not build or load the smoke bundle: ${error instanceof Error ? error.message : String(error)}`;
+    return scenes.map(scene => failure('E_SMOKE_BUNDLE', reason, scene));
   }
+};
+
+/** Run one named scene headless; the outcome is the report (or why it could not run). */
+export const runSmoke = async (options: RunOneSmokeOptions): Promise<SmokeOutcome> => {
+  const prepared = prepare(options.projectRoot);
+  if ('code' in prepared) return prepared;
+  const scene = resolveSmokeScene(prepared.project, options.cwd ?? prepared.root, options.scene);
+  if (typeof scene !== 'string') return scene;
+  const [outcome] = await runScenes(prepared, [scene], options);
+  return outcome;
+};
+
+/** Which scenes a run with no scene argument covers (see `select-scenes.ts`). */
+export const selectScenesFor = (options: RunSmokeSetOptions): SmokeSelection | SmokeFailure => {
+  const prepared = prepare(options.projectRoot);
+  if ('code' in prepared) return prepared;
+  const selection = selectSmokeScenes(prepared.project, {
+    manifestDefault: prepared.manifest.defaultScene,
+    changedOnly: options.changedOnly,
+    all: options.all,
+    ...(options.changedFiles !== undefined ? { changedFiles: options.changedFiles } : {}),
+  });
+  return 'error' in selection ? failure('E_SMOKE_NO_SCENE', selection.error) : selection;
+};
+
+/** No scene argument: run every selected scene; `ok` only when each ran clean. */
+export const runSmokeSet = async (
+  options: RunSmokeSetOptions
+): Promise<SmokeRunSet | SmokeFailure> => {
+  const prepared = prepare(options.projectRoot);
+  if ('code' in prepared) return prepared;
+  const selection = selectScenesFor(options);
+  if ('code' in selection) return selection;
+  const runs = await runScenes(prepared, selection.scenes, options);
+  return {
+    ok: runs.every(run => !isSmokeFailure(run) && run.errors.length === 0),
+    selection: selection.mode,
+    reason: selection.reason,
+    ...(selection.changed ? { changed: selection.changed } : {}),
+    runs,
+  };
 };
 
 // --- Output --------------------------------------------------------------------------------------
@@ -385,6 +430,43 @@ export const formatSmokeJson = (outcome: SmokeOutcome, root: string): string => 
 export const smokeExitCode = (outcome: SmokeOutcome): number =>
   isSmokeFailure(outcome) ? 2 : outcome.errors.length > 0 ? 1 : 0;
 
+/** The worst run decides: 2 if any could not run, else 1 if any reported errors, else 0. */
+export const smokeSetExitCode = (set: SmokeRunSet): number =>
+  set.runs.reduce((worst, run) => Math.max(worst, smokeExitCode(run)), 0);
+
+const runStatus = (run: SmokeOutcome): string => {
+  if (isSmokeFailure(run)) return `could not run (${run.code})`;
+  const parts = [plural(run.errors.length, 'error'), plural(run.warnings.length, 'warning')];
+  return `${run.errors.length > 0 ? 'FAILED' : 'ok'} — ${run.frames} frames, ${parts.join(', ')}`;
+};
+
+export const formatSmokeSetHuman = (set: SmokeRunSet, root: string): string => {
+  const lines: string[] = [];
+  lines.push(`pix3 smoke: ${plural(set.runs.length, 'scene')} — ${set.reason}`);
+  for (const run of set.runs) {
+    lines.push(`  ${(run.scene ?? '?').padEnd(32)} ${runStatus(run)}`);
+  }
+  const details = set.runs.filter(
+    run =>
+      isSmokeFailure(run) ||
+      run.errors.length > 0 ||
+      run.warnings.length > 0 ||
+      set.runs.length === 1
+  );
+  for (const run of details) lines.push('', formatSmokeHuman(run, root).trimEnd());
+  if (set.runs.length > 1 && details.length === 0) {
+    lines.push('Run one scene for its details: pix3 smoke <scene>.');
+  }
+  return `${lines.join('\n')}\n`;
+};
+
+export const formatSmokeSetJson = (set: SmokeRunSet, root: string): string =>
+  `${JSON.stringify(
+    { ...set, runs: set.runs.map(run => JSON.parse(formatSmokeJson(run, root)) as unknown) },
+    null,
+    2
+  )}\n`;
+
 export const runSmokeCli = async (argv: readonly string[], io: SmokeIo): Promise<number> => {
   const args = parseSmokeArgs(argv);
   if ('error' in args) {
@@ -396,22 +478,30 @@ export const runSmokeCli = async (argv: readonly string[], io: SmokeIo): Promise
     return 0;
   }
   const root = args.project ? resolve(io.cwd, args.project) : findProjectRoot(io.cwd);
-  let outcome: SmokeOutcome;
+  const shownRoot = root ?? io.cwd;
+  const common = { frames: args.frames, timeoutSec: args.timeoutSec, cwd: io.cwd };
+  let outcome: SmokeOutcome | SmokeRunSet;
   if (!root) {
     outcome = failure(
       'E_SMOKE_NO_PROJECT',
       `no pix3project.yaml in ${io.cwd} or above — run inside a project or pass --project <dir>.`
     );
+  } else if (args.scene !== undefined) {
+    outcome = await runSmoke({ projectRoot: root, scene: args.scene, ...common });
   } else {
-    outcome = await runSmoke({
+    outcome = await runSmokeSet({
       projectRoot: root,
-      scene: args.scene,
-      frames: args.frames,
-      timeoutSec: args.timeoutSec,
-      cwd: io.cwd,
+      changedOnly: args.changed,
+      all: args.all,
+      ...common,
     });
   }
-  const shownRoot = root ?? io.cwd;
+  if ('runs' in outcome) {
+    io.stdout(
+      args.json ? formatSmokeSetJson(outcome, shownRoot) : formatSmokeSetHuman(outcome, shownRoot)
+    );
+    return smokeSetExitCode(outcome);
+  }
   if (args.json) io.stdout(formatSmokeJson(outcome, shownRoot));
   else io.stdout(formatSmokeHuman(outcome, shownRoot));
   return smokeExitCode(outcome);

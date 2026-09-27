@@ -70,10 +70,14 @@ Example — the layout a **recipe** project (`pix3 new`) ships; other projects d
    game with `game_run` (or `play_restart`), **passing `expect`** — the sha256 of every file you
    wrote, as `pix3 check --json` prints them under `files`. An answer with
    `disk_differs_from_agent`, or a non-empty `changedDuringRun`, is not green.
-   **No editor connected?** Run `pix3 smoke` after `check`: it runs the game headless in Node
-   for 2 s (`--frames N` for more) and exits 1 on any script throw, `console.error` or
-   unhandled rejection, naming script, frame and source line. Green means nothing threw; it
-   does not mean it plays (nothing was tapped or drawn).
+   **No editor connected?** `pix3 check`, then `pix3 smoke <the scene you changed>` — the
+   game is `pix3 smoke scenes/main.pix3scene`; the menu never presses PLAY headless, so a
+   smoke of the menu says nothing about the game. It runs that scene in Node for 2 s
+   (`--frames N` for more) and exits 1 on any script throw, `console.error` or unhandled
+   rejection, naming script, frame and source line. With no scene it runs several, a line
+   each: the scenes your uncommitted changes reach (git), else every top-level scene, game
+   first. Green means nothing threw; it does not mean it plays (nothing was tapped or drawn)
+   — so then tell the human what to press and what they should see.
 5. **Art: placeholder → SVG → `generate_asset`, never emoji.** Placeholder = `ColorRect2D`, or
    a near-white PNG in `sprites/` tinted with a `core:tint` effect. Better art = an SVG you
    write into `sprites/` — it works on a `Sprite2D` when the root has `xmlns` plus px
@@ -176,8 +180,10 @@ second one.
   sha256 of the raw bytes), `diagnostics`, `typecheck`, `mergeLog`, `kit`.
 - `pix3 read <file>` — print a file and confirm to the editor you read exactly these bytes.
 - `pix3 validate [paths…]` — scenes only, no type-check.
-- `pix3 smoke [scene] [--frames N] [--json]` — run the game headless (no browser) and report
+- `pix3 smoke [scene] [--frames N] [--json]` — run a scene headless (no browser) and report
   script throws with frame and stack, `console.error`, missing `res://` files; exit 1 on errors.
+  Name the game scene (`pix3 smoke scenes/main.pix3scene`); no scene = the scenes git changes
+  reach, else every top-level scene (`--all` forces that).
 - `pix3 tree [scene] [--types A,B] [--depth N] [--props] [--json]` — scene outline, one line
   per node; no scene = project overview.
 - **Live channel (optional).** When the human runs `pix3 serve` in this folder and connects the

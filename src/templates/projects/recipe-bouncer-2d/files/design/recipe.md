@@ -11,9 +11,8 @@ a rotated flipper works for free. No `core:Hitbox2D` on the ball, no rapier. (Th
 engine's own `scene.physics2d` / `core:PhysicsBody2D` solver exists for games that grow
 many interacting bodies — do not put both on the same ball.)
 
-The paddle is optional: for an idle / builder pinball, delete or hide it, make the drain
-relaunch instead of costing a life, and the bumpers plus the `ball-hit` juice carry the
-game.
+The paddle is optional: for an idle pinball, hide it and make the drain relaunch
+instead of costing a life — the bumpers and the `ball-hit` juice carry the game.
 
 The look: `PostProcess` (bloom + vignette) over bright accents, a tinted gradient
 sprite behind the board, `Label2D` glow on the HUD (drawn after post — it glows on
@@ -40,9 +39,6 @@ canvas, never blooms).
 
 `menu.pix3scene`: `menu-post-fx`, `menu-root`, `menu-background`, `menu-bg-glow`,
 `title-label` (title patched in), `title-rule`, `subtitle-label`, `play-button`.
-
-Parenting adds geometry: under `walls`/`paddles` a node is an oriented box, under
-`bumpers` a circle.
 
 Signals: `ball` emits `ball-hit` (kind, nodeId, speed, x, y — world) and `ball-drained`;
 `TouchRules` re-emits `touch-scored` / `touch-damaged` on `game-root`, where `GameRules`
@@ -91,14 +87,19 @@ tunables:
 `component` present → `set_component_property`, absent → `set_property`. Current values
 live in the scene; each script's schema clamps on write. Bloom lifts only what is
 *already* bright — brighten the colour or lower `bloomThreshold` (0.58), don't raise
-intensity.
+intensity. A pastel / light ground is the reverse: **raise** it (~0.9) or everything blooms.
 
 ## Extension points
 
-- **Pinball flippers.** Two oriented boxes under `paddles` (`flipper-left`,
-  `flipper-right`) pivoted at their inner ends; swap `PaddleController` for a flipper
-  script: holding `Key_ArrowLeft`/`Key_ArrowRight` lerps `rotation.z` −25° → +35° in
-  ~0.06 s, release lerps back.
+- **Pinball flippers.** Two boxes **directly** under `paddles` (`flipper-left`,
+  `flipper-right`); swap `PaddleController` for a flipper script. `BallBody` reads each
+  direct child as a box centred on the node (a pivot `Group2D` there would itself be
+  the collider), so pivot in code: fix each flipper's **outer** end near its wall, tip
+  toward the centre, and every frame put the centre at `pivot ± (width/2)(cos θ, sin θ)`.
+  Holding `Key_ArrowLeft`/`Key_ArrowRight` lerps `rotation.z` −25° → +35° in ~0.06 s
+  (the right flipper mirrored: +25° → −35°); release lerps back. Add inlane guides
+  (boxes under `walls` from each side wall to a flipper's outer end), or the ball
+  drains around the flippers.
 - **Juice is one-liners — add it WITH the mechanic, never as a later pass.**
   `scene.audio.sfx('score')`, `scene.juice.burst({x, y})`,
   `floatText('+100', { at: node })`, `punchScale`/`shake`/`flash`,

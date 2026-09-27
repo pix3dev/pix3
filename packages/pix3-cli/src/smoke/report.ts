@@ -117,6 +117,21 @@ export interface SmokeFailure {
 
 export type SmokeOutcome = SmokeReport | SmokeFailure;
 
+/**
+ * `pix3 smoke` with no scene argument: several scenes, each run on its own (`runs`, in run order).
+ * `ok` = every run ran and reported no error.
+ */
+export interface SmokeRunSet {
+  readonly ok: boolean;
+  /** `changed` = the scenes uncommitted changes reach; `all` = every top-level scene. */
+  readonly selection: 'changed' | 'all';
+  /** Why these scenes, in words. */
+  readonly reason: string;
+  /** Project files git reported as changed, when git was asked. */
+  readonly changed?: readonly string[];
+  readonly runs: readonly SmokeOutcome[];
+}
+
 /** Every code `pix3 smoke` can print — the kit drift spec holds the kit's mentions to this list. */
 export const SMOKE_CODES: Readonly<
   Record<SmokeErrorCode | SmokeWarningCode | SmokeFailureCode, 'error' | 'warning' | 'failure'>

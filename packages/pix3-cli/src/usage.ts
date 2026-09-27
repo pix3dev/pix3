@@ -23,8 +23,9 @@ Usage:
         [--no-hydrate] [--offline] version check (exit 1 on errors)
         [--project <dir>]
   pix3 smoke [scene] [--json]      Run the game headless in Node for N frames (no browser):
-        [--frames N] [--timeout S] script throws with frame + stack, console errors, missing
-        [--project <dir>]          res:// (exit 1 on errors, 2 when it cannot run)
+        [--changed | --all]        script throws with frame + stack, console errors, missing
+        [--frames N] [--timeout S] res:// (exit 1 on errors, 2 when it cannot run). No scene =
+        [--project <dir>]          the scenes git changes reach, else every top-level scene
   pix3 tree [scene] [--json]       One line per node (type#id, pos, size, layout, components,
         [--depth N] [--types A,B]  prefab instances); no scene = project overview
         [--props] [--project <dir>]

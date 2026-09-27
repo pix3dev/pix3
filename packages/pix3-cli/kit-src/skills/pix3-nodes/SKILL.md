@@ -176,7 +176,9 @@ No transform — keys sit flat in `properties`. The first active one in the tree
 | `vignetteEnabled` / `vignetteOffset` / `vignetteDarkness` | bool / number / number | | |
 | `chromaticAberrationEnabled` / `chromaticAberrationOffset` | bool / number | | |
 
-Brighten the colour or lower `bloomThreshold` rather than raising `bloomIntensity`.
+Brighten the colour or lower `bloomThreshold` rather than raising `bloomIntensity`. The
+opposite for a pastel or light look: a pale ground sits above a low threshold and the whole
+screen blooms — **raise** `bloomThreshold` (0.85–0.95) so only the accents glow.
 
 ## Example — a new HUD label anchored top-right
 

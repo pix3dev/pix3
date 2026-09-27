@@ -96,7 +96,7 @@ it counts down and becomes a deadline (see `winMode`).
   Grid games usually need no collision at all — compare cell coordinates.
 - **Spawning.** `scene.instantiate` a prefab into a container node, `queueFree`
   it when it leaves the field, and add that container to `GameRules.freezeNodes`
-  so it stops on game over. Give your spawner a `clear()` method and `resetRun()`
+  so it — and every instance under it — stops on game over. Give your spawner a `clear()` method and `resetRun()`
   will empty the field for you.
 - **Juice is one-liners — add it WITH the mechanic, never as a later pass.**
   `scene.juice.burst({x, y})`, `floatText('+5', {at: node})`, `punchScale` /

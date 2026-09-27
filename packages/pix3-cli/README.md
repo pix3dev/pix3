@@ -12,7 +12,7 @@ pix3 serve [--project <dir>] [--port <n>] [--new-token]
 pix3 validate [paths…] [--json]               strict scene check
 pix3 check [--json] [--no-hydrate] [--offline] [--project <dir>]
                                               validate + tsc over the scripts + merge-log + versions
-pix3 smoke [scene] [--frames N] [--timeout S] [--json] [--project <dir>]
+pix3 smoke [scene] [--changed|--all] [--frames N] [--timeout S] [--json] [--project <dir>]
                                               run the game headless in Node, report what threw
 pix3 tree [scene] [--depth N] [--types A,B] [--props] [--json] [--project <dir>]
                                               scene outline, one line per node; no scene = overview
@@ -150,8 +150,21 @@ Spine skeletons referenced by nodes are not built; images a script loads through
 browser property a script reads is recorded, and an error right after such a read is
 `E_SMOKE_DOM` with the read attached (`domAccess`).
 
-Scene: the argument (`res://`, project-relative or a path), else `defaultExportScenePath`, else
-`scenes/main.pix3scene`, else the only scene no other scene instances outside `prefabs/` / `ui/`.
+Scene: the argument (`res://`, project-relative or a path) runs that one scene. With no argument
+several run, one after another from one bundle, a line each (`src/smoke/select-scenes.ts`):
+
+1. In a git work tree with uncommitted changes (staged, unstaged or untracked): the **top-level**
+   scenes those changes reach — the scene itself, a prefab / `scenes/ui/` overlay it instances, a
+   script exporting a class it attaches as `user:X`, a `res://` file it names. `--changed` forces
+   this (exit 2 without git or without changes).
+2. Otherwise — no git, nothing changed, a changed scene/script that reaches no top-level scene (a
+   helper module, an unused prefab), or a changed `pix3project.yaml` — **every** top-level scene
+   (not instanced by another, not under `prefabs/` / `ui/`), `scenes/main.pix3scene` first (the
+   editor's startup scene, where the game lives), then `defaultExportScenePath`, then by path.
+   `--all` forces this.
+
+It never picks `defaultExportScenePath` alone any more: in every recipe that is the menu, input is
+empty, PLAY is never pressed, and a game whose `onStart` throws used to smoke green.
 
 | Code | |
 | --- | --- |
@@ -166,14 +179,16 @@ Scene: the argument (`res://`, project-relative or a path), else `defaultExportS
 | `W_SMOKE_PENDING_COMPONENT` | A component type is not registered — it never runs |
 | `W_SMOKE_CONSOLE_WARN`, `W_SMOKE_LOADER`, `W_SMOKE_STUBBED_IMPORT`, `W_SMOKE_STOPPED` | `console.warn`, loader warnings, an import replaced by `{}`, the game stopped itself |
 
-Exit 0 = no errors (warnings allowed), 1 = errors, 2 = could not run: `E_SMOKE_NO_PROJECT`,
+Exit 0 = no errors (warnings allowed), 1 = errors, 2 = could not run (with several scenes, the
+worst run decides): `E_SMOKE_NO_PROJECT`,
 `E_SMOKE_NO_SCENE`, `E_SMOKE_BUNDLE`, `E_SMOKE_UNSUPPORTED` (no esbuild), `E_SMOKE_TIMEOUT`,
 `E_SMOKE_CRASH`. `--json` prints `{ ok, scene, frames, framesRequested, firstFrameOk, errors:
 [{ code, frame, script?, nodeId?, nodeName?, phase?, message, stack?, domAccess? }], warnings,
 nodes: { start, end }, timingsMs: { compile, load, firstFrame, step: { total, mean, p95, max },
 total }, scripts, domMissing, notes, game, logs }` — `game` is the `registerGameDebug` provider's
 `snapshot()` at the end (when the game registers one), `logs` the first `console.log` lines,
-frame-stamped. Stacks are source-mapped to the project's files.
+frame-stamped. Stacks are source-mapped to the project's files. With no scene argument `--json`
+prints `{ ok, selection: "changed" | "all", reason, changed?, runs: [<that report, per scene>] }`.
 
 A green smoke run means nothing threw for N frames without input. It does not mean the game
 plays: nothing was tapped, nothing was drawn.

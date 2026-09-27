@@ -160,7 +160,9 @@ export const compileAndImportScripts = async (
       logLevel: 'silent',
       // Stacks point at the project's own files (Node applies it: `setSourceMapsEnabled`).
       sourcemap: 'inline',
-      sourceRoot: project.root,
+      // With a trailing separator: consumers concatenate sourceRoot + source, and without it
+      // every stack read `<root>scripts/Foo.ts` (the root never stripped from the report).
+      sourceRoot: `${project.root.replace(/[\\/]+$/, '')}/`,
       loader: {
         '.glsl': 'text',
         '.vert': 'text',

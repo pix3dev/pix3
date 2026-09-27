@@ -15,7 +15,7 @@ the human exactly what to press and what they should see.
 pix3 check            # validate (both levels) + tsc over the scripts + merge-log + versions
 pix3 check --json     # the same, machine-readable
 pix3 validate [paths] [--json]   # scenes/prefabs only, no type-check
-pix3 smoke [scene] [--json]      # then: run the game headless for 120 frames, report what threw
+pix3 smoke scenes/main.pix3scene # then: run the game headless for 120 frames, report what threw
 pix3 tree [scene]                # outline of a scene (or of the project) instead of reading it
 ```
 
@@ -70,16 +70,28 @@ when scripts cannot be loaded) those are **not** checked — say so if your chan
 
 ### `pix3 smoke` — when no editor is connected
 
-`pix3 smoke` (after a green `check`) runs the entry scene in Node: your scripts compiled, the
-scene loaded by the real loader, `--frames N` steps of 1/60 s (default 120). Exit 1 lists every
+`pix3 smoke <scene>` (after a green `check`) runs that scene in Node: your scripts compiled, the
+scene loaded by the real loader, `--frames N` steps of 1/60 s (default 120). **Name the scene you
+changed** — the game is `pix3 smoke scenes/main.pix3scene`. Input is empty, so a menu never
+presses PLAY: smoking the menu (the build's entry scene) proves nothing about the game. With no
+scene, smoke runs several, one line each and exit 1 if any fails: the top-level scenes your
+uncommitted changes reach (git: the scene, a prefab or overlay it instances, a `user:` script it
+attaches), else — no git, nothing changed, or a change it cannot trace — every top-level scene,
+`scenes/main.pix3scene` first (`--changed` / `--all` force either; `--json` then answers
+`{ ok, selection, reason, runs: [one report per scene] }`). Exit 1 lists every
 `E_SMOKE_SCRIPT` (a hook threw: script, node, frame — 0 = `onAttach`/`onStart` — and a stack
 pointing at your `.ts` line), `E_SMOKE_CONSOLE_ERROR`, `E_SMOKE_UNHANDLED` (a rejected promise
 nobody awaited), `E_SMOKE_DOM` (a browser API the headless run lacks — `domAccess` names it; a
 browser-only feature, not necessarily a bug: say so). `W_SMOKE_MISSING_RESOURCE` is a `res://`
 typo. Exit 2 = it could not run (`E_SMOKE_NO_SCENE`: pass the scene; `E_SMOKE_TIMEOUT`: a loop
 that never ends). Nothing is drawn, heard or tapped: a green smoke run proves the game starts and
-runs without throwing, not that it plays — report it as exactly that. With the live channel,
-`game_run` (section 3) is the stronger check.
+runs without throwing, not that it plays — report it as exactly that, and tell the human what to
+press and what they should see (section 4). With the live channel, `game_run` (section 3) is the
+stronger check.
+
+**No live channel: the fallback, in this order** — `pix3 check` (green), then
+`pix3 smoke <the scene you changed>` (green), then ask the human to press Play in that scene,
+naming what to press and what they should see.
 
 ## 2. Merge-log: the editor kept the human's value
 

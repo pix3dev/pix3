@@ -22,7 +22,14 @@
  * and agents can assert on values instead of guessing from pixels. Add your own
  * state to `snapshot()` as you extend the rules — keep every value JSON-safe.
  */
-import { Button2D, Label2D, Script, registerGameDebug, type PropertySchema } from '@pix3/runtime';
+import {
+  Button2D,
+  Label2D,
+  NodeBase,
+  Script,
+  registerGameDebug,
+  type PropertySchema,
+} from '@pix3/runtime';
 
 type WinMode = 'score' | 'time' | 'survive';
 
@@ -57,7 +64,8 @@ export class GameRules extends Script {
       menuButton: 'menu-button',
       menuScene: 'res://scenes/menu.pix3scene',
       gameScene: 'res://scenes/main.pix3scene',
-      // Comma-separated node ids frozen (all their components disabled) on game over.
+      // Comma-separated node ids frozen on game over: every component on the node and
+      // on everything under it (spawned instances included) is disabled.
       freezeNodes: 'ball,paddle',
     };
   }
@@ -154,8 +162,12 @@ export class GameRules extends Script {
     });
 
     const owner = this.node;
-    owner?.connect('touch-scored', this, (...args: unknown[]) => this.addScore(Number(args[0]) || 0));
-    owner?.connect('touch-damaged', this, (...args: unknown[]) => this.takeDamage(Number(args[0]) || 0));
+    owner?.connect('touch-scored', this, (...args: unknown[]) =>
+      this.addScore(Number(args[0]) || 0)
+    );
+    owner?.connect('touch-damaged', this, (...args: unknown[]) =>
+      this.takeDamage(Number(args[0]) || 0)
+    );
     // The HUD announces itself once it is connected, so it never misses the
     // opening values (its onStart runs after this one).
     owner?.connect('hud-ready', this, () => this.broadcast());
@@ -230,7 +242,11 @@ export class GameRules extends Script {
   private takeDamage(amount: number): void {
     if (this.over) return;
     this.lives = Math.max(0, this.lives - Math.max(1, amount));
-    this.node?.emit('lives-changed', this.lives, Math.max(1, Number(this.config.startingLives) || 1));
+    this.node?.emit(
+      'lives-changed',
+      this.lives,
+      Math.max(1, Number(this.config.startingLives) || 1)
+    );
   }
 
   private broadcast(): void {
@@ -254,16 +270,22 @@ export class GameRules extends Script {
     this.setNodeVisible(String(this.config.resultNode ?? ''), true);
     this.setButtonEnabled(String(this.config.retryButton ?? ''), true);
 
+    // A freeze node freezes its whole subtree: the spawners' own components AND
+    // every instance they spawned under themselves (a chaser's script, a pickup's
+    // pop-in), so nothing keeps moving over the result card.
     for (const id of String(this.config.freezeNodes ?? '').split(',')) {
-      const node = this.findNode(id.trim());
-      if (!node) continue;
-      for (const component of node.components) {
-        // Only remember what WE switched off: reviving everything on reset would
-        // silently enable a component the scene author had left disabled.
-        if (!component.enabled) continue;
-        component.enabled = false;
-        this.frozen.push(component);
-      }
+      const root = this.findNode(id.trim());
+      if (!root) continue;
+      root.traverse(object => {
+        if (!(object instanceof NodeBase)) return;
+        for (const component of object.components) {
+          // Only remember what WE switched off: reviving everything on reset would
+          // silently enable a component the scene author had left disabled.
+          if (!component.enabled) continue;
+          component.enabled = false;
+          this.frozen.push(component);
+        }
+      });
     }
 
     // The run's last impression: a procedural jingle (no asset needed) and, on a
