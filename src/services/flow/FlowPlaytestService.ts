@@ -476,19 +476,17 @@ export class FlowPlaytestService {
   }
 
   private async probeControls(projectId: string): Promise<FlowSmokeResult | null> {
-    const controlsResult = (await this.tools.execute('game_controls').catch(() => null)) as
-      | {
-          ok?: boolean;
-          error?: string;
-          controls?: Array<{
-            name: string;
-            visible?: boolean;
-            enabled?: boolean;
-            reach?: string;
-            reachNote?: string;
-          }>;
-        }
-      | null;
+    const controlsResult = (await this.tools.execute('game_controls').catch(() => null)) as {
+      ok?: boolean;
+      error?: string;
+      controls?: Array<{
+        name: string;
+        visible?: boolean;
+        enabled?: boolean;
+        reach?: string;
+        reachNote?: string;
+      }>;
+    } | null;
     if (appState.project.id !== projectId) {
       return this.result('skipped', 'The controls probe was cancelled.');
     }
@@ -564,10 +562,7 @@ export class FlowPlaytestService {
       if (isNotFound) {
         entries = [];
       } else {
-        return this.result(
-          'inconclusive',
-          `Failed to read routines directory: ${message}`
-        );
+        return this.result('inconclusive', `Failed to read routines directory: ${message}`);
       }
     }
     const routineFiles = entries
@@ -579,9 +574,12 @@ export class FlowPlaytestService {
       if (signal?.aborted || appState.project.id !== projectId) {
         return this.result('skipped', 'The routine probe was cancelled.');
       }
-      const routineResult = (await this.tools.execute('game_run', { routine: routineName }).catch(
-        error => ({ ok: false, error: error instanceof Error ? error.message : String(error) })
-      )) as
+      const routineResult = (await this.tools
+        .execute('game_run', { routine: routineName })
+        .catch(error => ({
+          ok: false,
+          error: error instanceof Error ? error.message : String(error),
+        }))) as
         | Awaited<ReturnType<GameTestService['runRoutine']>>
         | { ok: boolean; error?: string };
       if (signal?.aborted || appState.project.id !== projectId) {
@@ -593,8 +591,10 @@ export class FlowPlaytestService {
         'ok' in routineResult &&
         routineResult.ok === true &&
         !('routine' in routineResult && routineResult.routine?.macro) &&
-        !('expectations' in routineResult &&
-          routineResult.expectations?.some(expectation => !expectation.met)) &&
+        !(
+          'expectations' in routineResult &&
+          routineResult.expectations?.some(expectation => !expectation.met)
+        ) &&
         !('newErrors' in routineResult && (routineResult.newErrors?.length ?? 0) > 0);
 
       if (!ok) {
