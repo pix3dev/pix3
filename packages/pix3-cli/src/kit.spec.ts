@@ -609,7 +609,9 @@ describe('pix3 kit', () => {
       });
       const agentsBefore = sha256(join(copy, 'AGENTS.md'));
       const tsconfigBefore = sha256(join(copy, 'tsconfig.json'));
-      const report = installKit(copy, kit, { devMcp: false });
+      // `update`: the checkout's kit may be from an older CLI; without it the recorded version stays
+      // the old one (by design) and the version assertion below would depend on DeepCore's state.
+      const report = installKit(copy, kit, { devMcp: false, update: true });
       expect(report.types).toBe('own-tsconfig');
       expect(sha256(join(copy, 'AGENTS.md'))).toBe(agentsBefore);
       expect(sha256(join(copy, 'tsconfig.json'))).toBe(tsconfigBefore);
