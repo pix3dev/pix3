@@ -81,6 +81,31 @@ The only untextured 2D fill. Build the game from these first, swap to sprites la
 There is no tint property: colour a sprite with a `core:tint` effect. Recipe placeholders are
 near-white `sprites/ph-*.png` + `effects: [{ type: core:tint, params: { color, amount: 1 } }]`.
 
+### An SVG you write as a sprite
+
+A `.svg` in `sprites/` works as a `Sprite2D` / `Button2D` texture in the editor, in play mode and
+in the single-file export — **when a browser `<img>` would decode it**, because that is how every
+texture loads. The browser rasterises it once, at its own `width`/`height`, and the GPU scales that
+bitmap. So:
+
+```xml
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
+  <circle cx="64" cy="64" r="56" fill="#ffcf33" stroke="#8a5a00" stroke-width="8"/>
+</svg>
+```
+
+- `xmlns="http://www.w3.org/2000/svg"` on the root — without it nothing renders.
+- `width` and `height` in px **and** a matching `viewBox`. Without a size the browser invents a
+  300x150 box (art letterboxed or cropped, the sprite auto-sizes to 300x150).
+- Make `width`/`height` the size the node draws it at (the node's `width`/`height`), or larger —
+  a 32px SVG drawn at 256px is a blurry bitmap, not crisp vectors.
+- Self-contained: no `<image href="http…">`, no `<use href="other.svg#…">`, no CSS `url(file)`,
+  no `@import`, no webfonts — none of them load when an SVG is an image (only `#id` and `data:`
+  do). Text only with generic families (`font-family="sans-serif"`); better, draw shapes.
+
+`pix3 validate` checks every `.svg` a scene references: `E_SVG_INVALID` (no `<svg>` root or no
+xmlns), `E_SVG_NO_SIZE`, `W_SVG_VIEWBOX_ONLY`, `W_SVG_EXTERNAL_REF`.
+
 ## Label2D
 
 | Key | Type | Default | Notes |
@@ -177,5 +202,7 @@ Brighten the colour or lower `bloomThreshold` rather than raising `bloomIntensit
 
 ## Known gaps
 
-- An `.svg` file on a `Sprite2D` (the kit's "write an SVG" art step) is not verified in the
-  editor, play mode or the single-file export yet — check that it renders, or fall back to a PNG.
+- On a **cloud** project (opened from the Pix3 server, not a folder or `pix3 serve`) an `.svg`
+  sprite renders on first load and then goes blank: the local cache hands SVGs back as
+  `text/plain`, which no browser decodes as an image. Folder and `pix3 serve` projects are fine;
+  on cloud, use a PNG.

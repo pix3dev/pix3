@@ -15,6 +15,8 @@ the human exactly what to press and what they should see.
 pix3 check            # validate (both levels) + tsc over the scripts + merge-log + versions
 pix3 check --json     # the same, machine-readable
 pix3 validate [paths] [--json]   # scenes/prefabs only, no type-check
+pix3 smoke [scene] [--json]      # then: run the game headless for 120 frames, report what threw
+pix3 tree [scene]                # outline of a scene (or of the project) instead of reading it
 ```
 
 If `pix3` is not on your PATH, run the pinned one from `.mcp.json`: `npx -y @pix3/cli@{{version}} check`.
@@ -54,6 +56,8 @@ Codes and what they usually mean:
 | `E_MISSING_RESOURCE` | `res://` path typo, or the asset was never written |
 | `E_MISSING_PREFAB`, `E_PREFAB_*`, `E_DUPLICATE_ID` | Fix the `instance:` path; a prefab file needs exactly one root; ids are unique |
 | `E_EMOJI_AS_ART` | A `label`/`text` that is only emoji — use a sprite or `ColorRect2D` |
+| `E_SVG_INVALID`, `E_SVG_NO_SIZE`, `W_SVG_VIEWBOX_ONLY` | An `.svg` sprite without `xmlns` or without `width`/`height` in px — see the SVG template in `pix3-nodes` |
+| `W_SVG_EXTERNAL_REF` | An `.svg` that links a file, URL or font — it will draw without it; inline it |
 | `E_TYPE` | A TypeScript error in a script (`TS2339: Property … does not exist …`) |
 | `E_TYPECHECK_UNAVAILABLE` | TypeScript could not be installed — run the printed command |
 | `E_DEPENDENCIES_MISSING` | A project with its own `tsconfig.json` and no `node_modules` — `npm install`; tsc was skipped |
@@ -63,6 +67,19 @@ Codes and what they usually mean:
 `pix3 validate --help` and `pix3 check --help` list every code. Level 2 of validate compiles
 and loads your scripts to check the properties of `user:` components; with `--no-hydrate` (or
 when scripts cannot be loaded) those are **not** checked — say so if your change depends on them.
+
+### `pix3 smoke` — when no editor is connected
+
+`pix3 smoke` (after a green `check`) runs the entry scene in Node: your scripts compiled, the
+scene loaded by the real loader, `--frames N` steps of 1/60 s (default 120). Exit 1 lists every
+`E_SMOKE_SCRIPT` (a hook threw: script, node, frame — 0 = `onAttach`/`onStart` — and a stack
+pointing at your `.ts` line), `E_SMOKE_CONSOLE_ERROR`, `E_SMOKE_UNHANDLED` (a rejected promise
+nobody awaited), `E_SMOKE_DOM` (a browser API the headless run lacks — `domAccess` names it; a
+browser-only feature, not necessarily a bug: say so). `W_SMOKE_MISSING_RESOURCE` is a `res://`
+typo. Exit 2 = it could not run (`E_SMOKE_NO_SCENE`: pass the scene; `E_SMOKE_TIMEOUT`: a loop
+that never ends). Nothing is drawn, heard or tapped: a green smoke run proves the game starts and
+runs without throwing, not that it plays — report it as exactly that. With the live channel,
+`game_run` (section 3) is the stronger check.
 
 ## 2. Merge-log: the editor kept the human's value
 
@@ -200,7 +217,9 @@ with:
   "press Play in `scenes/main.pix3scene`, tap the gold stars — the combo label top-right should
   count x2, x3";
 - what you could not verify (feel, audibility, small shakes, anything the channel cannot see);
-- placeholders you left.
+- placeholders you left — art (`ColorRect2D`, tinted PNGs, hand-written SVGs) and sound. A sound
+  you made with `pix3 sfx` is a real `.wav`, not a placeholder in the file sense, but say it is a
+  synthesised stand-in and that you could not listen to it.
 
 If the human reports an error from the editor, ask for the exact text (the editor's console
 or the load error shown on the scene), fix the first one, and check again.

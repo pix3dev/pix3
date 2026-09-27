@@ -653,6 +653,110 @@ describe('pix3 validate command', () => {
   });
 });
 
+describe('level 1: SVG sprites', () => {
+  const X = 'xmlns="http://www.w3.org/2000/svg"';
+  const RECT = '<rect width="64" height="32" fill="#fc3"/>';
+  const sprite = (id: string, file: string): string =>
+    [
+      `  - id: ${id}`,
+      '    type: Sprite2D',
+      '    properties:',
+      `      texture: { type: texture, url: res://sprites/${file} }`,
+    ].join('\n') + '\n';
+  const svgRun = (svgs: Record<string, string>): Promise<ValidateReport> =>
+    run(
+      {
+        ...Object.fromEntries(
+          Object.entries(svgs).map(([name, text]) => [`sprites/${name}`, text])
+        ),
+        'scenes/a.pix3scene': scene(
+          Object.keys(svgs)
+            .map((name, index) => sprite(`s${index}`, name))
+            .join('')
+        ),
+      },
+      { hydrate: false }
+    );
+  const svgCodes = (report: ValidateReport): Record<string, string[]> => {
+    const out: Record<string, string[]> = {};
+    for (const d of report.diagnostics) {
+      if (!d.code.includes('_SVG_')) continue;
+      const file = /res:\/\/sprites\/(\S+?):/.exec(d.message)?.[1] ?? '?';
+      (out[file] ??= []).push(d.code);
+    }
+    return out;
+  };
+
+  it('a sized SVG (width + height, or one of them + viewBox) passes', async () => {
+    const report = await svgRun({
+      'ok.svg': `<?xml version="1.0" encoding="UTF-8"?>\n<!-- art -->\n<svg ${X} width="64" height="32" viewBox="0 0 64 32">${RECT}</svg>`,
+      'px.svg': `<svg ${X} width="64px" height="32px">${RECT}</svg>`,
+      'derived.svg': `<svg ${X} width="64" viewBox="0 0 64 32">${RECT}</svg>`,
+      'local-refs.svg': `<svg ${X} width="8" height="8"><defs><linearGradient id="g"/></defs><rect fill="url(#g)"/><use href="#g"/><image href="data:image/png;base64,AAAA"/></svg>`,
+    });
+    expect(svgCodes(report)).toEqual({});
+  });
+
+  it('E_SVG_NO_SIZE: no width/height and no viewBox, or one dimension without a viewBox', async () => {
+    const report = await svgRun({
+      'bare.svg': `<svg ${X}>${RECT}</svg>`,
+      'half.svg': `<svg ${X} width="64">${RECT}</svg>`,
+    });
+    const found = find(report, 'E_SVG_NO_SIZE');
+    expect(found.map(d => d.path)).toEqual([
+      'root[0].properties.texture.url',
+      'root[1].properties.texture.url',
+    ]);
+    expect(found[0]).toMatchObject({ nodeId: 's0', line: 6 });
+    expect(found[1].message).toContain('defaults to 150px');
+  });
+
+  it('W_SVG_VIEWBOX_ONLY: a viewBox without width/height (% counts as none)', async () => {
+    const report = await svgRun({
+      'vb.svg': `<svg ${X} viewBox="0 0 64 32">${RECT}</svg>`,
+      'pct.svg': `<svg ${X} width="100%" height="100%" viewBox="0 0 64 32">${RECT}</svg>`,
+    });
+    expect(find(report, 'W_SVG_VIEWBOX_ONLY').map(d => d.nodeId)).toEqual(['s0', 's1']);
+    expect(find(report, 'W_SVG_VIEWBOX_ONLY')[0].fix).toContain('add width/height in px');
+    expect(report.errorCount).toBe(0);
+  });
+
+  it('W_SVG_EXTERNAL_REF: <image href=http…>, <use href=file>, url() and @import', async () => {
+    const report = await svgRun({
+      'ext.svg': [
+        `<svg ${X} xmlns:xlink="http://www.w3.org/1999/xlink" width="8" height="8">`,
+        '<style>@import url("https://fonts.example/a.css"); .a { fill: url(pattern.png) }</style>',
+        '<image href="https://example.com/a.png"/><use xlink:href="parts.svg#coin"/></svg>',
+      ].join(''),
+    });
+    const [ext] = find(report, 'W_SVG_EXTERNAL_REF');
+    expect(ext.message).toContain('href="https://example.com/a.png"');
+    expect(ext.message).toContain('href="parts.svg#coin"');
+    expect(ext.message).toContain(', …');
+  });
+
+  it('E_SVG_INVALID: no xmlns, or not an SVG at all; reported once per file per scene', async () => {
+    const report = await svgRun({
+      'noxmlns.svg': `<svg width="64" height="32">${RECT}</svg>`,
+      'html.svg': '<html><body>not an svg</body></html>',
+    });
+    expect(svgCodes(report)).toEqual({
+      'noxmlns.svg': ['E_SVG_INVALID'],
+      'html.svg': ['E_SVG_INVALID'],
+    });
+    expect(find(report, 'E_SVG_INVALID')[0].message).toContain('no xmlns');
+
+    const twice = await run(
+      {
+        'sprites/bare.svg': '<svg xmlns="http://www.w3.org/2000/svg"/>',
+        'scenes/a.pix3scene': scene(sprite('a', 'bare.svg') + sprite('b', 'bare.svg')),
+      },
+      { hydrate: false }
+    );
+    expect(twice.diagnostics.filter(d => d.code === 'E_SVG_NO_SIZE')).toHaveLength(1);
+  });
+});
+
 describe('fixture coverage', () => {
   it('covers every diagnostic code', () => {
     expect(Object.keys(DIAGNOSTIC_CODES).filter(code => !covered.has(code))).toEqual([]);

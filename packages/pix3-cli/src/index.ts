@@ -208,9 +208,36 @@ const main = async (): Promise<number> => {
       process.stdout.write(`acked ${record.path} ${record.sha256}\n`);
       return 0;
     }
+    case 'smoke': // own argument parsing; the game runs in a worker from the smoke bundle
+      return (await import('./smoke/command.ts')).runSmokeCli(
+        process.argv.slice(process.argv.indexOf('smoke') + 1),
+        {
+          cwd: process.cwd(),
+          stdout: text => process.stdout.write(text),
+          stderr: text => process.stderr.write(text),
+        }
+      );
+    case 'tree': // own argument parsing; plain YAML (the runtime loads only for --props)
+      return (await import('./tree/command.ts')).runTreeCli(
+        process.argv.slice(process.argv.indexOf('tree') + 1),
+        {
+          cwd: process.cwd(),
+          stdout: text => process.stdout.write(text),
+          stderr: text => process.stderr.write(text),
+        }
+      );
     case 'validate': // own argument parsing (`--json` takes no value); runtime loads lazily
       return (await import('./validate/entry.ts')).runValidateCli(
         process.argv.slice(process.argv.indexOf('validate') + 1)
+      );
+    case 'sfx': // own argument parsing; offline synth, no dependencies
+      return (await import('./sfx/command.ts')).runSfx(
+        process.argv.slice(process.argv.indexOf('sfx') + 1),
+        {
+          cwd: process.cwd(),
+          stdout: text => process.stdout.write(text),
+          stderr: text => process.stderr.write(text),
+        }
       );
     default:
       process.stderr.write(`pix3: unknown command "${command}".\n\n${USAGE}`);

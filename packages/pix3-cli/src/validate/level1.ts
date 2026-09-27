@@ -23,6 +23,7 @@ import {
 import { diagnostic, type Diagnostic, type DiagnosticInput } from './diagnostics.ts';
 import { toProjectPath, type ProjectFiles } from './project.ts';
 import { nearest } from './suggest.ts';
+import { inspectProjectSvg, isSvgPath } from './svg.ts';
 import type { UserScriptIndex } from './user-scripts.ts';
 import { checkDiskKindValue, checkPropertyValue, isResourceProperty } from './values.ts';
 import {
@@ -171,6 +172,8 @@ class SceneChecker {
   readonly diagnostics: Diagnostic[] = [];
   readonly references = new Set<string>();
   usesUserComponents = false;
+  /** SVGs already reported for this scene (one report per file, at its first reference). */
+  private readonly svgChecked = new Set<string>();
   private readonly seenIds = new Map<string, string>();
 
   constructor(
@@ -555,7 +558,10 @@ class SceneChecker {
     const target = toProjectPath(reference);
     if (!target) return;
     this.references.add(target);
-    if (this.env.project.has(target)) return;
+    if (this.env.project.has(target)) {
+      if (isSvgPath(target)) this.checkSvg(target, reference, nodeId, at);
+      return;
+    }
     const caseMatch = this.env.project.files.find(
       file => file.toLowerCase() === target.toLowerCase()
     );
@@ -566,6 +572,26 @@ class SceneChecker {
       fix: caseMatch ? `the file is res://${caseMatch} (case differs)` : undefined,
       at,
     });
+  }
+
+  /** An `.svg` the scene draws: will a browser `<img>` decode it, and at what size (`svg.ts`). */
+  private checkSvg(
+    target: string,
+    reference: string,
+    nodeId: string | undefined,
+    at: DocPath
+  ): void {
+    if (this.svgChecked.has(target)) return;
+    this.svgChecked.add(target);
+    for (const finding of inspectProjectSvg(this.env.project, target)) {
+      this.report({
+        code: finding.code,
+        nodeId,
+        message: `${reference}: ${finding.message}`,
+        fix: finding.fix,
+        at,
+      });
+    }
   }
 
   /** Every string below `value`: `res://` existence and the emoji-as-art guard. */

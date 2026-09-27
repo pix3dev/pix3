@@ -43,6 +43,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | Open a project served by `pix3 serve` (remote / no FSA), workspace backend | `docs/pix3-specification.md` → "Workspace backend (pix3 serve)"; wire contract `packages/pix3-cli/README.md`; code `src/services/project/workspace/` |
 | `pix3 check` (validate + tsc + merge-log) / `pix3 kit` / agent-kit generation and its drift spec / `.pix3/types` | `packages/pix3-cli/README.md` → "`pix3 check`" / "`pix3 kit`"; templates `packages/pix3-cli/kit-src/`, generator `packages/pix3-cli/src/kit/generate.ts`, drift spec `packages/pix3-cli/src/kit.spec.ts` |
 | External agent calls editor tools (`pix3 mcp --workspace`), sync barrier before `game_run`, `expect` hashes, `generate_*` permission | `docs/pix3-specification.md` → "Live agent channel"; barrier semantics + error table `packages/pix3-cli/README.md`; code `packages/pix3-cli/src/workspace-agent/`, `src/services/project/workspace/WorkspaceAgentToolBridge.ts` |
+| Run a game headless in Node without a browser (`pix3 smoke`), compact scene listing (`pix3 tree`), retro SFX without keys (`pix3 sfx`), SVG sprite rules (`E_SVG_*`) | `packages/pix3-cli/README.md` → "`pix3 smoke`" / "`pix3 tree`" / "`pix3 sfx`" / "SVG sprites"; code `packages/pix3-cli/src/{smoke,tree,sfx}/`, `src/validate/svg.ts` |
 
 **Version of record** is the `## N. Change Log` / title of `docs/pix3-specification.md` — never hardcode a spec version number in other docs.
 

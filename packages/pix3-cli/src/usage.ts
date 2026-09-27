@@ -22,10 +22,19 @@ Usage:
   pix3 check [--json]              validate + TypeScript check of the scripts + merge-log +
         [--no-hydrate] [--offline] version check (exit 1 on errors)
         [--project <dir>]
+  pix3 smoke [scene] [--json]      Run the game headless in Node for N frames (no browser):
+        [--frames N] [--timeout S] script throws with frame + stack, console errors, missing
+        [--project <dir>]          res:// (exit 1 on errors, 2 when it cannot run)
+  pix3 tree [scene] [--json]       One line per node (type#id, pos, size, layout, components,
+        [--depth N] [--types A,B]  prefab instances); no scene = project overview
+        [--props] [--project <dir>]
   pix3 kit [--update]              Install (or update) the agent kit: AGENTS.md, CLAUDE.md,
         [--project <dir>]          .claude/skills/pix3-*, .mcp.json, script types
   pix3 read <path>                 Print a project file and confirm to the editor that you
                                    read exactly these bytes (.pix3/ack.json)
   pix3 ack <path> --sha256 <hash>  Confirm you read the version with this byte hash
+  pix3 sfx <preset|"text">         Synthesize a sound effect offline into a WAV (coin, jump,
+        [--out <file.wav>]         hit, explosion, powerup, click; or "big explosion")
+        [--seed <n>] [--json]
   pix3 --version
 `;

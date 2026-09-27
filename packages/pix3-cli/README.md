@@ -12,13 +12,21 @@ pix3 serve [--project <dir>] [--port <n>] [--new-token]
 pix3 validate [paths…] [--json]               strict scene check
 pix3 check [--json] [--no-hydrate] [--offline] [--project <dir>]
                                               validate + tsc over the scripts + merge-log + versions
+pix3 smoke [scene] [--frames N] [--timeout S] [--json] [--project <dir>]
+                                              run the game headless in Node, report what threw
+pix3 tree [scene] [--depth N] [--types A,B] [--props] [--json] [--project <dir>]
+                                              scene outline, one line per node; no scene = overview
 pix3 kit [--update] [--project <dir>]         install / update the agent kit in a project
 pix3 read <path>                              print a file and ack its bytes' sha256
 pix3 ack <path> --sha256 <hash>               ack a version you read (hash of raw bytes)
+pix3 sfx <preset|"text"> [--out <f.wav>] [--seed <n>] [--json]
+                                              synthesize a sound effect to WAV, offline
 ```
 
 `new`, `kit`, `mcp`, `serve`, `read`/`ack` load neither TypeScript nor the kit generator: the kit
 and the runtime types are prebuilt into the package (`kit/`, `runtime-types/`, at `prepack`).
+`tree` reads YAML only; `smoke` and `tree --props` load the runtime from a bundle prebuilt at
+`prepack` (`dist/smoke/prebuilt/`, like validate's), so none of this slows `new` / `mcp` / `serve`.
 
 `read` / `ack` append `{ path, sha256, at }` to `.pix3/ack.json`. The editor, merging the next
 version of that file you write, lifts the protection of the manual edits that version contained
@@ -74,6 +82,126 @@ the command. `PIX3_TYPESCRIPT=<package dir>` overrides the search. Loaded with a
 
 Measured (recipe-tapper-2d, 5 scripts, packed CLI installed outside the repo, fresh `HOME`):
 first `check` 2.1 s including the TypeScript install, then 1.45 s (validate ~0.2 s, tsc ~1.2 s).
+
+### SVG sprites
+
+Every texture in Pix3 (editor viewport, play mode, the single-file export) loads as bytes → `Blob`
+→ object URL → three's `TextureLoader` → `<img>`, so an `.svg` renders exactly when a browser
+`<img>` decodes it, at the size the `<img>` reports. Level 1 checks every `.svg` a scene
+references (once per file per scene, at its first reference):
+
+| Code | Severity | When |
+| --- | --- | --- |
+| `E_SVG_INVALID` | error | no `<svg>` root, or the root lacks `xmlns="http://www.w3.org/2000/svg"` (the browser refuses to decode it) |
+| `E_SVG_NO_SIZE` | error | no absolute `width`/`height` and no `viewBox` (renders into a cropped 300x150 box), or one dimension without a `viewBox` |
+| `W_SVG_VIEWBOX_ONLY` | warning | a `viewBox` but no absolute `width`/`height` (`%` and `style=` sizes count as none): Chrome gives it 300x150, art letterboxed |
+| `W_SVG_EXTERNAL_REF` | warning | an `href`, CSS `url()` or `@import` to anything but `#fragment` / `data:` — never loads in SVG-as-image mode |
+
+Measured in Chromium 129 through the runtime's own `ResourceManager` + `AssetLoader` + `Sprite2D`:
+a sized SVG auto-sizes the sprite to its `width`×`height`; a viewBox-only one to 300×150; one
+without `xmlns`, or any SVG whose Blob type is not `image/svg+xml`, fails to load (browsers do
+not sniff SVG).
+
+## `pix3 sfx` — sound effects without the editor
+
+```text
+pix3 sfx coin                                   # -> audio/coin.wav in the project root
+pix3 sfx "short high coin pickup" --out audio/pickup.wav --seed 7
+pix3 sfx explosion --json                       # { path, res, durationMs, preset, seed, modifiers, bytes, peak, params }
+```
+
+Presets: `coin`, `jump`, `hit`, `explosion`, `powerup`, `click`. Free text picks the preset whose
+keyword appears first (`boom`, `pickup`, `button`, `hurt`, …) and applies modifier words
+(`high`/`low` pitch ×1.4/×0.7, `short`/`long` time ×0.65/×1.6, `soft`). `--seed <n>` renders a
+deterministic variation (pitch ±15 %, times ±20 %, duty/vibrato/cutoff nudged); without it the
+preset as tuned. Output is 44.1 kHz 16-bit mono PCM WAV — `AssetLoader.loadAudio` decodes it with
+`decodeAudioData` like any `.ogg`/`.mp3`, and the export embeds it as `audio/wav`. `res` in the
+JSON is the `res://` path when the file lands inside a project. Exit 2 on a bad argument or a
+description that names no preset.
+
+The synth (`src/sfx/synth.ts`, no dependencies) is one jsfxr-style voice: square / saw / sine /
+triangle / noise, exponential pitch slide, pitch jump, vibrato, ADSR, resonant low-pass, DC
+blocker, peak normalisation. It does not use the editor's `@txt2sfx/*` packages: their only
+renderer drives an `OfflineAudioContext` the caller supplies, i.e. a native Web Audio module
+(`node-web-audio-api`) in Node. Each preset renders in well under 10 ms; the whole command runs in
+~0.12 s; files are 2–67 KiB (click 24 ms … explosion 772 ms).
+
+## `pix3 smoke` — run the game headless
+
+`pix3 smoke [scene]` runs the game in Node — no browser, no editor, no `pix3 serve` — for
+`--frames N` fixed steps of 1/60 s (default 120) and reports everything that went wrong. It is the
+behavioural check after `pix3 check` when no editor is connected; with the live channel,
+`game_run` is the stronger one (it renders).
+
+What runs: the project's scripts compiled with esbuild (as `validate` level 2 does, but bare
+imports are bundled for real from the project's `node_modules` — Rapier, three addons — and only
+what resolves nowhere becomes an empty module, reported as `W_SMOKE_STUBBED_IMPORT`), the scene
+loaded from disk by the real `SceneLoader`, a real `SceneRunner` in manual time. Frame 0 is loading
+and starting the scene (`onAttach`/`onStart`, then 128 event-loop turns so spawn chains land);
+frame N is the N-th step. The run happens in a worker thread, so a script stuck in a loop is
+stopped by `--timeout` (default 20 s).
+
+Stubbed: rendering (a null renderer; post-processing never loads), audio (no Web Audio in Node),
+input (no events), network (`scene.network` is null). Textures resolve empty, glTF models and
+Spine skeletons referenced by nodes are not built; images a script loads through three's
+`TextureLoader` "load" as blank 1×1 pictures (so preloaders finish). A small browser shim provides
+`window` / `document` / canvas / `localStorage` / `matchMedia` / `requestAnimationFrame`; any other
+browser property a script reads is recorded, and an error right after such a read is
+`E_SMOKE_DOM` with the read attached (`domAccess`).
+
+Scene: the argument (`res://`, project-relative or a path), else `defaultExportScenePath`, else
+`scenes/main.pix3scene`, else the only scene no other scene instances outside `prefabs/` / `ui/`.
+
+| Code | |
+| --- | --- |
+| `E_SMOKE_SCRIPT` | A script hook threw (`onAttach`/`onStart`/`onUpdate`…); the engine disabled that component |
+| `E_SMOKE_DOM` | …and it was a browser API the shim does not provide (`domAccess` names it) |
+| `E_SMOKE_TICK` / `E_SMOKE_COMMAND` | The engine tick / a game command handler threw |
+| `E_SMOKE_CONSOLE_ERROR` | `console.error` (not the engine re-reporting one of the above) |
+| `E_SMOKE_UNHANDLED` | An unhandled promise rejection, or a timer callback that threw |
+| `E_SMOKE_LOAD` | The scene failed to load (missing prefab, invalid scene) |
+| `E_SMOKE_SCRIPT_COMPILE` / `E_SMOKE_SCRIPT_IMPORT` | Scripts do not compile / throw at module top level |
+| `W_SMOKE_MISSING_RESOURCE` | A `res://` file does not exist (the node loads without it) |
+| `W_SMOKE_PENDING_COMPONENT` | A component type is not registered — it never runs |
+| `W_SMOKE_CONSOLE_WARN`, `W_SMOKE_LOADER`, `W_SMOKE_STUBBED_IMPORT`, `W_SMOKE_STOPPED` | `console.warn`, loader warnings, an import replaced by `{}`, the game stopped itself |
+
+Exit 0 = no errors (warnings allowed), 1 = errors, 2 = could not run: `E_SMOKE_NO_PROJECT`,
+`E_SMOKE_NO_SCENE`, `E_SMOKE_BUNDLE`, `E_SMOKE_UNSUPPORTED` (no esbuild), `E_SMOKE_TIMEOUT`,
+`E_SMOKE_CRASH`. `--json` prints `{ ok, scene, frames, framesRequested, firstFrameOk, errors:
+[{ code, frame, script?, nodeId?, nodeName?, phase?, message, stack?, domAccess? }], warnings,
+nodes: { start, end }, timingsMs: { compile, load, firstFrame, step: { total, mean, p95, max },
+total }, scripts, domMissing, notes, game, logs }` — `game` is the `registerGameDebug` provider's
+`snapshot()` at the end (when the game registers one), `logs` the first `console.log` lines,
+frame-stamped. Stacks are source-mapped to the project's files.
+
+A green smoke run means nothing threw for N frames without input. It does not mean the game
+plays: nothing was tapped, nothing was drawn.
+
+## `pix3 tree` — find your way around a scene
+
+`pix3 tree <scene>` prints one line per node, indented by depth, from the YAML alone (no loader,
+no project code — instant):
+
+```text
+scenes/main.pix3scene — 12 nodes
+Group2D#game-root "Game Root" size=1080x1920 layout=stretch/stretch  components=[user:GameRules, user:TouchRules]
+  CanvasLayer2D#hud "HUD" size=1080x1920 layout=stretch/stretch  components=[user:ScoreHud]
+    Label2D#score-label "Score Label" text="SCORE 0" pos=(-340,850) layout=left/top
+    Group2D#result-overlay "Result Overlay" ↳ instance res://scenes/ui/result.pix3scene (1 override) hidden
+```
+
+`--depth N` stops N levels below the roots (cut subtrees end in `… +K below`); `--types A,B` keeps
+nodes of those types (or carrying those components; `instance` = prefab instances) with their
+ancestors as `·` context lines; `--props` adds, under each node, the properties that differ from
+the node type's defaults (read from a bare instance of the runtime class, through the disk-format
+table — the one step that loads the runtime bundle); `--json` gives the same as nested
+`{ id, type, name, depth, position?, size?, layout?, hidden?, text?, groups?, components,
+instance?: { path, rootType?, rootName?, overrides }, props?, children }`. Override count =
+instance-root properties + every `overrides.byLocalId.*.properties` key.
+
+`pix3 tree` with no scene is the project overview: manifest facts, the `user:` scripts, and every
+scene/prefab/overlay with its node count, node types, components and instances (entry scene
+marked `*`). Exit 0, 1 when a scene does not parse, 2 for bad arguments or a missing file.
 
 ## `pix3 kit` — the agent kit
 

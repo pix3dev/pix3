@@ -194,6 +194,9 @@ before children's.
   `killAll(target?)`. Default `sec` = 0.3. Prefer these over hand-lerping.
 - Audio with no asset: `scene.audio.sfx('tap' | 'score' | 'bounce' | 'explosion' | 'powerup' | 'win' | 'lose' | 'laser' | 'tick', { volume: 1, pitch: 1 })`;
   a file: `await scene.audio.play('res://audio/hit.ogg', { bus: 'sfx' | 'music' | 'master', volume, loop, playbackRate, pan, pitchVariation: 0, volumeVariation: 0 })`.
+  Sound without the editor: `pix3 sfx coin` writes `audio/coin.wav` (presets `coin`, `jump`,
+  `hit`, `explosion`, `powerup`, `click`, or words: `pix3 sfx "short high coin pickup" --out audio/pickup.wav`;
+  `--seed <n>` for a variation) — offline, no key; `.wav` plays everywhere `.ogg`/`.mp3` do.
   Sound cannot be proven audible from the live channel: the browser only starts Web Audio after
   a real user gesture, and `game_input`'s synthetic taps/keys are not one. Report a sound as
   "code path verified, audibility not" and ask the human to listen.

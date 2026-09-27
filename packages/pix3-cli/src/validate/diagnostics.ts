@@ -95,6 +95,27 @@ export const DIAGNOSTIC_CODES = {
     level: 1,
     summary: 'text that is nothing but emoji — a picture standing in for a sprite',
   },
+  E_SVG_INVALID: {
+    severity: 'error',
+    level: 1,
+    summary: 'a referenced .svg has no <svg> root or no SVG xmlns — the browser will not decode it',
+  },
+  E_SVG_NO_SIZE: {
+    severity: 'error',
+    level: 1,
+    summary: 'a referenced .svg has no usable width/height (and no viewBox to derive one)',
+  },
+  W_SVG_VIEWBOX_ONLY: {
+    severity: 'warning',
+    level: 1,
+    summary: 'a referenced .svg has a viewBox but no width/height — renders at 300x150',
+  },
+  W_SVG_EXTERNAL_REF: {
+    severity: 'warning',
+    level: 1,
+    summary:
+      'a referenced .svg points outside itself (href, url(), @import) — never loads as an image',
+  },
   W_LEGACY_VERSION: {
     severity: 'warning',
     level: 1,

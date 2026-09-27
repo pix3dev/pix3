@@ -17,6 +17,11 @@ Change it; do not rebuild it.
    them with the table in `.claude/skills/pix3-scene-format/SKILL.md` ("Recipe tool names").
 2. `README.md` — file layout of this project.
 3. The one scene or script you are about to change. Nothing else. Do not survey the repo.
+   To find it, and to find your way inside it, use `pix3 tree` (every scene and prefab with
+   node counts, types and components) and `pix3 tree <scene>` (one line per node: id, type,
+   position, size, layout, components, prefab instances; `--types Label2D,Button2D`,
+   `--depth 2`, `--props`) — not a read of whole scene files. Read the file itself right
+   before you edit it (rule 2).
 
 ## Layout
 
@@ -65,6 +70,10 @@ Example — the layout a **recipe** project (`pix3 new`) ships; other projects d
    game with `game_run` (or `play_restart`), **passing `expect`** — the sha256 of every file you
    wrote, as `pix3 check --json` prints them under `files`. An answer with
    `disk_differs_from_agent`, or a non-empty `changedDuringRun`, is not green.
+   **No editor connected?** Run `pix3 smoke` after `check`: it runs the game headless in Node
+   for 2 s (`--frames N` for more) and exits 1 on any script throw, `console.error` or
+   unhandled rejection, naming script, frame and source line. Green means nothing threw; it
+   does not mean it plays (nothing was tapped or drawn).
 5. **Art: placeholder → SVG → `generate_asset`, never emoji.** Placeholder = `ColorRect2D`, or
    a near-white PNG in `sprites/` tinted with a `core:tint` effect. Better art = an SVG you
    write into `sprites/` (known gap: an `.svg` on a `Sprite2D` is not verified yet — check it
@@ -166,6 +175,10 @@ second one.
   sha256 of the raw bytes), `diagnostics`, `typecheck`, `mergeLog`, `kit`.
 - `pix3 read <file>` — print a file and confirm to the editor you read exactly these bytes.
 - `pix3 validate [paths…]` — scenes only, no type-check.
+- `pix3 smoke [scene] [--frames N] [--json]` — run the game headless (no browser) and report
+  script throws with frame and stack, `console.error`, missing `res://` files; exit 1 on errors.
+- `pix3 tree [scene] [--types A,B] [--depth N] [--props] [--json]` — scene outline, one line
+  per node; no scene = project overview.
 - **Live channel (optional).** When the human runs `pix3 serve` in this folder and connects the
   editor to it (File → Connect to Workspace…), the MCP server in `.mcp.json`
   (`pix3 mcp --workspace`) gives you 14 tools: running and observing the game, screenshots,
