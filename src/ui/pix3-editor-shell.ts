@@ -92,6 +92,9 @@ import { OpenGamePopoutWindowCommand } from '@/features/scripts/OpenGamePopoutWi
 import { OpenProjectSettingsCommand } from '@/features/project/OpenProjectSettingsCommand';
 import { OpenProjectSyncCommand } from '@/features/project/OpenProjectSyncCommand';
 import { OpenProjectInIdeCommand } from '@/features/project/OpenProjectInIdeCommand';
+import { InstallAgentKitCommand } from '@/features/project/InstallAgentKitCommand';
+import { AgentKitService } from '@/services/project/agent-kit/AgentKitService';
+import type { AgentHandoff } from '@/services/project/agent-kit/agent-handoff';
 import { BuildProjectCommand } from '@/features/project/BuildProjectCommand';
 import { ExportPlayableHtmlCommand } from '@/features/project/ExportPlayableHtmlCommand';
 import { ExportPlayableZipCommand } from '@/features/project/ExportPlayableZipCommand';
@@ -171,6 +174,7 @@ import './shared/pix3-effect-picker';
 import './shared/pix3-script-creator';
 import './shared/pix3-create-project-dialog';
 import './shared/pix3-workspace-connect-dialog';
+import './shared/pix3-agent-handoff-dialog';
 import './shared/pix3-workspace-banner';
 import './shared/pix3-merge-banner';
 import './shared/pix3-recovery-menu';
@@ -219,6 +223,9 @@ export class Pix3EditorShell extends ComponentBase {
 
   @inject(ProjectLifecycleService)
   private readonly projectLifecycleService!: ProjectLifecycleService;
+
+  @inject(AgentKitService)
+  private readonly agentKitService!: AgentKitService;
 
   @inject(UpdateCheckService)
   private readonly updateCheckService!: UpdateCheckService;
@@ -416,6 +423,7 @@ export class Pix3EditorShell extends ComponentBase {
 
   @state()
   private activeCreateProjectDialog: CreateProjectDialogInstance | null = null;
+  private activeAgentHandoff: AgentHandoff | null = null;
   private activeWorkspaceConnectDialog: WorkspaceConnectDialogRequest | null = null;
 
   @state()
@@ -434,6 +442,7 @@ export class Pix3EditorShell extends ComponentBase {
   private disposeProjectSyncSubscription?: () => void;
   private disposeEditorSettingsSubscription?: () => void;
   private disposeCreateProjectSubscription?: () => void;
+  private disposeAgentHandoffSubscription?: () => void;
   private disposeWorkspaceConnectSubscription?: () => void;
   private disposeNodeTypePickerSubscription?: () => void;
   private disposePlayableExportDialogSubscription?: () => void;
@@ -505,6 +514,7 @@ export class Pix3EditorShell extends ComponentBase {
     const closeProjectCommand = new CloseProjectCommand();
     const connectWorkspaceCommand = new ConnectWorkspaceCommand();
     const moveProjectToFolderCommand = new MoveProjectToFolderCommand();
+    const installAgentKitCommand = new InstallAgentKitCommand();
     const editorSettingsCommand = new OpenEditorSettingsCommand();
     const switchWorkspaceModeCommand = new SwitchWorkspaceModeCommand();
     const openSpriteEditorCommand = new OpenSpriteEditorCommand();
@@ -609,6 +619,7 @@ export class Pix3EditorShell extends ComponentBase {
       closeProjectCommand,
       connectWorkspaceCommand,
       moveProjectToFolderCommand,
+      installAgentKitCommand,
       projectSettingsCommand,
       projectSyncCommand,
       openProjectInIdeCommand,
@@ -679,6 +690,11 @@ export class Pix3EditorShell extends ComponentBase {
 
     this.disposeCreateProjectSubscription = this.projectLifecycleService.subscribe(dialog => {
       this.activeCreateProjectDialog = dialog;
+      this.requestUpdate();
+    });
+
+    this.disposeAgentHandoffSubscription = this.agentKitService.subscribe(handoff => {
+      this.activeAgentHandoff = handoff;
       this.requestUpdate();
     });
 
@@ -907,6 +923,8 @@ export class Pix3EditorShell extends ComponentBase {
     this.disposeEditorSettingsSubscription = undefined;
     this.disposeCreateProjectSubscription?.();
     this.disposeCreateProjectSubscription = undefined;
+    this.disposeAgentHandoffSubscription?.();
+    this.disposeAgentHandoffSubscription = undefined;
     this.disposeWorkspaceConnectSubscription?.();
     this.disposeWorkspaceConnectSubscription = undefined;
     this.disposeNodeTypePickerSubscription?.();
@@ -1344,9 +1362,9 @@ export class Pix3EditorShell extends ComponentBase {
         ${this.renderProjectSyncHost()} ${this.renderEditorSettingsHost()}
         ${this.renderAnimationAutoSliceHost()} ${this.renderAssetImportHost()}
         ${this.renderSaveGeneratedAssetHost()} ${this.renderCreateProjectHost()}
-        ${this.renderWorkspaceConnectHost()} ${this.renderNodeTypePickerHost()}
-        ${this.renderPlayableExportDialogHost()} ${this.renderPlayableExportProgressDialogHost()}
-        ${this.renderAuthModal()}
+        ${this.renderWorkspaceConnectHost()} ${this.renderAgentHandoffHost()}
+        ${this.renderNodeTypePickerHost()} ${this.renderPlayableExportDialogHost()}
+        ${this.renderPlayableExportProgressDialogHost()} ${this.renderAuthModal()}
       </div>
     `;
   }
@@ -1981,6 +1999,17 @@ export class Pix3EditorShell extends ComponentBase {
         .workspaceName=${request.workspaceName}
         .workspaceId=${request.workspaceId}
       ></pix3-workspace-connect-dialog>`
+    );
+  }
+
+  private renderAgentHandoffHost() {
+    const handoff = this.activeAgentHandoff;
+    if (!handoff) {
+      return null;
+    }
+    return keyed(
+      handoff.id,
+      html`<pix3-agent-handoff-dialog .handoff=${handoff}></pix3-agent-handoff-dialog>`
     );
   }
 

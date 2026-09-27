@@ -1,5 +1,18 @@
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
+import { execFileSync } from 'node:child_process';
+
+// The editor bundles the CLI's generated agent kit (`packages/pix3-cli/kit/`, gitignored) — make
+// sure it exists and is current before any spec globs it. Same step as `vite.config.ts`.
+try {
+  execFileSync(process.execPath, [resolve(__dirname, 'scripts/ensure-agent-kit.mjs')], {
+    stdio: ['ignore', 'ignore', 'inherit'],
+  });
+} catch (error) {
+  console.warn(
+    `[vitest] agent kit not regenerated: ${error instanceof Error ? error.message : String(error)}`
+  );
+}
 
 export default defineConfig({
   test: {

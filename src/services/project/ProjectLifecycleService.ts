@@ -20,6 +20,10 @@ import { EditorTabService } from '@/services/editor/EditorTabService';
 import { DialogService } from '@/services/editor/DialogService';
 import { AuthService } from '@/services/cloud/AuthService';
 import type { ProjectBackend } from '@/state';
+import {
+  AgentKitService,
+  EXTERNAL_AGENT_TEMPLATE_SKIP,
+} from '@/services/project/agent-kit/AgentKitService';
 
 export interface CreateProjectDialogInstance {
   id: string;
@@ -35,6 +39,12 @@ export interface CreateProjectParams {
   templateId?: string;
   projectType?: ProjectType;
   targetPlatform?: TargetPlatform;
+  /**
+   * "Work with your own agent" (plan §1.1): a folder project that gets the agent kit `pix3 kit`
+   * writes instead of the in-editor agent overlay, then the "Continue in your agent" screen.
+   * Only meaningful with `backend: 'local'` — an agent cannot open OPFS or cloud storage.
+   */
+  withAgentKit?: boolean;
 }
 
 export class ProjectAuthRequiredError extends Error {
@@ -72,6 +82,9 @@ export class ProjectLifecycleService {
 
   @inject(AuthService)
   private readonly authService!: AuthService;
+
+  @inject(AgentKitService)
+  private readonly agentKitService!: AgentKitService;
 
   private activeCreateDialog: CreateProjectDialogInstance | null = null;
   private listeners = new Set<(dialog: CreateProjectDialogInstance | null) => void>();
@@ -291,6 +304,11 @@ export class ProjectLifecycleService {
       await this.editorTabService.closeAllTabs(true);
     };
 
+    const withAgentKit = params.withAgentKit === true;
+    if (withAgentKit && params.backend !== 'local') {
+      throw new Error('Working with your own agent needs a folder on disk (Storage: Folder).');
+    }
+
     if (params.backend === 'workspace') {
       // A workspace is created on its own machine (`pix3 new`), then served; the editor connects.
       throw new Error('Create the project with `pix3 new` on the server, then connect to it.');
@@ -316,6 +334,7 @@ export class ProjectLifecycleService {
           manifest: this.createManifest(params),
           templateId: params.templateId,
           backend: params.backend,
+          ...(withAgentKit ? { skipTemplatePaths: EXTERNAL_AGENT_TEMPLATE_SKIP } : {}),
         },
         { beforeActivate }
       );
@@ -324,6 +343,24 @@ export class ProjectLifecycleService {
     await this.projectService.openStartupScene();
     this.pendingCloudCreation = null;
     this.closeCreateDialog();
+
+    if (withAgentKit) {
+      // The project exists and is open whatever happens here: a kit that fails to write is
+      // reported (and can be retried from File → Install Agent Kit…), never a failed creation.
+      try {
+        await this.agentKitService.installAndShow({ update: false });
+      } catch (error) {
+        console.error('[ProjectLifecycleService] Agent kit was not written:', error);
+        await this.dialogService.showConfirmation({
+          title: 'Agent Kit Not Written',
+          message: `The project was created, but the agent kit could not be written: ${
+            error instanceof Error ? error.message : String(error)
+          }. Retry with File → Install Agent Kit…`,
+          confirmLabel: 'OK',
+          cancelLabel: 'Close',
+        });
+      }
+    }
   }
 
   /**

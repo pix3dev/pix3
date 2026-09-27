@@ -99,6 +99,12 @@ export interface CreateProjectOptions {
    * `'local'`. (Cloud projects are created via {@link CloudProjectService}.)
    */
   readonly backend?: 'local' | 'browser';
+  /**
+   * Template/overlay paths to leave out (see `applyTemplateFiles` `options.skip`). A project made
+   * for an external agent skips the in-editor agent overlay the agent kit replaces
+   * (`EXTERNAL_AGENT_TEMPLATE_SKIP`).
+   */
+  readonly skipTemplatePaths?: readonly string[];
 }
 
 export interface ActivateProjectOptions {
@@ -853,7 +859,12 @@ export class ProjectService {
       }
 
       // Create base project structure
-      await this.applyTemplateFiles(options.name, options.manifest, options.templateId);
+      await this.applyTemplateFiles(
+        options.name,
+        options.manifest,
+        options.templateId,
+        options.skipTemplatePaths ? { skip: options.skipTemplatePaths } : undefined
+      );
 
       await activateOptions?.beforeActivate?.();
 

@@ -77,6 +77,8 @@ export class Pix3CreateProjectDialog extends ComponentBase {
   @state() private viewportBaseHeight = '1080';
   @state() private error = '';
   @state() private submitting = false;
+  /** "Work with your own agent" (plan §1.1): folder project + agent kit + handoff screen. */
+  @state() private withAgentKit = false;
 
   connectedCallback(): void {
     super.connectedCallback();
@@ -206,7 +208,7 @@ export class Pix3CreateProjectDialog extends ComponentBase {
                     class="backend-option ${this.backend === 'browser'
                       ? 'backend-option--active'
                       : ''}"
-                    @click=${() => (this.backend = 'browser')}
+                    @click=${() => this.selectBackend('browser')}
                   >
                     In Browser
                   </button>
@@ -215,14 +217,14 @@ export class Pix3CreateProjectDialog extends ComponentBase {
             <button
               type="button"
               class="backend-option ${this.backend === 'local' ? 'backend-option--active' : ''}"
-              @click=${() => (this.backend = 'local')}
+              @click=${() => this.selectBackend('local')}
             >
               Folder
             </button>
             <button
               type="button"
               class="backend-option ${this.backend === 'cloud' ? 'backend-option--active' : ''}"
-              @click=${() => (this.backend = 'cloud')}
+              @click=${() => this.selectBackend('cloud')}
             >
               Cloud
             </button>
@@ -274,6 +276,8 @@ export class Pix3CreateProjectDialog extends ComponentBase {
               `
             : null}
         </div>
+
+        ${this.renderAgentField()}
 
         <div class="settings-field">
           <label>Target Platform</label>
@@ -354,10 +358,66 @@ export class Pix3CreateProjectDialog extends ComponentBase {
           @click=${this.onSubmit}
           ?disabled=${this.submitting || isCloudUnauthenticated}
         >
-          ${this.submitting ? 'Creating...' : 'Create'}
+          ${this.submitting ? 'Creating...' : this.withAgentKit ? 'Create & Continue' : 'Create'}
         </button>
       </div>
     `;
+  }
+
+  /**
+   * Who works on the project. "Your own agent" needs a folder an agent can open, so it selects
+   * Folder storage (and picking In Browser / Cloud switches it back off).
+   */
+  private renderAgentField() {
+    if (!this.folderPickerSupported()) {
+      return null;
+    }
+    return html`
+      <div class="settings-field">
+        <label id="createProjectAgentLabel">Work With</label>
+        <div class="backend-toggle" role="radiogroup" aria-labelledby="createProjectAgentLabel">
+          <button
+            type="button"
+            role="radio"
+            aria-checked=${this.withAgentKit ? 'false' : 'true'}
+            class="backend-option ${this.withAgentKit ? '' : 'backend-option--active'}"
+            @click=${() => (this.withAgentKit = false)}
+          >
+            The Editor
+          </button>
+          <button
+            type="button"
+            role="radio"
+            aria-checked=${this.withAgentKit ? 'true' : 'false'}
+            class="backend-option ${this.withAgentKit ? 'backend-option--active' : ''}"
+            @click=${() => {
+              this.withAgentKit = true;
+              this.backend = 'local';
+            }}
+          >
+            Your Own Agent
+          </button>
+        </div>
+        <div class="backend-copy">
+          <p>
+            ${this.withAgentKit
+              ? 'Claude Code, Codex or another coding agent works in the project folder. The editor writes the Pix3 agent kit (AGENTS.md, skills, MCP config) into it and shows the commands to start your agent.'
+              : 'Build in the editor, with its built-in assistant if you want one.'}
+          </p>
+        </div>
+      </div>
+    `;
+  }
+
+  private folderPickerSupported(): boolean {
+    return typeof window !== 'undefined' && 'showDirectoryPicker' in window;
+  }
+
+  private selectBackend(backend: ProjectBackend): void {
+    this.backend = backend;
+    if (backend !== 'local') {
+      this.withAgentKit = false;
+    }
   }
 
   private onTemplateSelected(template: ProjectTemplate): void {
@@ -423,6 +483,7 @@ export class Pix3CreateProjectDialog extends ComponentBase {
       templateId: this.templateId || undefined,
       projectType: template?.projectType,
       targetPlatform: this.targetPlatform,
+      ...(this.withAgentKit && this.backend === 'local' ? { withAgentKit: true } : {}),
     };
 
     try {
