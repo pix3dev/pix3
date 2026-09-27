@@ -4641,6 +4641,23 @@ export class ViewportRendererService {
   }
 
   /**
+   * Why the viewport is currently painting every frame instead of on demand (empty when idle).
+   * Surfaced in the status bar's load tooltip so a hot loop is attributable — above all to a
+   * user script whose editor preview keeps asking for frames.
+   */
+  getContinuousRenderReasons(): string[] {
+    const reasons: string[] = [];
+    if (this.previewAnimationActions.size > 0) {
+      reasons.push(`animation preview ×${this.previewAnimationActions.size}`);
+    }
+    reasons.push(...this.previewTicker.getActivePreviewReasons());
+    if (this.axisGizmo.isAnimating()) {
+      reasons.push('view-cube flight');
+    }
+    return reasons;
+  }
+
+  /**
    * Pointer-down over the orientation gizmo: snaps the camera onto the clicked
    * axis. Returns true when the press belongs to the gizmo, in which case the
    * viewport must not also treat it as a pick.

@@ -934,8 +934,12 @@ to expose inspector-editable params (see §6). `this.config` holds params.
 > chrome, timers) uses `performance.now()` — mirror how `flash()`/letterbox work.
 
 **Editor preview (draw the node your way without play mode):** implement
-`tickEditorPreview(dt, ctx)` — the editor calls it every non-play frame for each
-enabled component. Use `ctx.setAppearanceOverride({ textureRegion?, tint?,
+`tickEditorPreview(dt, ctx)` — the editor calls it on every non-play frame it
+paints, for each enabled component. The viewport still renders on demand:
+implementing the hook does not keep it painting — only `ctx.requestRender()`
+called _during_ the tick asks for the next frame (called later, e.g. when an
+asset finishes loading, it is a one-off repaint). The status bar shows **Live**
+and names the script while one keeps the loop hot. Use `ctx.setAppearanceOverride({ textureRegion?, tint?,
 visible? })` to change how _this component's node_ draws in the editor viewport;
 it is immediate-mode (stop pushing → the proxy reverts) and never mutates or
 serializes the node. `ctx.assetLoader` / `ctx.requestRender()` are also provided;

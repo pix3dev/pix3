@@ -15,6 +15,11 @@ export interface TabPerformanceSample {
   readonly gpuMs: number | null;
   /** Viewport render frame time (ms, CPU-side) — the fallback when `gpuMs` is null. */
   readonly renderMs: number;
+  /**
+   * Why the viewport is painting every frame rather than on demand (preview animations, a script
+   * preview asking for frames, a view-cube flight). Empty while it idles.
+   */
+  readonly continuousRenderReasons: readonly string[];
 }
 
 /**
@@ -43,7 +48,12 @@ export class TabPerformanceService {
   private timer: number | null = null;
   private expectedAt = 0;
   private cpuLoadEma = 0;
-  private lastSample: TabPerformanceSample = { cpuLoad: 0, gpuMs: null, renderMs: 0 };
+  private lastSample: TabPerformanceSample = {
+    cpuLoad: 0,
+    gpuMs: null,
+    renderMs: 0,
+    continuousRenderReasons: [],
+  };
   private readonly listeners = new Set<(sample: TabPerformanceSample) => void>();
 
   subscribe(listener: (sample: TabPerformanceSample) => void): () => void {
@@ -91,6 +101,7 @@ export class TabPerformanceService {
       cpuLoad: this.cpuLoadEma,
       gpuMs: viewportPerf.gpuMs,
       renderMs: viewportPerf.cpuMs,
+      continuousRenderReasons: this.viewport.getContinuousRenderReasons(),
     };
 
     for (const listener of this.listeners) {

@@ -185,6 +185,12 @@ pix3-status-bar .status-perf-sep {
   opacity: 0.45;
 }
 
+/* The viewport is repainting every frame (a preview is animating); the tooltip says which. */
+pix3-status-bar .status-perf-live {
+  color: var(--pix3-accent-color);
+  font-weight: 600;
+}
+
 pix3-status-bar .status-version {
   color: var(--fg-2);
 }

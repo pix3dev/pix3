@@ -7,10 +7,14 @@ import { TabPerformanceService } from '@/services/editor/TabPerformanceService';
 // Mutable stand-in for the viewport's per-frame cost, so tests can drive what
 // the perf service reads on each probe tick.
 let stubPerf: { cpuMs: number; gpuMs: number | null } = { cpuMs: 0, gpuMs: null };
+let stubReasons: string[] = [];
 
 class ViewportStub {
   getViewportPerfSample() {
     return stubPerf;
+  }
+  getContinuousRenderReasons() {
+    return stubReasons;
   }
 }
 
@@ -28,6 +32,7 @@ function makeService(): TabPerformanceService {
 describe('TabPerformanceService', () => {
   beforeEach(() => {
     stubPerf = { cpuMs: 0, gpuMs: null };
+    stubReasons = [];
     vi.useFakeTimers();
   });
 
@@ -43,7 +48,12 @@ describe('TabPerformanceService', () => {
     service.subscribe(sample => samples.push(sample));
 
     expect(samples).toHaveLength(1);
-    expect(samples[0]).toEqual({ cpuLoad: 0, gpuMs: null, renderMs: 0 });
+    expect(samples[0]).toEqual({
+      cpuLoad: 0,
+      gpuMs: null,
+      renderMs: 0,
+      continuousRenderReasons: [],
+    });
   });
 
   it('pushes viewport GPU/render cost to subscribers on each probe tick', () => {
@@ -84,5 +94,18 @@ describe('TabPerformanceService', () => {
 
     expect(latest?.gpuMs).toBeNull();
     expect(latest?.renderMs).toBe(4.1);
+  });
+
+  it('passes through why the viewport is repainting every frame', () => {
+    const service = makeService();
+    stubReasons = ['script preview: user:Spinner'];
+    let latest: { continuousRenderReasons: readonly string[] } | undefined;
+
+    service.subscribe(sample => {
+      latest = sample;
+    });
+    vi.advanceTimersByTime(500);
+
+    expect(latest?.continuousRenderReasons).toEqual(['script preview: user:Spinner']);
   });
 });

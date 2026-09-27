@@ -189,7 +189,12 @@ export class Pix3StatusBar extends ComponentBase {
   private diagnostics: ScriptDiagnosticsSummary | null = null;
 
   @state()
-  private perfSample: TabPerformanceSample = { cpuLoad: 0, gpuMs: null, renderMs: 0 };
+  private perfSample: TabPerformanceSample = {
+    cpuLoad: 0,
+    gpuMs: null,
+    renderMs: 0,
+    continuousRenderReasons: [],
+  };
 
   @state()
   private updateState: UpdateCheckState = {
@@ -779,7 +784,8 @@ export class Pix3StatusBar extends ComponentBase {
    * backend can't report GPU timing.
    */
   private renderPerformance() {
-    const { cpuLoad, gpuMs, renderMs } = this.perfSample;
+    const { cpuLoad, gpuMs, renderMs, continuousRenderReasons } = this.perfSample;
+    const isLive = continuousRenderReasons.length > 0;
     const cpuPct = Math.round(cpuLoad * 100);
     const level = cpuLoad >= 0.75 ? 'high' : cpuLoad >= 0.4 ? 'mid' : 'low';
 
@@ -792,7 +798,10 @@ export class Pix3StatusBar extends ComponentBase {
       `CPU ${cpuPct}% — main-thread load (event-loop lag)\n` +
       (hasGpu
         ? `GPU ${gpuValue} — viewport GPU frame time`
-        : `Frame ${gpuValue} — viewport render time (GPU timing unavailable on this backend)`);
+        : `Frame ${gpuValue} — viewport render time (GPU timing unavailable on this backend)`) +
+      (isLive
+        ? `\nViewport repainting every frame: ${continuousRenderReasons.join('; ')}`
+        : '\nViewport idle — repaints on demand');
 
     return html`
       <span class="status-indicator status-perf ${level}" title=${title}>
@@ -803,6 +812,9 @@ export class Pix3StatusBar extends ComponentBase {
         <span class="status-perf-metric"
           >${gpuLabel} <span class="status-perf-value gpu">${gpuValue}</span></span
         >
+        ${isLive
+          ? html`<span class="status-perf-sep">·</span><span class="status-perf-live">Live</span>`
+          : null}
       </span>
     `;
   }
