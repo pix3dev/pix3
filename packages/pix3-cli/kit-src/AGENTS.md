@@ -76,8 +76,9 @@ Example — the layout a **recipe** project (`pix3 new`) ships; other projects d
    does not mean it plays (nothing was tapped or drawn).
 5. **Art: placeholder → SVG → `generate_asset`, never emoji.** Placeholder = `ColorRect2D`, or
    a near-white PNG in `sprites/` tinted with a `core:tint` effect. Better art = an SVG you
-   write into `sprites/` (known gap: an `.svg` on a `Sprite2D` is not verified yet — check it
-   renders), or `generate_asset` through the live channel. A label/text that is only emoji is
+   write into `sprites/` — it works on a `Sprite2D` when the root has `xmlns` plus px
+   `width`/`height`; `pix3 validate` checks it (`E_SVG_*`); template in `pix3-nodes` — or
+   `generate_asset` through the live channel. A label/text that is only emoji is
    refused — emoji are not art. List every placeholder you leave.
 
 ## YAML essentials (`.pix3scene`) — details in `pix3-scene-format`

@@ -58,6 +58,8 @@ const WEBP_EXPORT_QUALITY = 0.85;
 
 /** Source formats worth re-encoding. WebP is already there; SVG and GIF are not raster stills. */
 const RECOMPRESSIBLE_IMAGE_RE = /\.(png|jpe?g)$/i;
+/** Images and audio: a generic blob type on these is overridden by the extension (see resolveMimeType). */
+const MEDIA_EXTENSION_RE = /\.(png|jpe?g|webp|gif|svg|mp3|ogg|wav)$/;
 
 export interface PlayableHtmlAssetSizeEntry {
   readonly path: string;
@@ -1110,11 +1112,17 @@ export class PlayableHtmlBuildService {
   }
 
   private resolveMimeType(path: string, blob: Blob): string {
-    if (blob.type) {
+    const lower = path.toLowerCase();
+    const blobType = blob.type.split(';')[0].trim().toLowerCase();
+    // A specific blob type wins (a `.png` key holding WebP bytes must announce image/webp). A
+    // generic one does not for images/audio: a cloud-cached `.svg` used to arrive as text/plain,
+    // and an SVG decodes only as image/svg+xml.
+    const isGeneric =
+      blobType === '' || blobType === 'text/plain' || blobType === 'application/octet-stream';
+    if (blob.type && !(isGeneric && MEDIA_EXTENSION_RE.test(lower))) {
       return blob.type;
     }
 
-    const lower = path.toLowerCase();
     if (lower.endsWith('.pix3scene') || lower.endsWith('.yaml') || lower.endsWith('.yml')) {
       return 'text/plain;charset=utf-8';
     }
@@ -1129,6 +1137,12 @@ export class PlayableHtmlBuildService {
     }
     if (lower.endsWith('.webp')) {
       return 'image/webp';
+    }
+    if (lower.endsWith('.gif')) {
+      return 'image/gif';
+    }
+    if (lower.endsWith('.svg')) {
+      return 'image/svg+xml';
     }
     if (lower.endsWith('.glb')) {
       return 'model/gltf-binary';
