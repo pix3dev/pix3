@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
+import { cliPackageRoot } from '../package-root.ts';
 import { repoRuntimePackage, runtimeSourceStamp } from '../types/runtime-types.ts';
 import { CLI_VERSION } from '../version.ts';
 import { BARRIER_ERROR_CODES, buildToolList } from '../workspace-agent/tools.ts';
@@ -22,7 +22,7 @@ import {
  * build. The generator itself (and the runtime bundle it needs) is imported only then.
  */
 
-const packageRoot = (): string => fileURLToPath(new URL('../..', import.meta.url));
+const packageRoot = (): string => cliPackageRoot();
 
 export const kitDir = (): string => join(packageRoot(), 'kit');
 export const kitSrcDir = (): string => join(packageRoot(), 'kit-src');
@@ -81,7 +81,8 @@ export const kitInputsStamp = (): string => {
       hash.update('(missing)');
     }
   }
-  const here = fileURLToPath(new URL('.', import.meta.url));
+  // The generator's own sources (only a checkout gets here: `kit-src/` is not published).
+  const here = join(packageRoot(), 'src', 'kit');
   for (const file of ['generate.ts', 'kit-format.ts', 'core-components.ts', 'kit-source.ts']) {
     hash.update(readFileSync(join(here, file)));
   }

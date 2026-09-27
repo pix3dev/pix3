@@ -1,7 +1,9 @@
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
+
+import { prebuiltDir } from '../package-root.ts';
 
 /**
  * `pix3 validate` as `index.ts` reaches it — deliberately free of runtime imports, so `pix3 new` /
@@ -9,7 +11,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
  *
  * The validator itself always runs from an esbuild bundle (see `bundle.ts` for why):
  * - published package: `dist/validate/prebuilt/bundle-main.js`, built at `prepack`;
- * - repo checkout: no prebuilt bundle next to this file, so it is built into a temp folder first
+ * - repo checkout (running the `.ts` sources): the prebuilt bundle is never used, even when a
+ *   `dist/` from an earlier build exists (`package-root.ts`); it is built into a temp folder first
  *   (~0.5 s, needs the repo's `esbuild`), which keeps runtime edits live without a build step.
  */
 
@@ -57,7 +60,6 @@ export interface BundledValidate {
   ): Promise<number>;
 }
 
-const PREBUILT_DIR = 'prebuilt';
 const BUNDLE_MAIN = 'bundle-main.js';
 
 /**
@@ -82,8 +84,8 @@ const importBundle = async (dir: string): Promise<BundledValidate> =>
 export const withValidateBundle = async <T>(
   fn: (bundle: BundledValidate, esbuildSpecifier: string | undefined) => Promise<T>
 ): Promise<T> => {
-  const prebuilt = join(fileURLToPath(new URL('.', import.meta.url)), PREBUILT_DIR);
-  if (existsSync(join(prebuilt, BUNDLE_MAIN))) {
+  const prebuilt = prebuiltDir('validate');
+  if (prebuilt && existsSync(join(prebuilt, BUNDLE_MAIN))) {
     return fn(await importBundle(prebuilt), resolveEsbuild());
   }
   // Repo checkout: build the bundle from source first.

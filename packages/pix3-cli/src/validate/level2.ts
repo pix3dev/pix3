@@ -135,6 +135,9 @@ export const loadUserScripts = async (
         sourcefile: 'pix3-validate-scripts.ts',
         loader: 'ts',
       },
+      // Error locations are reported relative to this; the project root makes them
+      // project-relative whatever the process's cwd is.
+      absWorkingDir: project.root,
       bundle: true,
       write: false,
       format: 'esm',

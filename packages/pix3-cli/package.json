@@ -16,14 +16,15 @@
     "dist",
     "templates",
     "kit",
-    "runtime-types"
+    "README.md",
+    "LICENSE"
   ],
   "engines": {
     "node": ">=24.15.0 <25"
   },
   "scripts": {
     "start": "node src/index.ts",
-    "build": "tsc -p tsconfig.build.json && node scripts/build-validate.mjs && node scripts/build-smoke.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-bin.mjs && node scripts/build-validate.mjs && node scripts/build-smoke.mjs",
     "copy-templates": "node scripts/copy-templates.mjs",
     "prepack": "npm run copy-templates && npm run build && npm run build-runtime-types && npm run build-kit",
     "postpack": "node scripts/copy-templates.mjs --clean",
@@ -39,17 +40,15 @@
     "agent"
   ],
   "license": "Apache-2.0",
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
-    "ws": "^8.18.0",
-    "yaml": "^2.6.0"
-  },
   "optionalDependencies": {
     "esbuild": "^0.27.3"
   },
   "devDependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@types/node": "^24.5.2",
     "@types/ws": "^8.18.1",
-    "typescript": "~5.8.3"
+    "typescript": "~5.8.3",
+    "ws": "^8.18.0",
+    "yaml": "^2.6.0"
   }
 }

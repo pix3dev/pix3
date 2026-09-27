@@ -24,7 +24,8 @@ pix3 sfx <preset|"text"> [--out <f.wav>] [--seed <n>] [--json]
 ```
 
 `new`, `kit`, `mcp`, `serve`, `read`/`ack` load neither TypeScript nor the kit generator: the kit
-and the runtime types are prebuilt into the package (`kit/`, `runtime-types/`, at `prepack`).
+and the runtime types are prebuilt into the package (`kit/`, `dist/runtime-types.json`, at
+`prepack`).
 `tree` reads YAML only; `smoke` and `tree --props` load the runtime from a bundle prebuilt at
 `prepack` (`dist/smoke/prebuilt/`, like validate's), so none of this slows `new` / `mcp` / `serve`.
 
@@ -244,7 +245,8 @@ does not exist.
 sources change) runs `tsc -p packages/pix3-runtime/tsconfig.types.json` (declarations of what
 `src/index.ts` reaches — no specs, samples or `testing/`) into `runtime-types/@pix3/runtime/`, and
 copies `@types/three` (without its `node_modules`) to `runtime-types/@types/three/` — the runtime's
-public types extend three.js. `lit` (re-exported `property`/`state` decorators), `postprocessing`
+public types extend three.js. The tarball carries that tree packed into one file,
+`dist/runtime-types.json` (see "Package layout" below); the installed CLI expands it on first use. `lit` (re-exported `property`/`state` decorators), `postprocessing`
 and the Spine runtime are not shipped: they are only reached from inside declaration files, which
 `skipLibCheck` leaves alone (they type as `any`). In a project without its own `tsconfig.json`:
 
@@ -686,3 +688,39 @@ best-effort, check `codex mcp --help` of your Codex version.
 with `PIX3_CLI_DEV=1`, both write `node <repo>/packages/pix3-cli/src/index.ts mcp --workspace`
 instead, so the channel can be tried before that version is on npm. `PIX3_CLI_DEV=0` forces the
 pinned form.
+
+## Package layout and publishing
+
+The published package has **no runtime `dependencies`**, so a cold `npx -y @pix3/cli@X.Y.Z …`
+fetches one tarball and installs nothing else (measured in
+`.plans/measurements/external-agent-phase0-cold-start.md`). `prepack` builds:
+
+```text
+dist/index.js               the bin: src/index.ts + yaml + @modelcontextprotocol/sdk (zod, ajv, …) + ws,
+                            one minified ESM file (scripts/build-bin.mjs); lazy commands stay lazy
+dist/validate/prebuilt/     validate + @pix3/runtime + three (scripts/build-validate.mjs)
+dist/smoke/prebuilt/        smoke worker + tree defaults + @pix3/runtime + three (scripts/build-smoke.mjs)
+dist/runtime-types.json     runtime-types/ packed into one file (scripts/build-runtime-types.mjs):
+                            ~1 100 small .d.ts cost npm over a second to unpack on every npx run
+kit/                        the agent kit (scripts/build-kit.mjs)
+templates/                  copy of src/templates/projects (scripts/copy-templates.mjs; removed at postpack)
+```
+
+Left out of the bin on purpose: Node built-ins; `esbuild` (an `optionalDependency` — level 2 of
+`validate`, `smoke` and `check` resolve it from the bin with `import.meta.resolve`, and degrade
+with a note when it is absent) and `typescript` (fetched on demand by `check`); `ws`'s optional
+native `bufferutil` / `utf-8-validate`; and the checkout-only modules (`validate/bundle.ts`,
+`smoke/bundle.ts`, the kit generator), which become a throwing stub. Every file the CLI reads from
+its own package is addressed from the package root (`src/package-root.ts`), never relative to the
+current module — in the bundle every module's `import.meta.url` is the bin's. The sources (`node
+src/index.ts`, the specs) never use a prebuilt bundle, even when an old `dist/` exists.
+`src/bin-bundle.spec.ts` builds the bin into a temp package layout and checks `--version` against
+`package.json` (and that against the lockstep root version), the pinned `@pix3/cli@X.Y.Z` launch,
+and that nothing but built-ins and the optional externals is imported at run time.
+
+Publishing is `.github/workflows/publish-packages.yml` (npm Trusted Publishing / OIDC, no token):
+a `runtime-vX.Y.Z` tag publishes `@pix3/runtime` and `@pix3/cli` together, `cli-vX.Y.Z` the CLI
+alone, or run the workflow manually. The job runs `npm ci` at the repo root (the build needs the
+runtime sources, the root TypeScript and esbuild), checks the lockstep version against the root
+and the tag, type-checks, runs the CLI specs and `npm publish`es. Try the tarball locally with
+`npm pack -w packages/pix3-cli` at the repo root, then `npx -y --package ./pix3-cli-X.Y.Z.tgz pix3 …`.

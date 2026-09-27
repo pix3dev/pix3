@@ -7,15 +7,16 @@ import {
   mkdtempSync,
   readdirSync,
   readFileSync,
+  renameSync,
   rmSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
-import { dirname, join, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join, relative, sep } from 'node:path';
 
+import { cliPackageRoot } from '../package-root.ts';
 import { CLI_VERSION } from '../version.ts';
 
 /**
@@ -34,6 +35,13 @@ import { CLI_VERSION } from '../version.ts';
  *   own `node_modules` (webxr / webgpu / meshoptimizer typings are only reached from inside
  *   `@types/three`, which `skipLibCheck` leaves alone).
  * - `manifest.json` — versions and the source stamp the staleness check compares.
+ *
+ * **Published as one file.** The tree is ~1 100 files (almost all `@types/three`), and npm unpacks
+ * a tarball file by file: shipping it as a directory measured +1.2–1.5 s on every cold AND warm
+ * `npx` run. So `prepack` also packs it into `dist/runtime-types.json` (`packRuntimeTypes`), the
+ * tarball carries only that, and the first command that needs the types expands it once
+ * (`ensureRuntimeTypes` → `expandRuntimeTypes`) into `<package>/runtime-types/`, or a temp folder
+ * where the package directory is read-only.
  *
  * Deliberately NOT shipped: `lit` (the runtime index re-exports `property`/`state` from
  * `lit/decorators.js`; unresolved inside a `.d.ts` under `skipLibCheck` they are `any`, and no
@@ -54,9 +62,19 @@ export interface RuntimeTypesManifest {
   readonly builtAt: string;
 }
 
-const packageRoot = (): string => fileURLToPath(new URL('../..', import.meta.url));
+const packageRoot = (): string => cliPackageRoot();
 
 export const runtimeTypesDir = (): string => join(packageRoot(), 'runtime-types');
+
+/** The published, single-file form of `runtime-types/` (see the layout note above). */
+export const runtimeTypesArchive = (): string => join(packageRoot(), 'dist', 'runtime-types.json');
+
+interface RuntimeTypesArchive {
+  readonly format: number;
+  readonly manifest: RuntimeTypesManifest;
+  /** `[relative path with '/', utf-8 text]` — every file of the tree is text. */
+  readonly files: readonly (readonly [string, string])[];
+}
 
 /** `<repo>/packages/pix3-runtime` when this CLI runs from a checkout of the pix3 repo, else null. */
 export const repoRuntimePackage = (): string | null => {
@@ -173,10 +191,90 @@ export const buildRuntimeTypes = (
   }
 };
 
+/** Pack a built `runtime-types/` tree into the single archive file the tarball ships. */
+export const packRuntimeTypes = (
+  dir = runtimeTypesDir(),
+  archive = runtimeTypesArchive()
+): { files: number; bytes: number } => {
+  const manifest = readRuntimeTypesManifest(dir);
+  if (!manifest) throw new Error(`${dir} has no manifest.json: build the runtime types first`);
+  const files = walk(dir)
+    .map(file => relative(dir, file).split(sep).join('/'))
+    .filter(file => file !== 'manifest.json')
+    .sort()
+    .map(file => {
+      const bytes = readFileSync(join(dir, file));
+      const text = bytes.toString('utf8');
+      if (!Buffer.from(text, 'utf8').equals(bytes)) {
+        throw new Error(`runtime types: ${file} is not UTF-8 text and cannot be archived`);
+      }
+      return [file, text] as const;
+    });
+  const body: RuntimeTypesArchive = { format: RUNTIME_TYPES_FORMAT, manifest, files };
+  const json = JSON.stringify(body);
+  mkdirSync(dirname(archive), { recursive: true });
+  writeFileSync(archive, json);
+  return { files: files.length, bytes: Buffer.byteLength(json) };
+};
+
+const writeTree = (archive: RuntimeTypesArchive, dir: string): void => {
+  const staging = `${dir}.tmp-${process.pid}-${Date.now()}`;
+  rmSync(staging, { recursive: true, force: true });
+  try {
+    for (const [file, text] of archive.files) {
+      const target = join(staging, ...file.split('/'));
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, text);
+    }
+    writeFileSync(join(staging, 'manifest.json'), `${JSON.stringify(archive.manifest, null, 2)}\n`);
+    rmSync(dir, { recursive: true, force: true });
+    renameSync(staging, dir);
+  } catch (error) {
+    rmSync(staging, { recursive: true, force: true });
+    // Another process expanded the same archive first: theirs is as good as ours.
+    if (readRuntimeTypesManifest(dir)?.sourceStamp === archive.manifest.sourceStamp) return;
+    throw error;
+  }
+};
+
+/**
+ * Expand the published archive (once) and return where the tree now is: `<package>/runtime-types/`,
+ * or — when the package directory is not writable (a root-owned global install) — a folder under
+ * the OS temp dir keyed by the archive's stamp. Null when there is no archive.
+ */
+export const expandRuntimeTypes = (
+  archiveFile = runtimeTypesArchive(),
+  dir = runtimeTypesDir()
+): { dir: string; manifest: RuntimeTypesManifest } | null => {
+  if (!existsSync(archiveFile)) return null;
+  const archive = JSON.parse(readFileSync(archiveFile, 'utf8')) as RuntimeTypesArchive;
+  if (archive.format !== RUNTIME_TYPES_FORMAT) {
+    throw new Error(
+      `${archiveFile}: runtime types archive format ${archive.format}, expected ${RUNTIME_TYPES_FORMAT}`
+    );
+  }
+  const fallback = join(
+    tmpdir(),
+    `pix3-cli-runtime-types-${archive.manifest.cliVersion}-${archive.manifest.sourceStamp.slice(0, 12)}`
+  );
+  for (const target of [dir, fallback]) {
+    if (readRuntimeTypesManifest(target)?.sourceStamp === archive.manifest.sourceStamp) {
+      return { dir: target, manifest: archive.manifest };
+    }
+    try {
+      writeTree(archive, target);
+      return { dir: target, manifest: archive.manifest };
+    } catch (error) {
+      if (target === fallback) throw error;
+    }
+  }
+  return null;
+};
+
 /**
  * The directory holding the shipped runtime types, current for this CLI. In a repo checkout it is
  * rebuilt when the runtime sources changed since the last build (a few seconds, printed); a
- * published package must carry it (`prepack`).
+ * published package carries it as `dist/runtime-types.json` (`prepack`), expanded on first use.
  */
 export const ensureRuntimeTypes = (
   options: { readonly log?: (line: string) => void } = {}
@@ -195,9 +293,15 @@ export const ensureRuntimeTypes = (
     options.log?.('Building the @pix3/runtime type declarations from the repo sources…');
     return { dir, manifest: buildRuntimeTypes({ log: options.log }) };
   }
+  // Published package: expanded from `dist/runtime-types.json` on first use.
+  if (current?.format === RUNTIME_TYPES_FORMAT && current.cliVersion === CLI_VERSION) {
+    return { dir, manifest: current };
+  }
+  const expanded = expandRuntimeTypes();
+  if (expanded) return expanded;
   if (!current) {
     throw new Error(
-      `${dir} is missing: this @pix3/cli package was published without its runtime types.`
+      `${runtimeTypesArchive()} is missing: this @pix3/cli package was published without its runtime types.`
     );
   }
   return { dir, manifest: current };

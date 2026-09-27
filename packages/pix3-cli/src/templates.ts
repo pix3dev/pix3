@@ -1,7 +1,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { parse } from 'yaml';
+
+import { cliPackageRoot } from './package-root.ts';
 
 /**
  * Project templates, read straight from disk.
@@ -46,7 +47,7 @@ export interface TemplateInfo {
   readonly filesDir: string;
 }
 
-const packageRootDir = (): string => fileURLToPath(new URL('..', import.meta.url));
+const packageRootDir = (): string => cliPackageRoot();
 
 /**
  * `<repo>/src/templates/projects` when this package runs from inside the pix3 monorepo, else null.
