@@ -353,8 +353,16 @@ export class ProjectBotStore implements BotStore {
  */
 function isNotFound(error: unknown): boolean {
   if (typeof error !== 'object' || error === null) return false;
-  const candidate = error as { code?: unknown; name?: unknown; message?: unknown };
-  if (candidate.code === 'not-found') return true;
+  const candidate = error as {
+    code?: unknown;
+    name?: unknown;
+    message?: unknown;
+    status?: unknown;
+  };
+  // 'not-found' = File System Access backend; 'not_found' / 404 = workspace backend (`pix3 serve`),
+  // whose message is the server's detail and need not say "not found".
+  if (candidate.code === 'not-found' || candidate.code === 'not_found') return true;
+  if (candidate.status === 404) return true;
   if (candidate.name === 'NotFoundError') return true;
   const message = typeof candidate.message === 'string' ? candidate.message.toLowerCase() : '';
   return /\bnot found\b|\bno such file\b|\b404\b/.test(message);

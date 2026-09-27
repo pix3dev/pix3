@@ -239,6 +239,28 @@ describe('ProjectReportStore', () => {
     expect(custom.files[`${REPORT_DIRECTORY}/.gitignore`]).toBe('!keep.json\n');
   });
 
+  it("recognises the workspace backend's not_found (pix3 serve) as a missing file", async () => {
+    // WorkspaceClient maps a 404 to code 'not_found' with the server's detail as message; with
+    // only the FSA spelling recognised the .gitignore was never written and a missing report
+    // directory failed to list.
+    const storage = makeStorage();
+    const workspaceNotFound = (path: string) =>
+      Object.assign(new Error(`${path}: no such entry`), { code: 'not_found', status: 404 });
+    storage.readTextFile.mockImplementation(async (path: string) => {
+      const text = storage.files[path];
+      if (text === undefined) throw workspaceNotFound(path);
+      return text;
+    });
+    storage.listDirectory.mockImplementation(async (path: string) => {
+      throw Object.assign(new Error(`${path}`), { code: 'not_found', status: 404 });
+    });
+    const store = new ProjectReportStore(storage as unknown as TraceProjectStorage);
+
+    await expect(store.list()).resolves.toEqual([]);
+    await store.save('0001-run-pass-f5.json', '{}');
+    expect(storage.files[`${REPORT_DIRECTORY}/.gitignore`]).toBe(REPORT_GITIGNORE);
+  });
+
   it('still saves the report when the .gitignore cannot be written', async () => {
     const storage = makeStorage();
     storage.writeTextFile.mockImplementationOnce(async () => {

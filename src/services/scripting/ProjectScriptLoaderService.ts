@@ -900,7 +900,9 @@ export class ProjectScriptLoaderService {
     return (
       error instanceof Error &&
       'code' in error &&
-      (error as { code?: unknown }).code === 'not-found'
+      // FSA backend says 'not-found', the workspace backend (`pix3 serve`) 'not_found'.
+      ((error as { code?: unknown }).code === 'not-found' ||
+        (error as { code?: unknown }).code === 'not_found')
     );
   }
 
