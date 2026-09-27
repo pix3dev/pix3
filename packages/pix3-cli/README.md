@@ -478,7 +478,7 @@ socket (`1003`).
 | `{ "type": "auth", "token": "<token>" }` | Must be the **first** frame, within **5 s**. |
 | `{ "type": "pong" }` | Answer to `ping`. |
 | `{ "type": "ping" }` | Server answers `{ "type": "pong" }`. |
-| `{ "type": "lease", "action": "acquire", "leaseId"?: "<id>" }` | Take the free lease; with the previous `leaseId`, resume it during the grace period. |
+| `{ "type": "lease", "action": "acquire", "leaseId"?: "<id>" }` | Take the free lease; with the current `leaseId`, resume it (during the grace period, or from a new socket while the old one is still open). |
 | `{ "type": "lease", "action": "takeover" }` | Take the lease from whoever holds it. |
 | `{ "type": "lease", "action": "release" }` | Give it up. |
 | `{ "type": "call-result", "id": "<call id>", "result": { "content": [Block, …], "isError"?: true, "_meta"?: {…} } }` | Answer a `call` (lease holder only). `Block` = `{ "type": "text", "text" }` or `{ "type": "image", "data": "<base64, no data: prefix>", "mimeType": "image/png" }`. `_meta.pix3 = { playRevision, stale }` on observing tools (see the agent lane). |
@@ -493,7 +493,7 @@ socket (`1003`).
 | `{ "type": "ping" }` | Every 10 s. A socket silent (no frame at all) for 30 s is terminated. |
 | `{ "type": "lease", "state": "granted", "leaseId", "resumed": boolean }` | Lease granted (`resumed: true` = same lease after a reconnect). |
 | `{ "type": "lease", "state": "busy", "inGrace": boolean }` | Someone else holds it (`inGrace`: its holder is disconnected but may come back). |
-| `{ "type": "lease", "state": "lost", "reason": "taken_over" \| "expired" \| "revoked", "leaseId" }` | Sent to the holder that lost it. |
+| `{ "type": "lease", "state": "lost", "reason": "taken_over" \| "expired" \| "revoked" \| "resumed_elsewhere", "leaseId" }` | Sent to the holder that lost it. `resumed_elsewhere`: its `leaseId` was presented on another socket (then this one closes with `4409`). |
 | `{ "type": "lease", "state": "released" }` | Answer to `release`. |
 | `{ "type": "call", "id", "name", "input", "agent"? }` | An MCP tool call for the lease holder. `agent = { name, session, verified: false }` on agent-lane calls: `name` is what the `pix3 mcp` process calls itself (its MCP client's `clientInfo.name`, else `--agent` / `PIX3_AGENT`), `session` a random id per `pix3 mcp` process. Nothing verifies either. |
 | `{ "type": "error", "error": "<code>", "message", "id"? }` | `unauthorized`, `auth_timeout`, `rate_limited`, `revoked` (then the socket closes), or `bad_frame`, `unknown_frame`, `not_lease_holder`, `bad_result`, `unknown_call`. |
@@ -513,8 +513,8 @@ Nothing under `.pix3/` produces events, except an outside change of `.pix3/ack.j
 Events are hints, not a guarantee of seeing every write — the barrier re-checks with
 `/ws/manifest` or `/ws/hash`.
 
-**Close codes**: `4401` unauthorized / auth timeout / revoked, `4429` rate limited, `1003` binary
-frame, `1001` server shutting down.
+**Close codes**: `4401` unauthorized / auth timeout / revoked, `4409` lease resumed on another
+socket, `4429` rate limited, `1003` binary frame, `1001` server shutting down.
 
 **Lease.** One holder at a time; it is the window that edits and answers MCP calls. When the
 holder's socket closes, the lease is kept for a **10 s grace**: the same window reconnecting
@@ -524,7 +524,20 @@ pending calls fail. The server does **not** announce that expiry: a client answe
 `busy {inGrace: true}` should send `acquire` again after `leaseGraceMs` (the editor adds 500 ms,
 and falls back to 11 s for a server that omits the field), repeating until `granted` or a
 `busy {inGrace: false}`. The editor keeps its `leaseId` per workspace in `sessionStorage`, so a
-reloaded tab resumes its own lease; another tab never shares it. On `takeover`, the old holder
+reloaded tab resumes its own lease; another tab never shares it.
+
+**The `leaseId` is the holder's secret**: an `acquire` presenting the current holder's `leaseId`
+from a **different socket while the holder's socket is still open** is the same tab after a
+reload whose new page connected before the old page's socket closed. The lease moves to the new
+socket at once — `granted {resumed: true}` there, `lost {reason: "resumed_elsewhere"}` on the old
+socket, which is then closed with `4409` (no grace starts); calls the old socket had not answered
+are sent again on the new one, same ids. Any other `leaseId` (or none) still gets
+`busy {inGrace: false}`. Because of that rule the editor presents a stored `leaseId` only when the
+page is a reload (`PerformanceNavigationTiming.type === "reload"`) or the page that stored it
+marked it on `pagehide` — the copy of `sessionStorage` a duplicated tab inherits from a live tab
+is dropped, and that tab acquires without an id. Against an older server (no move on a matching
+id), an editor answered `busy {inGrace: false}` while presenting its own `leaseId` asks again
+every 1 s for up to 15 s. On `takeover`, the old holder
 gets `lost/taken_over` and calls it had not
 answered go to the new holder. On `release`, pending calls fail. The HTTP routes do not check the
 lease (v1): a window without it is expected to stay read-only.

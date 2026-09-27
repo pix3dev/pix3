@@ -57,6 +57,14 @@ export interface StoredWorkspaceLease {
   readonly leaseId: string;
   /** The server run that issued it; a restarted server has a fresh lease table. */
   readonly serverSession: string;
+  /** Random id of the page (document) that wrote the entry. */
+  readonly holder?: string;
+  /**
+   * Set by that page's `pagehide`: it is going away and its successor in this tab may take the
+   * lease over even while its socket is still open. Absent on the copy a duplicated tab inherits
+   * from a live one, which must not take the lease from its original.
+   */
+  readonly unloaded?: boolean;
 }
 
 /** Per-workspace lease memory. The default lives in `sessionStorage`: per tab, survives F5. */
@@ -70,8 +78,10 @@ const LEASE_STORAGE_PREFIX = 'pix3.workspace.lease.';
 
 /**
  * `sessionStorage` is per tab and survives a reload of that tab, which is exactly the scope of a
- * lease: the reloaded tab resumes it, a second tab does not share it (a duplicated tab copies the
- * value, but the server only resumes a lease whose holder is disconnected, so it just gets `busy`).
+ * lease: the reloaded tab resumes it, a second tab does not share it. A duplicated tab copies the
+ * value, and the server moves a lease to whoever presents its id, so the client only presents a
+ * stored id when this page is a reload or the page that wrote it said it was unloading
+ * (`unloaded`, from `pagehide`); see {@link WorkspaceEventsClient}.
  * Every access is guarded: storage can be missing or throw (private mode, blocked site data).
  */
 export const sessionLeaseStore: WorkspaceLeaseStore = {
@@ -81,7 +91,12 @@ export const sessionLeaseStore: WorkspaceLeaseStore = {
       if (!raw) return null;
       const parsed = JSON.parse(raw) as Partial<StoredWorkspaceLease>;
       return typeof parsed.leaseId === 'string' && typeof parsed.serverSession === 'string'
-        ? { leaseId: parsed.leaseId, serverSession: parsed.serverSession }
+        ? {
+            leaseId: parsed.leaseId,
+            serverSession: parsed.serverSession,
+            ...(typeof parsed.holder === 'string' ? { holder: parsed.holder } : {}),
+            ...(parsed.unloaded === true ? { unloaded: true } : {}),
+          }
         : null;
     } catch {
       return null;
@@ -122,7 +137,34 @@ export interface WorkspaceEventsClientOptions {
   readonly connectTimeoutMs?: number;
   /** A socket with no frame for this long is considered dead (server pings every 10 s). */
   readonly silenceTimeoutMs?: number;
+  /**
+   * How this page was loaded (`PerformanceNavigationTiming.type`: `'reload'`, `'navigate'`,
+   * `'back_forward'`…). Default: read from `performance`. A `'reload'` may present a stored
+   * `leaseId` even without the `unloaded` mark.
+   */
+  readonly navigationType?: () => string | null;
+  /** Where `pagehide` / `pageshow` are listened for (default: `globalThis`; null = nowhere). */
+  readonly pageLifecycle?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> | null;
 }
+
+const defaultNavigationType = (): string | null => {
+  try {
+    const entry = globalThis.performance?.getEntriesByType?.('navigation')[0] as
+      | PerformanceNavigationTiming
+      | undefined;
+    return entry?.type ?? null;
+  } catch {
+    return null;
+  }
+};
+
+const randomPageId = (): string => {
+  try {
+    return globalThis.crypto.randomUUID();
+  } catch {
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+  }
+};
 
 const OPEN = 1;
 const DEFAULT_BACKOFF_MS = [500, 1_000, 2_000, 4_000, 8_000, 15_000];
@@ -135,6 +177,13 @@ const DEFAULT_SILENCE_TIMEOUT_MS = 30_000;
 const FALLBACK_LEASE_RETRY_MS = 11_000;
 /** Added to the server's grace so the retry lands after the expiry, not on it. */
 const LEASE_RETRY_MARGIN_MS = 500;
+/**
+ * `busy {inGrace: false}` while presenting our own `leaseId`: the previous page of this tab still
+ * has its socket open (a reload raced its close). Ask again this often, for this long, before
+ * settling for read-only. A server that moves the lease on a matching id never needs it.
+ */
+const RESUME_RETRY_INTERVAL_MS = 1_000;
+const RESUME_RETRY_WINDOW_MS = 15_000;
 
 /** Close codes of `/ws/events` (README "Close codes"). */
 const CLOSE_UNAUTHORIZED = 4401;
@@ -154,6 +203,13 @@ const CLOSE_RATE_LIMITED = 4429;
  * reloaded tab resumes its own lease. When the answer is `busy {inGrace: true}` (the holder's
  * socket is gone but its grace runs), `acquire` is sent again once the grace is over, and again
  * after that, until the lease is granted or someone connected holds it (`busy {inGrace: false}`).
+ *
+ * A reload can reach the server before the previous page's socket closes. The server then moves
+ * the lease to the socket presenting its `leaseId` (`granted {resumed: true}`, the old socket gets
+ * `lost {reason: 'resumed_elsewhere'}`); an older server answers `busy {inGrace: false}`, and while
+ * this client presents an id it asks again every second for up to 15 s. A stored id is presented
+ * only by a reload or after the writing page's `pagehide` marked it, so a duplicated tab (same
+ * `sessionStorage` copy, original still live) acquires without one and stays read-only at once.
  */
 export class WorkspaceEventsClient {
   private readonly createSocket: WorkspaceSocketFactory;
@@ -191,9 +247,26 @@ export class WorkspaceEventsClient {
   private workspaceId: string | null = null;
   private leaseGraceMs: number | null = null;
   private leaseRetryTimer: (() => void) | null = null;
+  /** End of the resume-retry window after `busy {inGrace: false}` (see the class comment). */
+  private resumeRetryUntil: number | null = null;
+  private readonly navigationType: () => string | null;
+  private readonly pageLifecycle: Pick<
+    EventTarget,
+    'addEventListener' | 'removeEventListener'
+  > | null;
+  private lifecycleAttached = false;
+  /** This page's id in {@link StoredWorkspaceLease.holder}. */
+  private readonly pageId = randomPageId();
 
   constructor(options: WorkspaceEventsClientOptions = {}) {
     this.leaseStore = options.leaseStore ?? sessionLeaseStore;
+    this.navigationType = options.navigationType ?? defaultNavigationType;
+    this.pageLifecycle =
+      options.pageLifecycle !== undefined
+        ? options.pageLifecycle
+        : typeof globalThis.addEventListener === 'function'
+          ? globalThis
+          : null;
     this.createSocket =
       options.createSocket ?? ((url: string) => new WebSocket(url) as WorkspaceSocketLike);
     this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
@@ -216,6 +289,8 @@ export class WorkspaceEventsClient {
     this.workspaceId = null;
     this.leaseGraceMs = null;
     this.pendingAttempt = null;
+    this.resumeRetryUntil = null;
+    this.attachLifecycle();
     this.open('connecting');
   }
 
@@ -224,6 +299,7 @@ export class WorkspaceEventsClient {
     const wasRunning = !this.stopped;
     this.stopped = true;
     this.clearTimers();
+    this.detachLifecycle();
     const socket = this.socket;
     this.socket = null;
     if (wasRunning) {
@@ -367,12 +443,12 @@ export class WorkspaceEventsClient {
     this.clearLeaseRetry();
     if (frame.state === 'granted') {
       this.leaseId = frame.leaseId;
-      if (this.workspaceId && this.lastServerSession) {
-        this.leaseStore.set(this.workspaceId, {
-          leaseId: frame.leaseId,
-          serverSession: this.lastServerSession,
-        });
-      }
+      this.resumeRetryUntil = null;
+      this.storeLease(false);
+    } else if (frame.state === 'lost' && frame.reason === 'resumed_elsewhere') {
+      // The next page of this tab took the lease with the id in the shared store: that entry is
+      // now its, so leave it alone.
+      this.leaseId = null;
     } else if (frame.state === 'lost' || frame.state === 'released') {
       this.leaseId = null;
       this.forgetStoredLease();
@@ -380,8 +456,68 @@ export class WorkspaceEventsClient {
       // The holder is disconnected: its lease frees itself when the grace ends (the server does
       // not announce that), so ask again then.
       this.scheduleLeaseRetry();
+    } else if (frame.state === 'busy' && this.leaseId !== null) {
+      // Our own id and a connected holder: the previous page of this tab, whose socket has not
+      // closed yet (an older server does not move the lease on a matching id).
+      this.scheduleResumeRetry();
     }
     this.handlers.onLease?.(frame);
+  }
+
+  private scheduleResumeRetry(): void {
+    const now = Date.now();
+    this.resumeRetryUntil ??= now + RESUME_RETRY_WINDOW_MS;
+    if (now + RESUME_RETRY_INTERVAL_MS > this.resumeRetryUntil) {
+      console.debug('[workspace] lease still held by another socket; staying read-only');
+      return;
+    }
+    this.leaseRetryTimer = keepaliveTimer(() => {
+      this.leaseRetryTimer = null;
+      this.acquireLease();
+    }, RESUME_RETRY_INTERVAL_MS);
+  }
+
+  private storeLease(unloaded: boolean): void {
+    if (!this.leaseId || !this.workspaceId || !this.lastServerSession) return;
+    this.leaseStore.set(this.workspaceId, {
+      leaseId: this.leaseId,
+      serverSession: this.lastServerSession,
+      holder: this.pageId,
+      ...(unloaded ? { unloaded: true } : {}),
+    });
+  }
+
+  private readonly onPageHide = (): void => {
+    if (this.stopped || !this.workspaceId) return;
+    // Mark the entry only while it is still this page's: after a reload that raced the unload,
+    // the next page may already have written its own.
+    const stored = this.leaseStore.get(this.workspaceId);
+    if (stored && stored.holder === this.pageId && stored.leaseId === this.leaseId) {
+      this.storeLease(true);
+    }
+  };
+
+  private readonly onPageShow = (event: Event): void => {
+    // Back from the bfcache: the page is live again, the unload mark no longer holds.
+    if ((event as PageTransitionEvent).persisted !== true || this.stopped || !this.workspaceId) {
+      return;
+    }
+    const stored = this.leaseStore.get(this.workspaceId);
+    if (stored?.holder === this.pageId && stored.unloaded) this.storeLease(false);
+  };
+
+  private attachLifecycle(): void {
+    if (this.lifecycleAttached || !this.pageLifecycle) return;
+    this.pageLifecycle.addEventListener('pagehide', this.onPageHide);
+    this.pageLifecycle.addEventListener('pageshow', this.onPageShow);
+    this.lifecycleAttached = true;
+  }
+
+  private detachLifecycle(): void {
+    if (!this.lifecycleAttached || !this.pageLifecycle) return;
+    this.pageLifecycle.removeEventListener('pagehide', this.onPageHide);
+    this.pageLifecycle.removeEventListener('pageshow', this.onPageShow);
+    this.lifecycleAttached = false;
   }
 
   private scheduleLeaseRetry(): void {
@@ -434,12 +570,24 @@ export class WorkspaceEventsClient {
     this.workspaceId = hello.workspaceId;
     this.leaseGraceMs =
       typeof hello.leaseGraceMs === 'number' && hello.leaseGraceMs >= 0 ? hello.leaseGraceMs : null;
+    this.resumeRetryUntil = null;
     if (this.leaseId === null) {
       // First hello of this page (e.g. after F5): the lease this tab held before, if any.
       const stored = this.leaseStore.get(hello.workspaceId);
-      if (stored && stored.serverSession === hello.serverSession) {
+      if (
+        stored &&
+        stored.serverSession === hello.serverSession &&
+        (stored.unloaded === true ||
+          stored.holder === this.pageId ||
+          this.navigationType() === 'reload')
+      ) {
         this.leaseId = stored.leaseId;
+        this.lastServerSession = hello.serverSession;
+        // Claim the entry (drops the unload mark): a tab duplicated from this one from now on
+        // inherits an entry of a live page.
+        this.storeLease(false);
       } else if (stored) {
+        // Another server run, or the copy a duplicated tab inherited from a live original.
         this.leaseStore.clear(hello.workspaceId);
       }
     }
@@ -552,6 +700,7 @@ export class WorkspaceEventsClient {
   private fail(error: WorkspaceError): void {
     this.stopped = true;
     this.clearTimers();
+    this.detachLifecycle();
     const socket = this.socket;
     this.socket = null;
     if (socket) {

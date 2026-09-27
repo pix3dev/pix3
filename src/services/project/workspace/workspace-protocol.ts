@@ -102,7 +102,8 @@ export type WorkspaceLeaseFrame =
   | {
       readonly type: 'lease';
       readonly state: 'lost';
-      readonly reason: 'taken_over' | 'expired' | 'revoked';
+      /** `resumed_elsewhere`: the same `leaseId` was presented on a newer socket (a reload). */
+      readonly reason: 'taken_over' | 'expired' | 'revoked' | 'resumed_elsewhere';
       readonly leaseId: string;
     }
   | { readonly type: 'lease'; readonly state: 'released' };

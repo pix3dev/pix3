@@ -46,13 +46,15 @@ interface Lease {
   graceTimer: NodeJS.Timeout | null;
 }
 
-type LeaseLostReason = 'taken_over' | 'expired' | 'revoked';
+type LeaseLostReason = 'taken_over' | 'expired' | 'revoked' | 'resumed_elsewhere';
 
 /** Close codes (4000–4999 is the application range). */
 const CLOSE_UNAUTHORIZED = 4401;
 const CLOSE_RATE_LIMITED = 4429;
 const CLOSE_UNSUPPORTED = 1003;
 const CLOSE_GOING_AWAY = 1001;
+/** The old socket of a holder whose lease was resumed on a new socket (same tab, reloaded). */
+const CLOSE_LEASE_MOVED = 4409;
 
 /** Big enough for a call result carrying a screenshot as text. */
 const WS_MAX_PAYLOAD = 64 * 1024 * 1024;
@@ -331,6 +333,11 @@ export class EventHub {
         this.granted(client, lease, true);
         this.relay.requeueDelivered();
         this.flushCalls();
+      } else if (typeof frame.leaseId === 'string' && frame.leaseId === lease.leaseId) {
+        // The holder's own leaseId from another socket while its old socket is still open: the
+        // same tab reloaded and the new page connected before the old page's socket closed (the
+        // id is a per-tab secret). Move the lease to the new socket instead of answering `busy`.
+        this.moveLease(lease, client);
       } else {
         const inGrace = lease.client === null;
         const detail = !inGrace
@@ -362,6 +369,25 @@ export class EventHub {
       return;
     }
     this.error(client, 'bad_frame', 'lease.action must be acquire, release or takeover.');
+  }
+
+  private moveLease(lease: Lease, client: Client): void {
+    const previous = lease.client;
+    lease.client = client;
+    this.options.log(`lease ${lease.leaseId.slice(0, 8)} resumed on a new socket`);
+    if (previous) {
+      this.send(previous, {
+        type: 'lease',
+        state: 'lost',
+        reason: 'resumed_elsewhere' satisfies LeaseLostReason,
+        leaseId: lease.leaseId,
+      });
+      previous.socket.close(CLOSE_LEASE_MOVED, 'lease resumed elsewhere');
+    }
+    this.granted(client, lease, true);
+    // Calls handed to the old socket and not answered go out again, with the same ids.
+    this.relay.requeueDelivered();
+    this.flushCalls();
   }
 
   private grantLease(client: Client): void {

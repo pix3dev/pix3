@@ -191,8 +191,13 @@ describe('WorkspaceSessionService', () => {
   });
 
   it('after a reload the same tab sends its stored leaseId, resumes and stays the owner', async () => {
-    // What the tab stored before F5 (sessionStorage survives the reload of the same tab).
-    sessionLeaseStore.set('ws-1', { leaseId: 'l-before-f5', serverSession: 'session-1' });
+    // What the tab stored before F5 (sessionStorage survives the reload of the same tab), marked
+    // by the old page's pagehide.
+    sessionLeaseStore.set('ws-1', {
+      leaseId: 'l-before-f5',
+      serverSession: 'session-1',
+      unloaded: true,
+    });
     leaseAnswer = { type: 'lease', state: 'granted', leaseId: 'l-before-f5', resumed: true };
 
     await session.connect('http://localhost:8490', 't');

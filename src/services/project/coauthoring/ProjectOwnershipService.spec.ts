@@ -72,6 +72,34 @@ describe('ProjectOwnershipService', () => {
     second.dispose();
   });
 
+  it('reload whose new page asks before the unloading page let go of the lock: queues, owns it once released', async () => {
+    appState.project.status = 'ready';
+    appState.project.id = 'p1';
+    appState.project.backend = 'local';
+    const locks = new FakeLocks();
+    const unloading = new ProjectOwnershipService();
+    unloading.setLockManager(locks);
+    unloading.sync();
+    await flush();
+    expect(unloading.isOwner()).toBe(true);
+
+    // The reloaded page opens the project while the old document still holds the lock.
+    const reloaded = new ProjectOwnershipService();
+    reloaded.setLockManager(locks);
+    reloaded.sync();
+    await flush();
+    // `ifAvailable` misses, but the request is queued (not a final view-only state)…
+    expect(reloaded.isOwner()).toBe(false);
+    expect(appState.project.coauthoring.takeOverPending).toBe(false);
+
+    // …and the browser releasing the old document's lock hands it over with no take-over.
+    unloading.dispose();
+    await flush();
+    expect(reloaded.isOwner()).toBe(true);
+    expect(appState.project.coauthoring.isOwner).toBe(true);
+    reloaded.dispose();
+  });
+
   it('assumes ownership without the Web Locks API', () => {
     appState.project.status = 'ready';
     appState.project.id = 'p1';

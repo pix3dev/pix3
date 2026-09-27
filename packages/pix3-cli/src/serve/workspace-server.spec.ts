@@ -922,6 +922,64 @@ describe('lease', () => {
     });
   });
 
+  it("an acquire with the holder's leaseId from a new socket transfers the lease (granted resumed, old socket gets lost)", async () => {
+    const { server, port } = await startServer({ leaseGraceMs: 100 });
+    const old = await authed(port);
+    old.send({ type: 'lease', action: 'acquire' });
+    const granted = await old.next(frame => frame.type === 'lease');
+    const pending = server.enqueueCall('get_selection', {});
+    const handed = await old.next(frame => frame.type === 'call');
+    // A reload whose new page connects before the old page's socket closed.
+    const reloaded = await authed(port);
+    reloaded.send({ type: 'lease', action: 'acquire', leaseId: granted.leaseId });
+    expect(await reloaded.next(frame => frame.type === 'lease')).toMatchObject({
+      state: 'granted',
+      leaseId: granted.leaseId,
+      resumed: true,
+    });
+    expect(await old.next(frame => frame.type === 'lease')).toMatchObject({
+      state: 'lost',
+      reason: 'resumed_elsewhere',
+      leaseId: granted.leaseId,
+    });
+    expect((await old.closed).code).toBe(4409);
+    // The call the old page never answered goes to the new one, same id.
+    const again = await reloaded.next(frame => frame.type === 'call');
+    expect(again.id).toBe(handed.id);
+    reloaded.send({
+      type: 'call-result',
+      id: again.id,
+      result: { content: [{ type: 'text', text: 'ok' }] },
+    });
+    expect(await pending).toEqual({ content: [{ type: 'text', text: 'ok' }] });
+    // The old socket closing did not start a grace: past it, the new socket still holds the lease.
+    await sleep(250);
+    const later = server.enqueueCall('play_status', {});
+    const delivered = await reloaded.next(frame => frame.type === 'call');
+    expect(delivered.name).toBe('play_status');
+    reloaded.send({
+      type: 'call-result',
+      id: delivered.id,
+      result: { content: [{ type: 'text', text: 'still here' }] },
+    });
+    expect(await later).toEqual({ content: [{ type: 'text', text: 'still here' }] });
+  });
+
+  it('an acquire with a different leaseId while the holder is connected stays busy', async () => {
+    const { port } = await startServer();
+    const a = await authed(port);
+    a.send({ type: 'lease', action: 'acquire' });
+    await a.next(frame => frame.type === 'lease');
+    const b = await authed(port);
+    b.send({ type: 'lease', action: 'acquire', leaseId: 'not-the-holders-id' });
+    expect(await b.next(frame => frame.type === 'lease')).toMatchObject({
+      state: 'busy',
+      inGrace: false,
+    });
+    await sleep(100);
+    expect(a.frames.filter(frame => frame.type === 'lease')).toHaveLength(1);
+  });
+
   it('says how long the grace is in hello', async () => {
     const { port } = await startServer({ leaseGraceMs: 1234 });
     const conn = await connect(port);
