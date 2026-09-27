@@ -107,7 +107,8 @@ beforeAll(() => {
 const text = (file: string): string => {
   const value = texts.get(file);
   if (value === undefined) throw new Error(`kit has no ${file}`);
-  return value;
+  // A Windows checkout (core.autocrlf) hands the kit sources over with CRLF.
+  return value.replace(/\r\n/g, '\n');
 };
 
 /** Text outside fenced code blocks, and the fenced lines, separately. */

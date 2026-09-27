@@ -232,8 +232,13 @@ describe('ProjectStorageService', () => {
       await service.writeTextFile('scenes/main.pix3scene', 'new');
       expect(workspace.writeFile).toHaveBeenCalledWith('scenes/main.pix3scene', 'new');
       expect(mockFileSystem.writeTextFile).not.toHaveBeenCalled();
+      // A scene save names its base (the version in the graph) instead of the client's.
+      await service.writeTextFile('scenes/main.pix3scene', 'newer', { baseHash: 'accepted' });
+      expect(workspace.writeFile).toHaveBeenLastCalledWith('scenes/main.pix3scene', 'newer', {
+        baseHash: 'accepted',
+      });
       expect(appState.project.lastModifiedDirectoryPath).toBe('scenes');
-      expect(appState.project.fileRefreshSignal).toBe(1);
+      expect(appState.project.fileRefreshSignal).toBe(2);
     });
 
     it('writes .pix3/ bookkeeping without a base when asked, and without a listing refresh', async () => {

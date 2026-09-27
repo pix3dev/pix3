@@ -350,7 +350,9 @@ Protocol version: **`WORKSPACE_PROTOCOL = 1`** (`src/protocol.ts`), reported as 
 - **Errors** are JSON: `{ "error": "<code>", "message": "<text>", ...extra }`.
 - **Paths** are POSIX, relative to the root, case preserved: `scenes/main.pix3scene`. Refused
   with `400 bad_path`: empty, absolute (`/…`), backslashes, a drive prefix (`C:`), NUL, empty
-  segments (leading/trailing/double `/`), `.` or `..` segments. A server-private path (see
+  segments (leading/trailing/double `/`), `.` or `..` segments, a `:` in a segment (an NTFS
+  stream: `name::$DATA`), a segment ending in `.` or a space (Win32 strips them). On Windows an
+  8.3 short name (`WORKSP~1.JSO`) is refused too — only an entry's own long name is accepted. A server-private path (see
   above) → `403 reserved_path`.
   `?path=` is percent-decoded **exactly once** (a literal `%2e%2e` after that one decoding is a
   file name, not `..`); JSON bodies are not decoded. **No operation passes through a symlink**:

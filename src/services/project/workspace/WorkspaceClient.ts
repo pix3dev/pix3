@@ -185,6 +185,9 @@ export class WorkspaceClient {
   async readBlob(path: string): Promise<Blob> {
     const normalized = toWorkspacePath(path);
     const cached = this.bodyCache.get(normalized);
+    // As in getManifest(): an answer arriving after a reset / workspace switch belongs to the
+    // PREVIOUS workspace and must not become the next one's write base or cached body.
+    const epoch = this.cacheEpoch;
     const response = await this.request({
       method: 'GET',
       route: '/ws/file',
@@ -194,13 +197,15 @@ export class WorkspaceClient {
     });
 
     if (response.status === 304 && cached) {
-      this.knownHashes.set(normalized, cached.etag);
+      if (this.cacheEpoch === epoch) {
+        this.knownHashes.set(normalized, cached.etag);
+      }
       return cached.blob;
     }
 
     const blob = await response.blob();
     const etag = parseEtag(response.headers.get('ETag'));
-    if (etag) {
+    if (etag && this.cacheEpoch === epoch) {
       this.knownHashes.set(normalized, etag);
       if (blob.size <= MAX_CACHED_BODY_BYTES) {
         this.bodyCache.set(normalized, { etag, blob });
@@ -233,6 +238,7 @@ export class WorkspaceClient {
         ? (this.knownHashes.get(normalized) ?? null)
         : options.baseHash;
     const blob = data instanceof Blob ? data : new Blob([data]);
+    const epoch = this.cacheEpoch;
 
     const response = await this.request({
       method: 'PUT',
@@ -260,6 +266,10 @@ export class WorkspaceClient {
     }
 
     const result = (await response.json()) as WorkspaceWriteResult;
+    if (this.cacheEpoch !== epoch) {
+      // Written to the previous workspace; nothing of it belongs in the current one's caches.
+      return result;
+    }
     this.knownHashes.set(normalized, result.sha256);
     if (blob.size <= MAX_CACHED_BODY_BYTES) {
       this.bodyCache.set(normalized, { etag: result.sha256, blob });

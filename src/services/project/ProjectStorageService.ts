@@ -166,14 +166,23 @@ export class ProjectStorageService {
    * `options.unconditional`: on a workspace, write without an `If-Match` base. Only for files the
    * editor owns outright (`.pix3/protected.json`) — never for project content, where the base is
    * what stops a save from overwriting an agent's newer version.
+   *
+   * `options.baseHash`: on a workspace, the `If-Match` base to use instead of the client's known
+   * hash. A scene save passes the version the editor ACCEPTED into its graph: the client's known
+   * hash also moves on background reads of an external version not merged yet, and a save based
+   * on that would overwrite the agent's version with the old graph.
    */
   async writeTextFile(
     path: string,
     contents: string,
-    options: { readonly unconditional?: boolean } = {}
+    options: { readonly unconditional?: boolean; readonly baseHash?: string } = {}
   ): Promise<void> {
     const normalizedPath = this.normalizePath(path);
-    await this.writeTextFileInternal(normalizedPath, contents, options.unconditional === true);
+    await this.writeTextFileInternal(
+      normalizedPath,
+      contents,
+      options.unconditional === true ? null : options.baseHash
+    );
     await this.publishAssetMutation({
       kind: 'write-file',
       path: normalizedPath,
@@ -438,7 +447,8 @@ export class ProjectStorageService {
   private async writeTextFileInternal(
     path: string,
     contents: string,
-    unconditional = false
+    /** Workspace `If-Match` base: `null` = unconditional, `undefined` = the client's known hash. */
+    baseHash?: string | null
   ): Promise<void> {
     const backend = this.getBackend();
     if (backend === 'local') {
@@ -447,10 +457,10 @@ export class ProjectStorageService {
     }
     if (backend === 'workspace') {
       this.ensureWriteAllowed();
-      if (unconditional) {
-        await this.workspace.writeFile(path, contents, { baseHash: null });
-      } else {
+      if (baseHash === undefined) {
         await this.workspace.writeFile(path, contents);
+      } else {
+        await this.workspace.writeFile(path, contents, { baseHash });
       }
       return;
     }

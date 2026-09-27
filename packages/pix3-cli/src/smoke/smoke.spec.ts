@@ -138,7 +138,7 @@ describe('pix3 smoke', () => {
       message: 'Error: start went wrong',
     });
     // Source-mapped: the stack names the project's own file.
-    expect(report.errors[0].stack).toMatch(/scripts\/StartBoom\.ts:\d+/);
+    expect(report.errors[0].stack).toMatch(/scripts[/\\]StartBoom\.ts:\d+/);
     expect(report.firstFrameOk).toBe(false);
     expect(smokeExitCode(report)).toBe(1);
     const human = formatSmokeHuman(report, root);
@@ -146,7 +146,7 @@ describe('pix3 smoke', () => {
       'frame 0  E_SMOKE_SCRIPT user:StartBoom on "Game Root" (start): Error: start went wrong'
     );
     // The project root is stripped from stack lines: they name the project's own file.
-    expect(human).toMatch(/at StartBoom\.onStart \(scripts\/StartBoom\.ts:\d+:\d+\)/);
+    expect(human).toMatch(/at StartBoom\.onStart \(scripts[/\\]StartBoom\.ts:\d+:\d+\)/);
   });
 
   it('reports a throw in onUpdate on the frame it happened (frame 3)', async () => {

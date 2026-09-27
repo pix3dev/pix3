@@ -1,5 +1,5 @@
-import { lstat } from 'node:fs/promises';
-import { join } from 'node:path';
+import { lstat, realpath } from 'node:fs/promises';
+import { basename, join } from 'node:path';
 
 import { HttpError } from '../server/http.ts';
 
@@ -65,6 +65,14 @@ export const parseWirePath = (raw: unknown, field = 'path'): string => {
       throw bad(`\`${field}\` has an empty segment (leading, trailing or double "/").`);
     if (segment === '.' || segment === '..')
       throw bad(`\`${field}\` must not contain "." or "..".`);
+    // Windows spellings of ANOTHER name, refused on every platform so a path means the same thing
+    // everywhere: `name:stream` / `name::$DATA` is an NTFS alternate data stream (the default
+    // stream IS the file, so `.pix3/workspace.json::$DATA` would read the private state file), and
+    // Win32 strips trailing dots and spaces (`workspace.json.` opens `workspace.json`).
+    if (segment.includes(':'))
+      throw bad(`\`${field}\` must not contain ":" (a drive or an NTFS stream name).`);
+    if (segment.endsWith('.') || segment.endsWith(' '))
+      throw bad(`\`${field}\` has a segment ending in "." or a space.`);
   }
   if (isServerPrivatePath(raw)) {
     throw new HttpError(
@@ -132,6 +140,9 @@ export const resolveInsideRoot = async (
     if (!last && !stats.isDirectory()) {
       throw new HttpError(409, 'not_a_directory', `A parent of ${wirePath} is not a directory.`);
     }
+    if (process.platform === 'win32') {
+      await refuseShortNameAlias(current, segments[i], wirePath);
+    }
     if (last) {
       return {
         absolute: current,
@@ -141,6 +152,24 @@ export const resolveInsideRoot = async (
   }
   // Unreachable: `parseWirePath` guarantees at least one segment.
   throw bad('Empty path.');
+};
+
+/**
+ * Windows only: refuse a segment that opened the entry under a name other than its own — an 8.3
+ * short name (`.pix3/WORKSP~1.JSO` is `.pix3/workspace.json` on a volume with short names) would
+ * otherwise slip past {@link isServerPrivatePath}, which only knows the long names. The component
+ * is known not to be a link (checked just before), so its real path's last element is its long
+ * name; NTFS names are case-insensitive, and case is not an alias.
+ */
+const refuseShortNameAlias = async (
+  absolute: string,
+  segment: string,
+  wirePath: string
+): Promise<void> => {
+  const longName = basename(await realpath(absolute));
+  if (longName.toLowerCase() !== segment.toLowerCase()) {
+    throw bad(`${wirePath} uses "${segment}", an alias of "${longName}"; use the long name.`);
+  }
 };
 
 /** Parent wire path, or `null` for a top-level entry. */

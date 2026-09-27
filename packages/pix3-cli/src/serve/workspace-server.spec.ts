@@ -464,6 +464,22 @@ describe('.pix3/ — the editor bookkeeping', () => {
     ]);
   });
 
+  it('refuses Windows aliases of a name: NTFS streams, trailing dots and spaces', async () => {
+    const { base } = await startServer();
+    for (const path of [
+      '.pix3/workspace.json::$DATA',
+      '.pix3/workspace.json:x',
+      '.pix3/workspace.json.',
+      '.pix3/workspace.json ',
+      '.pix3./workspace.json',
+      'scenes/main.pix3scene:stream',
+    ]) {
+      const read = await call(`${base}/ws/file?path=${encodeURIComponent(path)}`);
+      expect([path, read.status, read.json.error]).toEqual([path, 400, 'bad_path']);
+      expect((await put(base, path, 'x')).status).toBe(400);
+    }
+  });
+
   it('lists .pix3/recovery/ after writes and deletes (the journal prunes by listing)', async () => {
     const { base } = await startServer();
     await put(base, '.pix3/recovery/scenes%2Fmain.pix3scene/1-aaaa.pix3scene', 'v1');

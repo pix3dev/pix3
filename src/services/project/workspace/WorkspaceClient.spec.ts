@@ -171,6 +171,29 @@ describe('WorkspaceClient', () => {
     expect(error.message).toContain(ENDPOINT);
   });
 
+  it("drops a read answered after a workspace switch (it is the previous workspace's)", async () => {
+    let release: (response: Response) => void = () => undefined;
+    const { client, requests } = createClient(request =>
+      request.url.startsWith(ENDPOINT)
+        ? new Promise<Response>(resolve => {
+            release = resolve;
+          })
+        : file('new body', 'new-hash')
+    );
+    const stale = client.readText('scenes/main.pix3scene');
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+
+    client.reset();
+    client.configure({ endpoint: 'http://localhost:8491', token: TOKEN });
+    await client.readText('scenes/main.pix3scene');
+    release(file('old body', 'old-hash'));
+    await expect(stale).resolves.toBe('old body');
+
+    expect(client.getKnownHash('scenes/main.pix3scene')).toBe('new-hash');
+    await client.readText('scenes/main.pix3scene');
+    expect(requests[2].headers['If-None-Match']).toBe('"new-hash"');
+  });
+
   it('keeps the manifest in step with its own writes, moves and deletes', async () => {
     const { client } = createClient(request => {
       if (request.url.endsWith('/ws/manifest')) {

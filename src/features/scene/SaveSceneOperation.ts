@@ -151,8 +151,12 @@ export class SaveSceneOperation implements Operation<SaveSceneOperationResult> {
     if (!alreadyOnDisk) {
       // Journal first: the version being written is recoverable even if the write clobbers it.
       await journal?.recordVersion(projectPath, sceneYaml, 'editor-write');
+      // Workspace `If-Match` base: the version in the graph (or the one "Keep mine" chose), never
+      // the client's known hash — a background read of an agent's version not merged yet moves
+      // that, and a save based on it would overwrite the agent's version with the old graph.
+      const baseHash = overwrite ?? known?.hash;
       try {
-        await storage.writeTextFile(filePath, sceneYaml);
+        await storage.writeTextFile(filePath, sceneYaml, baseHash ? { baseHash } : {});
       } catch (error) {
         if (error instanceof WorkspaceConflictError) {
           return refuse(error.currentHash);

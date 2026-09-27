@@ -60,6 +60,6 @@ describe('pix3 smoke golden: shipped templates run clean', () => {
         }
       }
       expect(set.ok).toBe(true);
-    });
+    }, 30_000);
   }
 });

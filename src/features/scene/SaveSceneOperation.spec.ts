@@ -74,8 +74,8 @@ function createHarness() {
     fileHandle: null,
     lastModifiedTime: null,
   };
-  const save = () =>
-    new SaveSceneOperation({ sceneId: SCENE_ID, quiet: true }).perform({
+  const save = (params: { overwriteExternalHash?: string } = {}) =>
+    new SaveSceneOperation({ sceneId: SCENE_ID, quiet: true, ...params }).perform({
       state: appState,
       snapshot: structuredClone({ scenes: { descriptors: {} } }),
       container: container as unknown as OperationContext['container'],
@@ -151,6 +151,37 @@ describe('SaveSceneOperation — pre-write check and recovery journal', () => {
     expect(result.outcome).toBe('external-change');
     expect(h.externalChanges.report).toHaveBeenCalledWith(PATH);
     expect(appState.scenes.descriptors[SCENE_ID].isDirty).toBe(true);
+  });
+
+  it('bases a workspace write on the accepted version, not on a background read', async () => {
+    const h = createHarness();
+    h.storage.backend = 'workspace';
+    const accepted = 'version: 1.0.0\nroot: []\n';
+    const agent = 'version: 1.0.0\nroot: [] # the agent wrote this\n';
+    await h.diskState.recordRead(PATH, accepted);
+    // The server holds the agent's version, and the client already READ it in the background
+    // (so its own known hash — the default base — is the agent's hash); not merged yet.
+    const agentHash = await sha256(agent);
+    const bases: Array<string | undefined> = [];
+    h.storage.writeTextFile = vi.fn(
+      async (path: string, _contents: string, options: { baseHash?: string } = {}) => {
+        if (!path.endsWith(PATH)) return;
+        bases.push(options.baseHash);
+        const base = options.baseHash ?? agentHash;
+        if (base !== agentHash) throw new WorkspaceConflictError(PATH, base, agentHash);
+      }
+    );
+
+    const result = await h.save();
+
+    expect(result.outcome).toBe('external-change');
+    expect(bases).toEqual([await sha256(accepted)]);
+    expect(h.diskState.isPendingExternal(PATH)).toBe(true);
+
+    // "Keep mine" writes over exactly the version the human chose.
+    const kept = await h.save({ overwriteExternalHash: agentHash });
+    expect(kept.outcome).toBe('saved');
+    expect(bases[1]).toBe(agentHash);
   });
 
   it('skips the write when the bytes are already on disk', async () => {
