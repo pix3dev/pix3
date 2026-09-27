@@ -23,7 +23,7 @@
   },
   "scripts": {
     "start": "node src/index.ts",
-    "build": "tsc -p tsconfig.build.json && node scripts/build-validate.mjs",
+    "build": "tsc -p tsconfig.build.json && node scripts/build-validate.mjs && node scripts/build-smoke.mjs",
     "copy-templates": "node scripts/copy-templates.mjs",
     "prepack": "npm run copy-templates && npm run build && npm run build-runtime-types && npm run build-kit",
     "postpack": "node scripts/copy-templates.mjs --clean",

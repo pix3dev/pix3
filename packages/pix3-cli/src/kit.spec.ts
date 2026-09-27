@@ -44,6 +44,7 @@ import {
 import { createProject } from './new-project.ts';
 import { listTemplates } from './templates.ts';
 import { ensureRuntimeTypes } from './types/runtime-types.ts';
+import { SMOKE_CODES } from './smoke/report.ts';
 import { USAGE } from './usage.ts';
 import { DIAGNOSTIC_CODES } from './validate/diagnostics.ts';
 import { schemaForType } from './validate/level1.ts';
@@ -282,7 +283,11 @@ describe('kit drift', () => {
   });
 
   it('names only diagnostic codes that validate / check emit', () => {
-    const known = [...Object.keys(DIAGNOSTIC_CODES), ...Object.keys(CHECK_CODES)];
+    const known = [
+      ...Object.keys(DIAGNOSTIC_CODES),
+      ...Object.keys(CHECK_CODES),
+      ...Object.keys(SMOKE_CODES),
+    ];
     const problems: string[] = [];
     for (const [file, content] of texts) {
       for (const match of content.matchAll(/\b([EW]_[A-Z0-9_]+\*?)/g)) {

@@ -1,9 +1,10 @@
 {
   "extends": "./tsconfig.json",
-  // Specs are type-checked by `tsconfig.json` but never shipped. `src/validate/**` is bundled by
-  // esbuild instead (it pulls in `@pix3/runtime` from source); only its Node-runnable entry
-  // (`validate/entry.ts`, reached from `index.ts`) is compiled here.
-  "exclude": ["src/**/*.spec.ts", "src/validate/**"],
+  // Specs are type-checked by `tsconfig.json` but never shipped. `src/validate/**` and
+  // `src/smoke/**` (plus `tree/defaults.ts`) are bundled by esbuild instead (they pull in
+  // `@pix3/runtime` from source); only their Node-runnable files reached from `index.ts`
+  // (`validate/entry.ts`, `smoke/command.ts` → `entry.ts` / `report.ts`) are compiled here.
+  "exclude": ["src/**/*.spec.ts", "src/validate/**", "src/smoke/**", "src/tree/defaults.ts"],
   "compilerOptions": {
     "noEmit": false,
     "outDir": "dist",
