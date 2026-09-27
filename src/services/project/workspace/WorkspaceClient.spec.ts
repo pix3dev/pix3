@@ -194,6 +194,39 @@ describe('WorkspaceClient', () => {
     expect(requests[2].headers['If-None-Match']).toBe('"new-hash"');
   });
 
+  it.each([
+    ['delete', (client: WorkspaceClient) => client.delete('scenes/main.pix3scene')],
+    [
+      'move',
+      (client: WorkspaceClient) => client.move('scenes/main.pix3scene', 'scenes/b.pix3scene'),
+    ],
+    ['mkdir', (client: WorkspaceClient) => client.mkdir('scenes/main.pix3scene')],
+  ])("leaves the next workspace's caches alone when a %s answers late", async (_op, mutate) => {
+    let release: (response: Response) => void = () => undefined;
+    const { client, requests } = createClient(request =>
+      request.url.startsWith(ENDPOINT)
+        ? new Promise<Response>(resolve => {
+            release = resolve;
+          })
+        : request.url.includes('/ws/manifest')
+          ? json(200, { revision: 'r', files: [] })
+          : file('new body', 'new-hash')
+    );
+    const stale = mutate(client);
+    await vi.waitFor(() => expect(requests).toHaveLength(1));
+
+    client.reset();
+    client.configure({ endpoint: 'http://localhost:8491', token: TOKEN });
+    await client.getManifest();
+    await client.readText('scenes/main.pix3scene');
+    release(json(200, { ok: true }));
+    await stale;
+
+    expect(client.getKnownHash('scenes/main.pix3scene')).toBe('new-hash');
+    expect(client.getKnownHash('scenes/b.pix3scene')).toBeNull();
+    expect(client.getManifestEntries()).toEqual([]);
+  });
+
   it('keeps the manifest in step with its own writes, moves and deletes', async () => {
     const { client } = createClient(request => {
       if (request.url.endsWith('/ws/manifest')) {

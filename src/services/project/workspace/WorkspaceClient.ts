@@ -267,7 +267,8 @@ export class WorkspaceClient {
 
     const result = (await response.json()) as WorkspaceWriteResult;
     if (this.cacheEpoch !== epoch) {
-      // Written to the previous workspace; nothing of it belongs in the current one's caches.
+      // Written to the previous workspace; nothing of it belongs in the current one's caches
+      // (the same guard follows the `await` of every mutation below).
       return result;
     }
     this.knownHashes.set(normalized, result.sha256);
@@ -287,6 +288,7 @@ export class WorkspaceClient {
 
   async mkdir(path: string): Promise<WorkspaceMkdirResult> {
     const normalized = toWorkspacePath(path);
+    const epoch = this.cacheEpoch;
     const response = await this.request({
       method: 'POST',
       route: '/ws/mkdir',
@@ -294,6 +296,9 @@ export class WorkspaceClient {
       mutation: true,
     });
     const result = (await response.json()) as WorkspaceMkdirResult;
+    if (this.cacheEpoch !== epoch) {
+      return result;
+    }
     this.ensureParentDirectories(normalized);
     this.upsertManifestEntry({ path: normalized, kind: 'dir', size: 0, mtime: Date.now() });
     return result;
@@ -304,6 +309,7 @@ export class WorkspaceClient {
     options: { readonly recursive?: boolean } = {}
   ): Promise<WorkspaceDeleteResult> {
     const normalized = toWorkspacePath(path);
+    const epoch = this.cacheEpoch;
     const response = await this.request({
       method: 'POST',
       route: '/ws/delete',
@@ -311,6 +317,9 @@ export class WorkspaceClient {
       mutation: true,
     });
     const result = (await response.json()) as WorkspaceDeleteResult;
+    if (this.cacheEpoch !== epoch) {
+      return result;
+    }
     this.removeManifestPath(normalized);
     this.forgetPath(normalized);
     return result;
@@ -323,6 +332,7 @@ export class WorkspaceClient {
   ): Promise<WorkspaceMoveResult> {
     const source = toWorkspacePath(from);
     const target = toWorkspacePath(to);
+    const epoch = this.cacheEpoch;
     const response = await this.request({
       method: 'POST',
       route: '/ws/move',
@@ -330,6 +340,9 @@ export class WorkspaceClient {
       mutation: true,
     });
     const result = (await response.json()) as WorkspaceMoveResult;
+    if (this.cacheEpoch !== epoch) {
+      return result;
+    }
     this.renamePrefix(source, target);
     return result;
   }
