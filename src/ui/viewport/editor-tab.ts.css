@@ -29,9 +29,8 @@
 }
 
 /* §6 — floating toolbar islands over the canvas, not an embedded bar.
-   Spans the top, transparent; each toolbar-group is its own card. The left
-   padding clears the vertical transform island (top-left), the right padding
-   forces a wrap before the top-right zoom island rather than underlapping it. */
+   Spans the top, transparent; each toolbar-group is its own card. The right
+   padding forces a wrap before the top-right zoom island rather than underlapping it. */
 .top-toolbar {
   position: absolute;
   top: 12px;
@@ -42,7 +41,7 @@
   flex-wrap: wrap;
   align-items: flex-start;
   gap: 8px;
-  padding: 0 150px 0 46px;
+  padding: 0 150px 0 0;
   background: transparent;
   border: none;
   pointer-events: none;
@@ -257,10 +256,10 @@
   z-index: 3;
 }
 
-/* Floating tool island — top-left, vertical (§6). */
+/* Floating tool island — below the main toolbar at the left edge (§6). */
 .transform-overlay-shell {
   position: absolute;
-  top: 12px;
+  top: 54px;
   left: 12px;
   z-index: 4;
   width: max-content;
