@@ -24,6 +24,12 @@ import { EditorSettingsService } from '@/services/editor/EditorSettingsService';
 import { ProjectSyncService } from '@/services/project/ProjectSyncService';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import { CURRENT_EDITOR_VERSION } from '@/version';
+import {
+  describeDevBackend,
+  getActiveDevBackend,
+  isDevBackendSwitchAvailable,
+  switchDevBackend,
+} from '@/core/dev-backend';
 import { subscribe } from 'valtio/vanilla';
 import {
   appState,
@@ -684,7 +690,7 @@ export class Pix3StatusBar extends ComponentBase {
           <pix3-agent-channel-indicator></pix3-agent-channel-indicator>
           ${this.renderCoauthoringStatus()} ${this.renderSyncStatus()} ${this.renderAgentLanes()}
           ${this.isFlow ? html`` : this.renderPerformance()} ${this.renderDiagnostics()}
-          ${this.projectName ? this.renderBundleSize() : html``}
+          ${this.projectName ? this.renderBundleSize() : html``} ${this.renderDevBackend()}
           <span class="status-version">${this.updateState.currentVersion.displayVersion}</span>
           ${this.projectName
             ? html`<span class="status-project">${this.projectName}</span>`
@@ -693,6 +699,54 @@ export class Pix3StatusBar extends ComponentBase {
       </div>
     `;
   }
+
+  /**
+   * Dev-server only: which collab backend the Vite proxy forwards to. Prod is tinted as a
+   * warning — it is live data, and a localhost editor looks identical either way.
+   */
+  private renderDevBackend() {
+    if (!isDevBackendSwitchAvailable()) {
+      return html``;
+    }
+    const active = getActiveDevBackend();
+    const other = active === 'prod' ? 'local' : 'prod';
+    const title =
+      `Backend: ${describeDevBackend(active)}` +
+      (active === 'prod' ? ' — LIVE production data.' : ' — local collab server.') +
+      `\nClick to switch to ${describeDevBackend(other)} (reloads the editor).`;
+    return html`
+      <button
+        type="button"
+        class="status-indicator status-sync status-dev-backend ${active === 'prod'
+          ? 'is-warn'
+          : 'is-pending'}"
+        title=${title}
+        @click=${this.onDevBackendClick}
+      >
+        ${this.icons.getIcon('server', IconSize.SMALL)}
+        <span class="status-sync-label">${active === 'prod' ? 'Prod' : 'Local'}</span>
+      </button>
+    `;
+  }
+
+  private onDevBackendClick = async (): Promise<void> => {
+    const target = getActiveDevBackend() === 'prod' ? 'local' : 'prod';
+    const confirmed = await this.dialogService.showConfirmation({
+      title: 'Switch backend',
+      message:
+        `Switch this editor to ${describeDevBackend(target)}?\n\n` +
+        (target === 'prod'
+          ? 'You will work with LIVE production accounts and cloud projects.\n\n'
+          : 'You will work with the local collab server (npm run dev:collab).\n\n') +
+        'The editor reloads; unsaved changes are lost. Each backend keeps its own sign-in.',
+      confirmLabel: 'Switch and reload',
+      cancelLabel: 'Cancel',
+      isDangerous: target === 'prod',
+    });
+    if (confirmed) {
+      switchDevBackend(target);
+    }
+  };
 
   /**
    * The two ways the agent can reach a model, side by side: the local Pix3AgentBridge (which owns

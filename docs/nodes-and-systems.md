@@ -919,7 +919,9 @@ scopes (built-in starter pack, your personal library, and the team library). In 
 editor: the **Library** panel (tabbed with the Asset Browser) — filter by scope/type,
 search, then drag a card into the viewport (or double-click) to insert. Inserting
 copies the bundle into `res://assets/library/<slug>/` and remaps its paths; it is a
-snapshot, so later edits to the library item do not change the project. Publish a
+snapshot, so later edits to the library item do not change the project. Files whose
+content the project already holds (sha256, at any path) are reused in place instead of
+copied, so inserting an item back into the project it came from adds only its entry. Publish a
 reusable node with **Publish to Library** (Edit menu, or `library.publish-node`),
 which packs the subtree and its asset dependencies into a personal item. Good results
 from the Sprite Editor can be kept with its **Save to Library** action. Programmatic

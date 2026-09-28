@@ -4,8 +4,9 @@
  * A bundle stores files under bundle-relative paths that mirror their original project
  * layout (e.g. `prefabs/x.pix3scene`, `assets/sprites/btn.png`). Text files inside the
  * bundle reference siblings with absolute `res://<bundle-relative-path>` URIs. On insert
- * the whole bundle is copied under `res://assets/library/<slug>/`, so every reference that
- * points at a bundle file must gain that prefix.
+ * the bundle is copied under `res://assets/library/<slug>/` (files whose content the project
+ * already has are reused where they are), so every reference that points at a bundle file is
+ * rewritten to wherever that file landed.
  *
  * The rewrite is a whole-text regex replace with a right-boundary lookahead, mirroring
  * `ProjectService.rewriteResourceReferencesInText` (which handles the move-remap case).
@@ -48,17 +49,40 @@ export function remapBundleReferences(
   bundleFiles: readonly string[],
   targetDir: string
 ): string {
-  const ordered = [...new Set(bundleFiles.map(normalizeBundlePath))].sort(
-    (a, b) => b.length - a.length
-  );
+  const mapping = new Map<string, string>();
+  for (const file of bundleFiles.map(normalizeBundlePath)) {
+    mapping.set(file, bundleFileToProjectPath(file, targetDir));
+  }
+  return remapBundleReferencesTo(text, mapping);
+}
+
+/**
+ * Rewrite every `res://<bundleFile>` reference in `text` to `res://<mapping.get(bundleFile)>`.
+ * The general form of {@link remapBundleReferences}, for inserts where files do not all land
+ * under one folder (a file whose content already exists in the project is reused in place).
+ * Bundle files absent from `mapping` are left untouched.
+ */
+export function remapBundleReferencesTo(
+  text: string,
+  mapping: ReadonlyMap<string, string>
+): string {
+  const ordered = [...mapping.keys()].sort((a, b) => b.length - a.length);
   let result = text;
   for (const file of ordered) {
-    const source = `res://${file}`;
-    const target = `res://${targetDir}/${file}`;
-    const pattern = new RegExp(`${escapeRegExp(source)}(?=$|[^A-Za-z0-9._\\-/])`, 'g');
-    result = result.replace(pattern, target);
+    const target = `res://${mapping.get(file)}`;
+    result = result.replace(referencePattern(file), target);
   }
   return result;
+}
+
+/** The subset of `bundleFiles` that `text` references as `res://<file>`. */
+export function referencedBundleFiles(text: string, bundleFiles: readonly string[]): string[] {
+  return bundleFiles.filter(file => referencePattern(file).test(text));
+}
+
+/** `res://<file>` with the right-boundary lookahead (so `a/b` does not match inside `a/bc`). */
+function referencePattern(file: string): RegExp {
+  return new RegExp(`${escapeRegExp(`res://${file}`)}(?=$|[^A-Za-z0-9._\\-/])`, 'g');
 }
 
 /**

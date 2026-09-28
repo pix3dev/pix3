@@ -130,3 +130,48 @@ pix3-auth-screen {
   background: var(--bg-2);
   color: var(--fg-0);
 }
+
+/* Dev-server only backend switch (local collab server vs cloud.pix3.dev). */
+.auth-backend {
+  margin-top: 1.25rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line-1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: var(--fg-2);
+}
+.auth-backend-options {
+  display: inline-flex;
+  border: 1px solid var(--line-1);
+  border-radius: var(--radius-2);
+  overflow: hidden;
+}
+.auth-backend-option {
+  padding: 0.3rem 0.8rem;
+  background: none;
+  border: none;
+  color: var(--fg-2);
+  cursor: pointer;
+  font: inherit;
+}
+.auth-backend-option + .auth-backend-option {
+  border-left: 1px solid var(--line-1);
+}
+.auth-backend-option:hover {
+  color: var(--fg-0);
+  background: var(--bg-3);
+}
+.auth-backend-option.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.auth-backend-option--prod.is-active {
+  background: var(--warn-soft);
+  color: var(--warn);
+}
+.auth-backend-host.is-prod {
+  color: var(--warn);
+}

@@ -39,6 +39,9 @@ export class ProjectStorageService {
   private disposeCollaborationSubscription?: () => void;
   private observedAssetEventsMap: Y.Map<string> | null = null;
   private assetEventsObserver?: (event: Y.YMapEvent<string>) => void;
+  /** Open {@link batchMutations} scopes; while > 0 listing refresh signals are coalesced. */
+  private mutationBatchDepth = 0;
+  private batchedDirectories: string[] = [];
 
   constructor() {
     this.disposeCollaborationSubscription = subscribe(appState.collaboration, () => {
@@ -353,6 +356,63 @@ export class ProjectStorageService {
     return entry.sha256 ?? undefined;
   }
 
+  /**
+   * sha256 (hex) → project paths (sorted) of every file whose hash the backend's manifest already
+   * carries (`pix3 serve` workspace, cloud) — content lookup without reading a byte. `null` on the
+   * local FSA backend, which has no hashed manifest: callers hash their own candidates there.
+   * Editor bookkeeping under `.pix3/` is excluded. All paths are kept because equal content is
+   * common (a looping flipbook repeats frames), and a caller should prefer the path it expects.
+   */
+  async getContentHashIndex(): Promise<ReadonlyMap<string, readonly string[]> | null> {
+    const backend = this.getBackend();
+    let entries: { path: string; hash: string | undefined }[];
+    if (backend === 'workspace') {
+      await this.ensureWorkspaceManifest();
+      entries = this.workspace
+        .getManifestEntries()
+        .filter(entry => entry.kind === 'file')
+        .map(entry => ({ path: entry.path, hash: entry.sha256 }));
+    } else if (backend === 'cloud') {
+      entries = (await this.getManifestEntries())
+        .filter(entry => entry.kind === 'file')
+        .map(entry => ({ path: entry.path, hash: entry.hash }));
+    } else {
+      return null;
+    }
+    const index = new Map<string, string[]>();
+    for (const { path, hash } of entries.sort((a, b) => a.path.localeCompare(b.path))) {
+      if (hash && !isPix3InternalPath(path)) {
+        const paths = index.get(hash);
+        if (paths) {
+          paths.push(path);
+        } else {
+          index.set(hash, [path]);
+        }
+      }
+    }
+    return index;
+  }
+
+  /**
+   * Run `fn` with this editor's asset-listing refresh signals coalesced: every write inside still
+   * lands (and still reaches collaborators) immediately, but the asset browser refreshes once when
+   * the outermost batch settles instead of once per file. A 137-frame library insert used to
+   * re-list the tree 137 times — over a remote workspace, each one a round trip.
+   */
+  async batchMutations<T>(fn: () => Promise<T>): Promise<T> {
+    this.mutationBatchDepth += 1;
+    try {
+      return await fn();
+    } finally {
+      this.mutationBatchDepth -= 1;
+      if (this.mutationBatchDepth === 0 && this.batchedDirectories.length > 0) {
+        const directories = this.batchedDirectories;
+        this.batchedDirectories = [];
+        this.applyAssetMutationSignal(directories);
+      }
+    }
+  }
+
   normalizeResourcePath(path: string): string {
     if (this.getBackend() === 'local') {
       return this.fileSystem.normalizeResourcePath(path);
@@ -567,6 +627,10 @@ export class ProjectStorageService {
     // `.pix3/` is editor bookkeeping (recovery journal, protected set): the asset browser hides it,
     // and an autosave every second must not make every listing refresh.
     if (directories.length > 0 && directories.every(directory => isPix3InternalPath(directory))) {
+      return;
+    }
+    if (this.mutationBatchDepth > 0) {
+      this.batchedDirectories.push(...directories);
       return;
     }
     appState.project.lastModifiedDirectoryPath = this.coalesceDirectories(directories);

@@ -241,6 +241,42 @@ describe('ProjectStorageService', () => {
       expect(appState.project.fileRefreshSignal).toBe(2);
     });
 
+    it('coalesces the listing refresh of a batch of writes into one signal', async () => {
+      await service.batchMutations(async () => {
+        await service.writeBinaryFile('sprites/a/1.png', new ArrayBuffer(1));
+        await service.batchMutations(() =>
+          service.writeBinaryFile('sprites/a/2.png', new ArrayBuffer(1))
+        );
+        await service.writeTextFile('sprites/b/x.pix3anim', 'clips: []');
+        expect(appState.project.fileRefreshSignal).toBe(0);
+      });
+      expect(workspace.writeFile).toHaveBeenCalledTimes(3);
+      expect(appState.project.fileRefreshSignal).toBe(1);
+      expect(appState.project.lastModifiedDirectoryPath).toBe('.');
+    });
+
+    it('still signals once when a batch fails part-way', async () => {
+      await expect(
+        service.batchMutations(async () => {
+          await service.writeBinaryFile('sprites/a/1.png', new ArrayBuffer(1));
+          throw new Error('boom');
+        })
+      ).rejects.toThrow('boom');
+      expect(appState.project.fileRefreshSignal).toBe(1);
+      expect(appState.project.lastModifiedDirectoryPath).toBe('sprites/a');
+    });
+
+    it('indexes manifest hashes by content, skipping entries without one', async () => {
+      const index = await service.getContentHashIndex();
+      expect(index).toEqual(
+        new Map([
+          ['c', ['pix3project.yaml']],
+          ['a', ['scenes/main.pix3scene']],
+          ['b', ['scenes/sub/deep.pix3scene']],
+        ])
+      );
+    });
+
     it('writes .pix3/ bookkeeping without a base when asked, and without a listing refresh', async () => {
       await service.writeTextFile('.pix3/protected.json', '{}', { unconditional: true });
       expect(workspace.writeFile).toHaveBeenCalledWith('.pix3/protected.json', '{}', {

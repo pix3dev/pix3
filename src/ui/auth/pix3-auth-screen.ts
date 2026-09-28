@@ -1,5 +1,12 @@
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { AuthService } from '@/services/cloud/AuthService';
+import {
+  describeDevBackend,
+  getActiveDevBackend,
+  isDevBackendSwitchAvailable,
+  switchDevBackend,
+  type DevBackendId,
+} from '@/core/dev-backend';
 import './pix3-auth-screen.ts.css';
 
 @customElement('pix3-auth-screen')
@@ -118,7 +125,39 @@ export class Pix3AuthScreen extends ComponentBase {
           </form>
 
           <button class="auth-toggle" @click=${this.toggleMode}>${toggleText}</button>
+          ${this.renderDevBackendSwitch()}
         </div>
+      </div>
+    `;
+  }
+
+  /** Dev server only: pick the backend before signing in (each keeps its own session). */
+  private renderDevBackendSwitch() {
+    if (!isDevBackendSwitchAvailable()) {
+      return null;
+    }
+    const active = getActiveDevBackend();
+    const option = (id: DevBackendId, label: string) => html`
+      <button
+        type="button"
+        role="radio"
+        aria-checked=${active === id ? 'true' : 'false'}
+        class="auth-backend-option ${active === id ? 'is-active' : ''} auth-backend-option--${id}"
+        title=${describeDevBackend(id)}
+        @click=${() => switchDevBackend(id)}
+      >
+        ${label}
+      </button>
+    `;
+    return html`
+      <div class="auth-backend">
+        <span class="auth-backend-label">Backend</span>
+        <div class="auth-backend-options" role="radiogroup" aria-label="Backend">
+          ${option('local', 'Local')} ${option('prod', 'Production')}
+        </div>
+        <span class="auth-backend-host ${active === 'prod' ? 'is-prod' : ''}"
+          >${describeDevBackend(active)}${active === 'prod' ? ' — live data' : ''}</span
+        >
       </div>
     `;
   }

@@ -1,4 +1,4 @@
-import { defineConfig, loadEnv } from 'vite';
+import { defineConfig, loadEnv, type HttpProxy } from 'vite';
 import { resolve } from 'path';
 import wasm from 'vite-plugin-wasm';
 import { VitePWA } from 'vite-plugin-pwa';
@@ -7,7 +7,9 @@ import { execFileSync } from 'node:child_process';
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
   ensureAgentKit();
-  const collabTarget = env.VITE_COLLAB_SERVER_URL || 'http://localhost:4001';
+  const devBackends = resolveDevBackends(mode, env);
+  const routeProxyToDevBackend = (proxy: HttpProxy.ProxyServer) =>
+    routeToDevBackend(proxy, devBackends);
   // Dev-only bundle inventory: `ANALYZE=1 npm run build` emits dist/stats.html (treemap).
   // Never runs in a normal build — kept out of the default plugin list entirely.
   const analyzePlugins = process.env.ANALYZE
@@ -148,6 +150,7 @@ export default defineConfig(async ({ mode }) => {
     ],
     define: {
       __PIX3_RAPIER_EXPORT_KEYS__: JSON.stringify(rapierExportKeys),
+      __PIX3_DEV_BACKENDS__: JSON.stringify(devBackends),
     },
     optimizeDeps: {
       include: ['three', 'lit', 'valtio', 'yaml', 'golden-layout'],
@@ -224,22 +227,27 @@ export default defineConfig(async ({ mode }) => {
         allow: ['..'],
       },
       proxy: {
+        // Target is picked per request from the `pix3-dev-backend` cookie (local vs cloud.pix3.dev),
+        // so the backend switcher in the editor needs a page reload, not a dev-server restart.
         '/api': {
-          target: collabTarget,
+          target: devBackends.targets[devBackends.default],
           changeOrigin: true,
           secure: false,
+          configure: routeProxyToDevBackend,
         },
         '/collaboration': {
-          target: collabTarget,
+          target: devBackends.targets[devBackends.default],
           changeOrigin: true,
           secure: false,
           ws: true,
+          configure: routeProxyToDevBackend,
         },
         '/preview': {
-          target: collabTarget,
+          target: devBackends.targets[devBackends.default],
           changeOrigin: true,
           secure: false,
           ws: true,
+          configure: routeProxyToDevBackend,
         },
         // OpenAI does not send CORS headers, so the browser cannot call api.openai.com directly
         // (Gemini can). This same-origin dev proxy forwards GPT Image requests; the user's key
@@ -307,4 +315,131 @@ function ensureAgentKit(): void {
       `[vite] agent kit not regenerated: ${error instanceof Error ? error.message : String(error)}`
     );
   }
+}
+
+type DevBackendId = 'local' | 'prod';
+
+interface DevBackends {
+  /** Backend used while no `pix3-dev-backend` cookie is set: `dev` → local, `dev:prod` → prod. */
+  default: DevBackendId;
+  targets: Record<DevBackendId, string>;
+}
+
+/** Cookie the editor's backend switcher writes (see `src/core/dev-backend.ts`). */
+const DEV_BACKEND_COOKIE = 'pix3-dev-backend';
+/**
+ * Both backends set their session as `token=` on `localhost:8123`, so without a rename logging in
+ * to one would log you out of the other (and send a prod session to the local server). The proxy
+ * stores the prod session under this name and swaps it back to `token` on the way out.
+ */
+const PROD_TOKEN_COOKIE = 'pix3prod_token';
+
+function resolveDevBackends(mode: string, env: Record<string, string>): DevBackends {
+  const isProdMode = mode === 'prod-backend';
+  const local =
+    env.PIX3_LOCAL_BACKEND_URL ||
+    (isProdMode ? '' : env.VITE_COLLAB_SERVER_URL) ||
+    'http://localhost:4001';
+  const prod =
+    env.PIX3_PROD_BACKEND_URL ||
+    (isProdMode ? env.VITE_COLLAB_SERVER_URL : '') ||
+    'https://cloud.pix3.dev';
+  return { default: isProdMode ? 'prod' : 'local', targets: { local, prod } };
+}
+
+function parseCookieHeader(header: string | string[] | undefined): Array<[string, string]> {
+  const raw = Array.isArray(header) ? header.join('; ') : (header ?? '');
+  return raw
+    .split(';')
+    .map(part => part.trim())
+    .filter(Boolean)
+    .map(part => {
+      const eq = part.indexOf('=');
+      return eq < 0 ? [part, ''] : [part.slice(0, eq), part.slice(eq + 1)];
+    });
+}
+
+function pickDevBackend(
+  req: { headers: Record<string, string | string[] | undefined> },
+  backends: DevBackends
+): DevBackendId {
+  const value = parseCookieHeader(req.headers.cookie).find(
+    ([name]) => name === DEV_BACKEND_COOKIE
+  )?.[1];
+  return value === 'local' || value === 'prod' ? value : backends.default;
+}
+
+/** Outgoing `Cookie`: hand the chosen backend its own session as `token`, drop the other one. */
+function rewriteRequestCookies(
+  cookieHeader: string | string[] | undefined,
+  backend: DevBackendId
+): string {
+  const kept: string[] = [];
+  for (const [name, value] of parseCookieHeader(cookieHeader)) {
+    if (name === DEV_BACKEND_COOKIE) continue;
+    if (backend === 'prod') {
+      if (name === 'token') continue;
+      kept.push(name === PROD_TOKEN_COOKIE ? `token=${value}` : `${name}=${value}`);
+    } else if (name !== PROD_TOKEN_COOKIE) {
+      kept.push(`${name}=${value}`);
+    }
+  }
+  return kept.join('; ');
+}
+
+/**
+ * Re-targets one Vite proxy entry per request. Vite calls `proxy.web(req, res, {})` and
+ * `proxy.ws(req, socket, head)`; per-call options are merged over the entry's options by
+ * http-proxy-3, so injecting `target` here routes the request without touching Vite internals.
+ */
+function routeToDevBackend(proxy: HttpProxy.ProxyServer, backends: DevBackends): void {
+  type Req = Parameters<HttpProxy.ProxyServer['web']>[0];
+  const backendOf = new WeakMap<Req, DevBackendId>();
+  const web = proxy.web.bind(proxy) as (...args: unknown[]) => unknown;
+  const ws = proxy.ws.bind(proxy) as (...args: unknown[]) => unknown;
+
+  const withTarget = (req: Req, args: unknown[], optsIndex: number): unknown[] => {
+    const backend = pickDevBackend(req, backends);
+    backendOf.set(req, backend);
+    const next = [...args];
+    const cb = typeof next[next.length - 1] === 'function' ? next.pop() : undefined;
+    const opts = (next[optsIndex] as Record<string, unknown> | undefined) ?? {};
+    next.length = optsIndex;
+    next.push({ ...opts, target: backends.targets[backend] });
+    if (cb) next.push(cb);
+    return next;
+  };
+
+  (proxy as { web: unknown }).web = (...args: unknown[]) =>
+    web(...withTarget(args[0] as Req, args, 2));
+  (proxy as { ws: unknown }).ws = (...args: unknown[]) =>
+    ws(...withTarget(args[0] as Req, args, 3));
+
+  const onProxyReq = (
+    proxyReq: {
+      getHeader(name: string): unknown;
+      setHeader(name: string, value: string): void;
+      removeHeader(name: string): void;
+    },
+    req: Req
+  ) => {
+    const backend = backendOf.get(req) ?? pickDevBackend(req, backends);
+    const cookie = rewriteRequestCookies(
+      proxyReq.getHeader('cookie') as string | string[] | undefined,
+      backend
+    );
+    if (cookie) proxyReq.setHeader('cookie', cookie);
+    else proxyReq.removeHeader('cookie');
+  };
+  proxy.on('proxyReq', onProxyReq);
+  proxy.on('proxyReqWs', onProxyReq);
+
+  proxy.on('proxyRes', (proxyRes, req) => {
+    if ((backendOf.get(req) ?? pickDevBackend(req, backends)) !== 'prod') return;
+    const setCookie = proxyRes.headers['set-cookie'];
+    if (!setCookie) return;
+    proxyRes.headers['set-cookie'] = setCookie.map(cookie =>
+      cookie.startsWith('token=') ? `${PROD_TOKEN_COOKIE}=${cookie.slice('token='.length)}` : cookie
+    );
+  });
 }

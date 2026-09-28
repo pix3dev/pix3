@@ -4,7 +4,8 @@
  *
  * Copy step (not undoable — same as any asset import). A bundle has two file buckets:
  *  - **namespaced** — the prefab/scene entry and its scene-referenced assets: written under
- *    `res://assets/library/<slug>/…`, with `res://` references remapped to that prefix.
+ *    `res://assets/library/<slug>/…`, with `res://` references remapped to that prefix — except
+ *    files whose content the project already holds (sha256, any path), which are reused in place.
  *  - **original-path** (`manifest.originalPathFiles`) — `user:` scripts + assets referenced from
  *    script code: restored **verbatim** to their original project paths (a `.ts` file's baked-in
  *    paths can't be remapped, and scripts only register under `scripts/`). References to these
@@ -38,8 +39,35 @@ import {
   insertTargetDir,
   isTextReferenceFile,
   normalizeBundlePath,
-  remapBundleReferences,
+  referencedBundleFiles,
+  remapBundleReferencesTo,
 } from '@/services/library/library-path-remap';
+
+/**
+ * Concurrent file writes during a copy: enough to hide per-request latency on a remote `pix3 serve`
+ * workspace (one HTTP round trip per file), few enough not to flood it.
+ */
+const WRITE_CONCURRENCY = 6;
+
+interface PendingWrite {
+  readonly path: string;
+  readonly data: string | ArrayBuffer;
+}
+
+/** Hex sha256 of bytes (text as UTF-8) — the form both hashed manifests use; null without WebCrypto. */
+async function sha256Hex(data: string | ArrayBuffer): Promise<string | null> {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) {
+    return null;
+  }
+  const bytes = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+  const digest = new Uint8Array(await subtle.digest('SHA-256', bytes));
+  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function byteLength(data: string | ArrayBuffer): number {
+  return typeof data === 'string' ? new TextEncoder().encode(data).byteLength : data.byteLength;
+}
 
 /** Describes where a bundle landed in the project after the copy step. */
 export interface InsertedBundle {
@@ -81,6 +109,11 @@ export class LibraryInsertService {
     if (!bundle) {
       return null;
     }
+    // One asset-browser refresh for the whole copy, not one per file.
+    return this.storage.batchMutations(() => this.copyBundle(bundle));
+  }
+
+  private async copyBundle(bundle: LibraryBundle): Promise<InsertedBundle> {
     const manifest = bundle.manifest;
     const targetDir = insertTargetDir(manifest.slug);
     const allFiles = [...bundle.files.keys()].map(normalizeBundlePath);
@@ -108,8 +141,19 @@ export class LibraryInsertService {
       entryFile && entryNamespaced
         ? await this.pathExists(bundleFileToProjectPath(entryFile, targetDir))
         : await this.pathExists(targetDir);
-    if (!alreadyPresent) {
-      await this.writeNamespacedFiles(bundle, targetDir, namespacedFiles);
+    let placement: Map<string, string>;
+    let written = 0;
+    if (alreadyPresent) {
+      placement = new Map(
+        namespacedFiles.map(file => [file, bundleFileToProjectPath(file, targetDir)] as const)
+      );
+    } else {
+      ({ placement, written } = await this.writeNamespacedFiles(
+        bundle,
+        targetDir,
+        namespacedFiles,
+        entryFile
+      ));
     }
 
     // Original-path restore always runs — it is idempotent (skip-if-identical) and covers the
@@ -117,12 +161,12 @@ export class LibraryInsertService {
     const warnings = await this.restoreOriginalFiles(bundle, originalFiles);
 
     const resourcePaths = [
-      ...namespacedFiles.map(file => `res://${bundleFileToProjectPath(file, targetDir)}`),
+      ...namespacedFiles.map(file => `res://${placement.get(file)}`),
       ...originalFiles.map(file => `res://${file}`),
     ];
     const entryResourcePath = entryFile
       ? entryNamespaced
-        ? `res://${bundleFileToProjectPath(entryFile, targetDir)}`
+        ? `res://${placement.get(entryFile) ?? bundleFileToProjectPath(entryFile, targetDir)}`
         : `res://${entryFile}`
       : undefined;
 
@@ -132,7 +176,7 @@ export class LibraryInsertService {
       targetDir,
       entryResourcePath,
       resourcePaths,
-      reused: alreadyPresent,
+      reused: alreadyPresent || (namespacedFiles.length > 0 && written === 0),
       warnings,
     };
   }
@@ -234,31 +278,165 @@ export class LibraryInsertService {
   }
 
   /**
-   * Write the namespaced bucket under `targetDir`. Only references to *other namespaced files*
-   * are remapped — references to original-path files (scripts, code-loaded audio) are left alone
-   * so they resolve at the verbatim locations `restoreOriginalFiles` writes them to.
+   * Place the namespaced bucket, returning where each bundle file landed (bundle path → project
+   * path) and how many files were actually written.
+   *
+   * **Content dedup.** A file whose bytes the project already holds — at any path — is not copied;
+   * references to it are pointed at the existing file. Binary files are matched as-is; a text file
+   * is matched *after* its references are remapped, so a flipbook whose frames were all found in
+   * place compares equal to the project's own flipbook and is reused too. Inserting an item back
+   * into the project it was published from therefore writes nothing but its synthetic entry.
+   * Only references to *other namespaced files* are remapped — references to original-path files
+   * (scripts, code-loaded audio) are left alone so they resolve where `restoreOriginalFiles` puts
+   * them.
+   *
+   * **Write order.** Binaries first, then text files in dependency order (a file is written only
+   * after every bundle file it references), the entry last. A listing refresh that loads a
+   * half-copied item would otherwise find a prefab whose frames do not exist yet — and the loader
+   * logs a failure for every one of them. Files within one stage are written concurrently.
    */
   private async writeNamespacedFiles(
     bundle: LibraryBundle,
     targetDir: string,
-    namespacedFiles: readonly string[]
-  ): Promise<void> {
+    namespacedFiles: readonly string[],
+    entryFile: string | undefined
+  ): Promise<{ placement: Map<string, string>; written: number }> {
     const namespacedSet = new Set(namespacedFiles);
+    const blobs = new Map<string, Blob>();
     for (const [rawPath, blob] of bundle.files) {
       const relativePath = normalizeBundlePath(rawPath);
-      if (!namespacedSet.has(relativePath)) {
-        continue;
-      }
-      const projectPath = bundleFileToProjectPath(relativePath, targetDir);
-      await this.ensureParentDirectory(projectPath);
-      if (isTextReferenceFile(relativePath)) {
-        const text = await blob.text();
-        const remapped = remapBundleReferences(text, namespacedFiles, targetDir);
-        await this.storage.writeTextFile(projectPath, remapped);
-      } else {
-        await this.storage.writeBinaryFile(projectPath, await blob.arrayBuffer());
+      if (namespacedSet.has(relativePath)) {
+        blobs.set(relativePath, blob);
       }
     }
+    const files = [...blobs.keys()];
+    const hashIndex = await this.storage.getContentHashIndex();
+    const placement = new Map<string, string>();
+    let written = 0;
+
+    const place = async (
+      file: string,
+      data: string | ArrayBuffer
+    ): Promise<PendingWrite | null> => {
+      const existing = await this.findExistingContent(file, data, hashIndex);
+      if (existing) {
+        placement.set(file, existing);
+        return null;
+      }
+      const projectPath = bundleFileToProjectPath(file, targetDir);
+      placement.set(file, projectPath);
+      return { path: projectPath, data };
+    };
+
+    // Stage 1: binaries (frames, textures, audio) — they reference nothing.
+    const directories = new Set<string>();
+    const binaries = await Promise.all(
+      files
+        .filter(file => !isTextReferenceFile(file))
+        .map(async file => place(file, await blobs.get(file)!.arrayBuffer()))
+    );
+    written += await this.writeAll(binaries, directories);
+
+    // Stage 2..n: text files, each once every bundle file it references is placed.
+    const texts = new Map<string, string>();
+    for (const file of files.filter(isTextReferenceFile)) {
+      texts.set(file, await blobs.get(file)!.text());
+    }
+    const dependencies = new Map(
+      [...texts].map(([file, text]) => [file, referencedBundleFiles(text, files)] as const)
+    );
+    let remaining = [...texts.keys()];
+    while (remaining.length > 0) {
+      let ready = remaining.filter(file =>
+        dependencies.get(file)!.every(dep => placement.has(dep))
+      );
+      let writes: (PendingWrite | null)[];
+      if (ready.length > 0) {
+        writes = await Promise.all(
+          ready.map(file => place(file, remapBundleReferencesTo(texts.get(file)!, placement)))
+        );
+      } else {
+        // A reference cycle: pin the rest into the target folder so their mutual references
+        // resolve, and copy them without dedup (their final text depends on their own placement).
+        for (const file of remaining) {
+          placement.set(file, bundleFileToProjectPath(file, targetDir));
+        }
+        ready = remaining;
+        writes = ready.map(file => ({
+          path: placement.get(file)!,
+          data: remapBundleReferencesTo(texts.get(file)!, placement),
+        }));
+      }
+      const readySet = new Set(ready);
+      remaining = remaining.filter(file => !readySet.has(file));
+
+      const entryPath = entryFile !== undefined ? placement.get(entryFile) : undefined;
+      const entryWrite = writes.find(write => write !== null && write.path === entryPath) ?? null;
+      written += await this.writeAll(
+        writes.filter(write => write !== entryWrite),
+        directories
+      );
+      written += await this.writeAll([entryWrite], directories);
+    }
+    return { placement, written };
+  }
+
+  /**
+   * Project path of a file with exactly `data`'s bytes, or null. Uses the backend's hashed
+   * manifest when it has one; on the local FSA backend (no manifest hashes) it checks only the
+   * file's own original path — the insert-back-into-its-source-project case — by hashing it.
+   */
+  private async findExistingContent(
+    bundlePath: string,
+    data: string | ArrayBuffer,
+    hashIndex: ReadonlyMap<string, readonly string[]> | null
+  ): Promise<string | null> {
+    const hash = await sha256Hex(data);
+    if (hash === null) {
+      return null;
+    }
+    if (hashIndex) {
+      // Equal content is common (a looping flipbook repeats frames): keep the file's own path when
+      // it is among the matches, so references — and the text files carrying them — stay as-is.
+      const paths = hashIndex.get(hash);
+      return paths ? (paths.includes(bundlePath) ? bundlePath : paths[0]) : null;
+    }
+    const candidate = await this.readExisting(bundlePath);
+    if (!candidate || candidate.size !== byteLength(data)) {
+      return null;
+    }
+    return (await sha256Hex(await candidate.arrayBuffer())) === hash ? bundlePath : null;
+  }
+
+  /**
+   * Write files concurrently (bounded), creating each parent directory once per copy — `created`
+   * carries the directories already made across calls. Returns the number of files written.
+   */
+  private async writeAll(
+    writes: readonly (PendingWrite | null)[],
+    created: Set<string>
+  ): Promise<number> {
+    const queue = writes.filter((write): write is PendingWrite => write !== null);
+    for (const write of queue) {
+      const directory = write.path.split('/').slice(0, -1).join('/');
+      if (directory && !created.has(directory)) {
+        created.add(directory);
+        await this.storage.createDirectory(directory);
+      }
+    }
+    let next = 0;
+    const worker = async () => {
+      while (next < queue.length) {
+        const { path, data } = queue[next++];
+        if (typeof data === 'string') {
+          await this.storage.writeTextFile(path, data);
+        } else {
+          await this.storage.writeBinaryFile(path, data);
+        }
+      }
+    };
+    await Promise.all(Array.from({ length: Math.min(WRITE_CONCURRENCY, queue.length) }, worker));
+    return queue.length;
   }
 
   /**

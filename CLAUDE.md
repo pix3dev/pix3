@@ -60,6 +60,9 @@ A browser-based editor for HTML5 scenes that blend 2D and 3D layers. Stack: Type
 ```bash
 npm run dev            # Vite dev server on port 8123, backend = local collab server (:4001)
 npm run dev:prod       # same dev server, backend = production cloud.pix3.dev (LIVE data)
+                       # either one: switch local <-> prod at runtime from the status-bar
+                       # "Local/Prod" badge or the sign-in screen (cookie-routed Vite proxy,
+                       # separate session per backend; see src/core/dev-backend.ts)
 npm run dev:collab     # Editor + collab server together (concurrently)
 npm run build          # tsc typecheck + Vite production build (prebuild stamps version)
 npm run test           # Vitest run (one-shot, happy-dom env)

@@ -3,31 +3,77 @@ import { describe, expect, it, vi } from 'vitest';
 import { LibraryInsertService } from '@/services/library/LibraryInsertService';
 import type { LibraryBundle, LibraryItemManifest } from '@/services/library/library-types';
 
-/** Recording ProjectStorageService stand-in; `existing` seeds files already on disk. */
-function makeStorage(existing: Record<string, string> = {}) {
-  const store: Record<string, string> = { ...existing };
+/**
+ * Recording ProjectStorageService stand-in; `existing` seeds files already on disk. `hashed`
+ * emulates a backend with a hashed manifest (`pix3 serve`/cloud); otherwise it behaves like local
+ * FSA (`getContentHashIndex` → null).
+ */
+function makeStorage(existing: Record<string, string | Uint8Array> = {}, hashed = false) {
+  const store: Record<string, string | Uint8Array> = { ...existing };
   const textWrites: Record<string, string> = {};
   const binaryWrites: Record<string, number> = {};
+  /** Every write in call order — for write-ordering assertions. */
+  const writeOrder: string[] = [];
+  let batchDepth = 0;
+  const writesOutsideBatch: string[] = [];
+  const record = (path: string) => {
+    writeOrder.push(path);
+    if (batchDepth === 0) {
+      writesOutsideBatch.push(path);
+    }
+  };
   return {
     store,
     textWrites,
     binaryWrites,
+    writeOrder,
+    writesOutsideBatch,
     createDirectory: vi.fn(async () => {}),
     getFileHandle: vi.fn(async (path: string) => (path in store ? ({} as object) : null)),
     async readBlob(path: string): Promise<Blob> {
       if (path in store) {
-        return new Blob([store[path]], { type: 'text/plain' });
+        return new Blob([store[path] as BlobPart], { type: 'text/plain' });
       }
       throw new Error(`not found: ${path}`);
     },
     writeTextFile: vi.fn(async (path: string, content: string) => {
+      record(path);
       textWrites[path] = content;
       store[path] = content;
     }),
     writeBinaryFile: vi.fn(async (path: string, buffer: ArrayBuffer) => {
+      record(path);
       binaryWrites[path] = buffer.byteLength;
+      store[path] = new Uint8Array(buffer);
+    }),
+    getContentHashIndex: vi.fn(async () => {
+      if (!hashed) {
+        return null;
+      }
+      const index = new Map<string, string[]>();
+      for (const [path, content] of Object.entries(existing).sort(([a], [b]) =>
+        a.localeCompare(b)
+      )) {
+        const hash = await hashOf(content);
+        index.set(hash, [...(index.get(hash) ?? []), path]);
+      }
+      return index;
+    }),
+    batchMutations: vi.fn(async <T>(fn: () => Promise<T>): Promise<T> => {
+      batchDepth += 1;
+      try {
+        return await fn();
+      } finally {
+        batchDepth -= 1;
+      }
     }),
   };
+}
+
+async function hashOf(content: string | Uint8Array): Promise<string> {
+  const bytes = typeof content === 'string' ? new TextEncoder().encode(content) : content;
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes as BufferSource));
+  return Array.from(digest, byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 function makeBundle(
@@ -53,9 +99,13 @@ function makeBundle(
   return { manifest, files: map };
 }
 
-function makeService(bundle: LibraryBundle, existing: Record<string, string> = {}) {
+function makeService(
+  bundle: LibraryBundle,
+  existing: Record<string, string | Uint8Array> = {},
+  hashed = false
+) {
   const service = new LibraryInsertService();
-  const storage = makeStorage(existing);
+  const storage = makeStorage(existing, hashed);
   const order: string[] = [];
   const scriptLoader = {
     syncAndBuild: vi.fn(async () => {
@@ -185,5 +235,140 @@ describe('LibraryInsertService — legacy manifests', () => {
     expect(inserted!.resourcePaths).not.toContain('res://assets/library/enemy/preview.webp');
     expect(inserted!.warnings).toEqual([]);
     expect(scriptLoader.syncAndBuild).not.toHaveBeenCalled();
+  });
+});
+
+/** A Seven-shaped character: synthetic entry → prefab → flipbook → frames (bundle layout). */
+const FRAME_A = new Uint8Array([1, 1, 1]);
+const FRAME_B = new Uint8Array([2, 2, 2, 2]);
+const ANIM = [
+  'clips:',
+  '  - frames:',
+  '      - texturePath: res://sprites/goblin/a_0001.png',
+  '      - texturePath: res://sprites/goblin/a_0002.png',
+].join('\n');
+const PREFAB =
+  'root:\n  - type: AnimatedSprite2D\n    animationResourcePath: res://sprites/goblin/goblin.pix3anim\n';
+const ENTRY = 'root:\n  - id: goblin-1\n    instance: res://prefabs/Goblin.pix3scene\n';
+
+function characterBundle(): LibraryBundle {
+  return makeBundle(
+    { slug: 'goblin', name: 'Goblin', entry: 'prefab.pix3scene', preview: 'preview.webp' },
+    {
+      'prefab.pix3scene': ENTRY,
+      'prefabs/Goblin.pix3scene': PREFAB,
+      'sprites/goblin/goblin.pix3anim': ANIM,
+      'sprites/goblin/a_0001.png': new Blob([FRAME_A]),
+      'sprites/goblin/a_0002.png': new Blob([FRAME_B]),
+      'preview.webp': new Blob([new Uint8Array([9])]),
+    }
+  );
+}
+
+describe('LibraryInsertService — write order', () => {
+  it('writes frames, then the flipbook, then the prefab, the entry last — all in one batch', async () => {
+    const { service, storage } = makeService(characterBundle());
+
+    await service.copyBundleIntoProject('item-1');
+
+    const at = (path: string) => storage.writeOrder.indexOf(`assets/library/goblin/${path}`);
+    expect(storage.writeOrder).toHaveLength(5);
+    expect(at('sprites/goblin/a_0001.png')).toBeLessThan(at('sprites/goblin/goblin.pix3anim'));
+    expect(at('sprites/goblin/a_0002.png')).toBeLessThan(at('sprites/goblin/goblin.pix3anim'));
+    expect(at('sprites/goblin/goblin.pix3anim')).toBeLessThan(at('prefabs/Goblin.pix3scene'));
+    expect(at('prefab.pix3scene')).toBe(4);
+    expect(storage.writesOutsideBatch).toEqual([]);
+    // Each directory is created once, not once per file.
+    const dirs = storage.createDirectory.mock.calls.map(call => (call as unknown[])[0]);
+    expect(new Set(dirs).size).toBe(dirs.length);
+  });
+
+  it('copies a reference cycle into the target folder instead of stalling', async () => {
+    const bundle = makeBundle(
+      { entry: 'a.pix3scene' },
+      {
+        'a.pix3scene': 'instance: res://b.pix3scene\n',
+        'b.pix3scene': 'instance: res://a.pix3scene\n',
+      }
+    );
+    const { service, storage } = makeService(bundle);
+    const inserted = await service.copyBundleIntoProject('item-1');
+    expect(storage.textWrites['assets/library/enemy/a.pix3scene']).toBe(
+      'instance: res://assets/library/enemy/b.pix3scene\n'
+    );
+    expect(storage.textWrites['assets/library/enemy/b.pix3scene']).toBe(
+      'instance: res://assets/library/enemy/a.pix3scene\n'
+    );
+    expect(inserted!.entryResourcePath).toBe('res://assets/library/enemy/a.pix3scene');
+  });
+});
+
+describe('LibraryInsertService — content dedup', () => {
+  const sourceProject = {
+    'prefabs/Goblin.pix3scene': PREFAB,
+    'sprites/goblin/goblin.pix3anim': ANIM,
+    'sprites/goblin/a_0001.png': FRAME_A,
+    'sprites/goblin/a_0002.png': FRAME_B,
+  };
+
+  it('back into its source project: reuses everything, writes only the synthetic entry', async () => {
+    const { service, storage } = makeService(characterBundle(), sourceProject, true);
+
+    const inserted = await service.copyBundleIntoProject('item-1');
+
+    expect(storage.writeOrder).toEqual(['assets/library/goblin/prefab.pix3scene']);
+    expect(storage.textWrites['assets/library/goblin/prefab.pix3scene']).toContain(
+      'instance: res://prefabs/Goblin.pix3scene'
+    );
+    expect(inserted!.resourcePaths).toContain('res://sprites/goblin/a_0001.png');
+    expect(inserted!.resourcePaths).toContain('res://prefabs/Goblin.pix3scene');
+  });
+
+  it('matches by hash wherever the file lives, remapping referrers to the existing path', async () => {
+    const { service, storage } = makeService(
+      characterBundle(),
+      { 'art/other/place/frame.png': FRAME_A },
+      true
+    );
+
+    await service.copyBundleIntoProject('item-1');
+
+    expect(storage.binaryWrites['assets/library/goblin/sprites/goblin/a_0001.png']).toBeUndefined();
+    expect(storage.binaryWrites['assets/library/goblin/sprites/goblin/a_0002.png']).toBe(4);
+    const anim = storage.textWrites['assets/library/goblin/sprites/goblin/goblin.pix3anim'];
+    expect(anim).toContain('res://art/other/place/frame.png');
+    expect(anim).toContain('res://assets/library/goblin/sprites/goblin/a_0002.png');
+  });
+
+  it('keeps a file on its own path when other files share its content', async () => {
+    // A looping flipbook repeats frames: a_0002 has a byte-identical twin that sorts first.
+    const { service, storage } = makeService(
+      characterBundle(),
+      { ...sourceProject, 'sprites/goblin/a_0000.png': FRAME_B },
+      true
+    );
+    await service.copyBundleIntoProject('item-1');
+    // Nothing remapped, so the flipbook and prefab still match the project's and are reused.
+    expect(storage.writeOrder).toEqual(['assets/library/goblin/prefab.pix3scene']);
+  });
+
+  it('local backend (no hashed manifest): reuses identical files at their original paths', async () => {
+    const { service, storage } = makeService(characterBundle(), sourceProject, false);
+    await service.copyBundleIntoProject('item-1');
+    expect(storage.writeOrder).toEqual(['assets/library/goblin/prefab.pix3scene']);
+  });
+
+  it('copies a same-path file whose content differs', async () => {
+    const { service, storage } = makeService(
+      characterBundle(),
+      { ...sourceProject, 'sprites/goblin/a_0002.png': new Uint8Array([7, 7, 7, 7]) },
+      false
+    );
+    await service.copyBundleIntoProject('item-1');
+    expect(storage.binaryWrites['assets/library/goblin/sprites/goblin/a_0002.png']).toBe(4);
+    // The flipbook now differs from the project's (one frame moved), so it is copied too.
+    expect(storage.textWrites['assets/library/goblin/sprites/goblin/goblin.pix3anim']).toContain(
+      'res://sprites/goblin/a_0001.png'
+    );
   });
 });
