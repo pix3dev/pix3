@@ -263,6 +263,14 @@ node, use the `core:AnimationPlayer` behaviour.
   `fps` property here, unlike [AnimatedSprite3D](#animatedsprite3d).
 - `freeOnFinish` + a one-shot clip is the whole "spawn an explosion" pattern: no script needed.
 - `sizeMode: native` is what you want for a trimmed spritesheet whose frames differ in size.
+- **Scripts switch clips with `play(name?, { restart? })`**, not by writing `currentClip`. It
+  returns `false` (and changes nothing) for a clip the loaded resource does not have — no silent
+  fallback to the first clip. A different clip starts at frame 0; the current clip keeps its
+  position unless `restart: true`, which is also how a finished one-shot (`isPlaying` went false on
+  its last frame) is played again — a repeated `attack` must begin at frame 0. `getClipNames()`
+  lists the resource's clips once it has loaded.
+- Sequence frames are keyed by their `texturePath`, so clips are independent: `attack[0]` and
+  `idle[0]` are different files and never share a texture slot.
 
 ---
 

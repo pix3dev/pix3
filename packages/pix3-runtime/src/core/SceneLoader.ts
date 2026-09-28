@@ -2154,21 +2154,24 @@ export class SceneLoader {
       const resource = await this.assetLoader.loadAnimationResource(animationResourcePath);
       sprite.setAnimationResource(resource);
 
-      const frameTexturePaths = new Map<number, string>();
+      // Every distinct frame file once, keyed by its path: clips are independent
+      // frame lists, so keying by in-clip index would let `attack[0]` replace
+      // `idle[0]` (see AnimatedSprite2D.frameTextures).
+      const frameTexturePaths = new Set<string>();
       for (const clip of resource.clips) {
-        clip.frames.forEach((frame, frameIndex) => {
+        for (const frame of clip.frames) {
           const texturePath = getAnimationFrameTexturePath(resource, frame);
           if (texturePath) {
-            frameTexturePaths.set(frameIndex, texturePath);
+            frameTexturePaths.add(texturePath);
           }
-        });
+        }
       }
 
       await Promise.all(
-        Array.from(frameTexturePaths.entries()).map(async ([frameIndex, texturePath]) => {
+        Array.from(frameTexturePaths).map(async texturePath => {
           try {
             const texture = await this.assetLoader.loadTexture(texturePath);
-            sprite.setFrameTexture(frameIndex, texture);
+            sprite.setFrameTexture(texturePath, texture);
           } catch (error) {
             console.warn(
               `[SceneLoader] Error loading frame texture for AnimatedSprite2D "${sprite.nodeId}":`,

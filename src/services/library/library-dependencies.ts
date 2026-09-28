@@ -8,7 +8,7 @@
  * files. The extraction is text-based, mirroring `ProjectService`'s regex remap.
  */
 
-import { getAssetPathExtension } from '@/core/asset-categories';
+import { getAssetPathExtension, isResourceGraphPath } from '@/core/asset-categories';
 
 const RES_TOKEN = /res:\/\/[^\s"'`)\]}]+/g;
 /** Trailing characters that commonly abut a path token in YAML/JSON but are not part of it. */
@@ -38,6 +38,16 @@ export function stripResScheme(reference: string): string {
 export function isSceneReference(reference: string): boolean {
   const ext = getAssetPathExtension(stripResScheme(reference));
   return ext === 'pix3scene' || ext === 'pix3prefab';
+}
+
+/**
+ * Whether a `res://` reference points at a resource whose contents list further `res://` files and
+ * must be walked like a scene (`RESOURCE_GRAPH_EXTENSIONS`): a `.pix3anim` flipbook names every
+ * frame texture, so a prefab that only references the flipbook still needs those PNGs in the
+ * bundle (they used to be dropped, and a re-published character came back with no frames).
+ */
+export function isResourceGraphReference(reference: string): boolean {
+  return isResourceGraphPath(stripResScheme(reference));
 }
 
 /** Whether a `res://` reference points at a script we should copy into the bundle. */

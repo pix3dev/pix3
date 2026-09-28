@@ -162,6 +162,50 @@ describe('PublishToLibraryService.publishAssetPath — script + code-asset packi
     expect(bundle.manifest.originalPathFiles).toContain('assets/shared.png');
   });
 
+  it('walks a referenced .pix3anim and bundles every frame texture it lists', async () => {
+    const { service, getBundle } = makeService({
+      'prefabs/goblin.pix3scene': [
+        'version: 1.0.0',
+        'root:',
+        '  - type: AnimatedSprite2D',
+        '    properties:',
+        '      animationResourcePath: res://assets/goblin/goblin.pix3anim',
+        '      currentClip: idle',
+      ].join('\n'),
+      'assets/goblin/goblin.pix3anim': JSON.stringify({
+        version: '1.0.0',
+        texturePath: '',
+        clips: [
+          {
+            name: 'idle',
+            frames: [
+              { texturePath: 'res://assets/goblin/idle_0001.png' },
+              { texturePath: 'res://assets/goblin/idle_0002.png' },
+            ],
+          },
+          { name: 'attack', frames: [{ texturePath: 'res://assets/goblin/attack_0001.png' }] },
+        ],
+      }),
+      'assets/goblin/idle_0001.png': new Blob([new Uint8Array([1])]),
+      'assets/goblin/idle_0002.png': new Blob([new Uint8Array([2])]),
+      'assets/goblin/attack_0001.png': new Blob([new Uint8Array([3])]),
+    });
+
+    await service.publishAssetPath('res://prefabs/goblin.pix3scene');
+    const bundle = getBundle()!;
+    const keys = [...bundle.files.keys()].sort();
+    expect(keys).toEqual(
+      expect.arrayContaining([
+        'assets/goblin/goblin.pix3anim',
+        'assets/goblin/idle_0001.png',
+        'assets/goblin/idle_0002.png',
+        'assets/goblin/attack_0001.png',
+      ])
+    );
+    // Namespaced (remapped on insert), not original-path: the flipbook is scene data, not code.
+    expect(bundle.manifest.originalPathFiles ?? []).not.toContain('assets/goblin/idle_0001.png');
+  });
+
   it('terminates on an import cycle between two scripts and bundles both', async () => {
     const { service, getBundle } = makeService({
       'prefabs/cycle.pix3scene': [

@@ -318,3 +318,170 @@ describe('AnimatedSprite2D animation runtime', () => {
     expect(loaded.currentFrame).toBe(1);
   });
 });
+
+/**
+ * Two sequence clips of different lengths whose frames are distinct files. The
+ * loader used to key frame textures by the frame's index *inside its clip*, so
+ * `attack[0]` overwrote `idle[0]` and the idle pose rendered attack pixels.
+ */
+const MULTI_CLIP_RESOURCE: AnimationResource = {
+  version: '1.0.0',
+  texturePath: '',
+  clips: [
+    {
+      name: 'idle',
+      fps: 10,
+      loop: true,
+      playbackMode: 'normal',
+      frames: ['idle-0', 'idle-1', 'idle-2'].map(stem => sequenceFrame(stem)),
+    },
+    {
+      name: 'attack',
+      fps: 10,
+      loop: false,
+      playbackMode: 'normal',
+      frames: ['attack-0', 'attack-1'].map(stem => sequenceFrame(stem)),
+    },
+  ],
+};
+
+function sequenceFrame(stem: string) {
+  return {
+    textureIndex: 0,
+    offset: { x: 0, y: 0 },
+    repeat: { x: 1, y: 1 },
+    durationMultiplier: 1,
+    anchor: { x: 0.5, y: 1 },
+    texturePath: `res://animations/goblin/${stem}.png`,
+    boundingBox: { x: 0, y: 0, width: 0, height: 0 },
+    collisionPolygon: [],
+  };
+}
+
+class MultiClipAssetLoader extends AssetLoader {
+  readonly loadedPaths: string[] = [];
+
+  async loadAnimationResource(): Promise<AnimationResource> {
+    return MULTI_CLIP_RESOURCE;
+  }
+
+  async loadTexture(resourcePath: string): Promise<Texture> {
+    this.loadedPaths.push(resourcePath);
+    const texture = new Texture();
+    // Clones keep `name`, so the test can tell which source file a material shows.
+    texture.name = resourcePath;
+    return texture;
+  }
+}
+
+async function hydrateMultiClipSprite(
+  currentClip: string
+): Promise<{ sprite: AnimatedSprite2D; loader: MultiClipAssetLoader }> {
+  const authored = new AnimatedSprite2D({
+    id: 'goblin',
+    name: 'Goblin',
+    animationResourcePath: 'res://animations/goblin.pix3anim',
+    currentClip,
+    isPlaying: false,
+  });
+  const yaml = new SceneSaver().serializeScene({
+    version: '1.0.0',
+    metadata: {},
+    rootNodes: [authored],
+    nodeMap: new Map([[authored.nodeId, authored]]),
+  });
+  const loader = new MultiClipAssetLoader(new ResourceManager('/'), new AudioService());
+  const sceneLoader = new SceneLoader(loader, new ScriptRegistry(), new ResourceManager('/'));
+  const graph = await sceneLoader.parseScene(yaml, { filePath: 'res://scenes/main.pix3scene' });
+  await flushMicrotasks(8);
+  return { sprite: graph.rootNodes[0] as AnimatedSprite2D, loader };
+}
+
+describe('AnimatedSprite2D multi-clip sequence textures', () => {
+  it('shows each clip its own frame files, not the last clip loaded at that index', async () => {
+    const { sprite, loader } = await hydrateMultiClipSprite('idle');
+    const material = getSpriteMaterial(sprite);
+
+    // Every distinct frame file is loaded exactly once.
+    expect([...loader.loadedPaths].sort()).toEqual(
+      ['attack-0', 'attack-1', 'idle-0', 'idle-1', 'idle-2']
+        .map(stem => `res://animations/goblin/${stem}.png`)
+        .sort()
+    );
+
+    expect(material.map?.name).toBe('res://animations/goblin/idle-0.png');
+    sprite.currentFrame = 1;
+    expect(material.map?.name).toBe('res://animations/goblin/idle-1.png');
+    sprite.currentFrame = 2;
+    expect(material.map?.name).toBe('res://animations/goblin/idle-2.png');
+
+    sprite.currentClip = 'attack';
+    expect(sprite.currentFrame).toBe(0);
+    expect(material.map?.name).toBe('res://animations/goblin/attack-0.png');
+    sprite.currentFrame = 1;
+    expect(material.map?.name).toBe('res://animations/goblin/attack-1.png');
+
+    sprite.currentClip = 'idle';
+    expect(material.map?.name).toBe('res://animations/goblin/idle-0.png');
+  });
+});
+
+describe('AnimatedSprite2D.play', () => {
+  it('restarts a finished one-shot clip from frame 0 and refuses unknown clips', async () => {
+    const { sprite } = await hydrateMultiClipSprite('attack');
+    const material = getSpriteMaterial(sprite);
+
+    expect(sprite.play('attack')).toBe(true);
+    expect(sprite.isPlaying).toBe(true);
+    sprite.tick(0.5);
+    expect(sprite.currentFrame).toBe(1);
+    expect(sprite.isPlaying).toBe(false); // one-shot finished
+    expect(material.map?.name).toBe('res://animations/goblin/attack-1.png');
+
+    // Same clip without restart: stays where it finished.
+    expect(sprite.play('attack')).toBe(true);
+    expect(sprite.currentFrame).toBe(1);
+
+    // Same clip with restart: back to frame 0, playing, and advancing again.
+    expect(sprite.play('attack', { restart: true })).toBe(true);
+    expect(sprite.currentFrame).toBe(0);
+    expect(sprite.isPlaying).toBe(true);
+    expect(material.map?.name).toBe('res://animations/goblin/attack-0.png');
+    sprite.tick(0.11);
+    expect(sprite.currentFrame).toBe(1);
+
+    // Unknown clip: refused, nothing changes (no fallback to the first clip).
+    expect(sprite.play('jump')).toBe(false);
+    expect(sprite.currentClip).toBe('attack');
+    expect(sprite.currentFrame).toBe(1);
+
+    // A different clip always starts at frame 0.
+    sprite.currentFrame = 1;
+    expect(sprite.play('idle')).toBe(true);
+    expect(sprite.currentClip).toBe('idle');
+    expect(sprite.currentFrame).toBe(0);
+    expect(sprite.isPlaying).toBe(true);
+    expect(material.map?.name).toBe('res://animations/goblin/idle-0.png');
+    expect(sprite.getClipNames()).toEqual(['idle', 'attack']);
+
+    // No name: replay the current clip.
+    sprite.currentFrame = 1;
+    expect(sprite.play(undefined, { restart: true })).toBe(true);
+    expect(sprite.currentClip).toBe('idle');
+    expect(sprite.currentFrame).toBe(0);
+  });
+
+  it('accepts a clip name before the resource has loaded', () => {
+    const sprite = new AnimatedSprite2D({
+      id: 'lazy',
+      name: 'Lazy',
+      animationResourcePath: 'res://animations/goblin.pix3anim',
+      isPlaying: false,
+    });
+    expect(sprite.play('attack')).toBe(true);
+    expect(sprite.currentClip).toBe('attack');
+    expect(sprite.isPlaying).toBe(true);
+    sprite.setAnimationResource(MULTI_CLIP_RESOURCE);
+    expect(sprite.currentClip).toBe('attack');
+  });
+});

@@ -23,6 +23,7 @@ import {
   collectClipPointNames,
   findAnimationClip,
   findAnimationFramePoint,
+  getAnimationFrameTexturePath,
   isSequenceAnimationFrame,
   type AnimationClip,
   type AnimationFrame,
@@ -46,6 +47,15 @@ export type { AnimatedSpriteAnchor2D, AnimatedSpriteSizeMode };
 const FRAME_POINT_SCRATCH = new Vector3();
 const FRAME_POINT_MATRIX_SCRATCH = new Matrix4();
 const FRAME_POINT_EULER_SCRATCH = new Euler();
+
+export interface PlayClipOptions {
+  /**
+   * Start the clip from its first frame even when it is already the current
+   * clip — a repeated `attack` must begin at frame 0. Defaults to `false`
+   * (Godot's `play()`): re-playing the current clip keeps its position.
+   */
+  restart?: boolean;
+}
 
 export interface AnimatedSprite2DProps extends Omit<Node2DProps, 'type'> {
   animationResourcePath?: string | null;
@@ -85,7 +95,13 @@ export class AnimatedSprite2D
   private animationResource: AnimationResource | null = null;
   private activeClip: AnimationClip | null = null;
   private spritesheetTexture: Texture | null = null;
-  private readonly frameTextures = new Map<number, Texture>();
+  /**
+   * Sequence frame textures keyed by the frame's `texturePath` — NOT by frame
+   * index. Clips are independent frame lists, so `attack[0]` and `idle[0]` are
+   * different files; an index key made the last clip loaded win for every
+   * index it shared, and idle rendered attack pixels.
+   */
+  private readonly frameTextures = new Map<string, Texture>();
 
   private mesh: Mesh;
   private material: MeshBasicMaterial;
@@ -212,24 +228,99 @@ export class AnimatedSprite2D
 
   setAnimationResource(resource: AnimationResource | null): void {
     this.animationResource = resource;
+    if (resource && this.currentClip && !resource.clips.some(c => c.name === this.currentClip)) {
+      console.warn(
+        `[AnimatedSprite2D] Unknown clip "${this.currentClip}" on node ${this.nodeId} ` +
+          `(available: ${resource.clips.map(c => c.name).join(', ') || 'none'}); using the first clip.`
+      );
+    }
     this.syncActiveClip(false);
   }
 
-  setFrameTexture(frameIndex: number, texture: Texture | null): void {
-    const normalizedIndex = Math.max(0, Math.floor(frameIndex));
-    const previousTexture = this.frameTextures.get(normalizedIndex);
+  /**
+   * Register the texture for one sequence frame file. `frame` is the frame's
+   * `texturePath` (the loader passes every distinct path of the resource once).
+   * A number is accepted as a compatibility form and resolves to that frame of
+   * the ACTIVE clip only — it cannot address another clip's frames.
+   */
+  setFrameTexture(frame: string | number, texture: Texture | null): void {
+    const texturePath =
+      typeof frame === 'number'
+        ? getAnimationFrameTexturePath(
+            this.animationResource,
+            this.activeClip?.frames[Math.max(0, Math.floor(frame))] ?? null
+          )
+        : frame.trim();
+    if (texturePath.length === 0) {
+      return;
+    }
+
+    const previousTexture = this.frameTextures.get(texturePath);
     if (previousTexture) {
       previousTexture.dispose();
-      this.frameTextures.delete(normalizedIndex);
+      this.frameTextures.delete(texturePath);
     }
 
     if (texture) {
-      this.frameTextures.set(normalizedIndex, this.cloneTexture(texture));
+      this.frameTextures.set(texturePath, this.cloneTexture(texture));
     }
 
-    if (normalizedIndex === this._currentFrame) {
+    if (this.currentFrameTexturePath() === texturePath) {
       this.refreshTexturePresentation();
     }
+  }
+
+  /** Whether a texture is registered for a frame file (by `texturePath`). */
+  hasFrameTexture(texturePath: string): boolean {
+    return this.frameTextures.has(texturePath.trim());
+  }
+
+  /**
+   * Switch to a named clip and play it (same shape as `SpineSkeleton2D.play`).
+   * With no name the current clip is (re)played. Returns `false` — and changes
+   * nothing — when the resource is loaded and has no clip of that name: no
+   * silent fallback to the first clip, unlike writing `currentClip`.
+   *
+   * Before the resource has loaded the name is accepted and resolved on arrival
+   * (`SceneLoader` fetches the `.pix3anim` asynchronously, so a component's
+   * `onStart` usually runs first); a name that then turns out unknown is warned
+   * about once by `setAnimationResource`.
+   *
+   * A different clip always starts at frame 0 with a fresh play-clock. The
+   * current clip keeps its position unless `restart` is set, which also revives
+   * a finished one-shot (`isPlaying` was flipped off at its last frame).
+   */
+  play(name?: string, options: PlayClipOptions = {}): boolean {
+    const clipName = (name ?? this.currentClip).trim();
+    if (clipName.length === 0) {
+      return false;
+    }
+    if (this.animationResource && !this.animationResource.clips.some(c => c.name === clipName)) {
+      return false;
+    }
+
+    const isSameClip = this.activeClip !== null && this.activeClip.name === clipName;
+    if (!isSameClip) {
+      this.currentClip = clipName;
+      this.properties.currentClip = clipName;
+      // Resets the frame + play-clock when the active clip actually changes.
+      this.syncActiveClip(true);
+    }
+    if (options.restart || !isSameClip) {
+      this._currentFrame = 0;
+      this.properties.currentFrame = 0;
+      this.frameSequencePlayer.reset();
+      this.refreshTexturePresentation();
+    }
+
+    this.isPlaying = true;
+    this.properties.isPlaying = true;
+    return true;
+  }
+
+  /** Names of the clips in the loaded resource (empty until it is loaded). */
+  getClipNames(): string[] {
+    return this.animationResource?.clips.map(clip => clip.name) ?? [];
   }
 
   setSpritesheetTexture(texture: Texture | null): void {
@@ -478,13 +569,20 @@ export class AnimatedSprite2D
     return frames[this._currentFrame] ?? null;
   }
 
+  /** `texturePath` of the frame showing now (`''` for spritesheet frames / no frame). */
+  private currentFrameTexturePath(): string {
+    return getAnimationFrameTexturePath(this.animationResource, this.getCurrentFrameData());
+  }
+
   private refreshTexturePresentation(): void {
     // Frame geometry (native sizing + both anchors) depends on which frame is
     // showing, so it is re-derived on every presentation refresh.
     this.updateSize();
 
     const currentFrame = this.getCurrentFrameData();
-    const frameTexture = currentFrame ? (this.frameTextures.get(this._currentFrame) ?? null) : null;
+    const frameTexturePath = this.currentFrameTexturePath();
+    const frameTexture =
+      currentFrame && frameTexturePath ? (this.frameTextures.get(frameTexturePath) ?? null) : null;
     const usesSequenceTexture = isSequenceAnimationFrame(currentFrame) && Boolean(frameTexture);
     const texture = usesSequenceTexture ? frameTexture : this.spritesheetTexture;
 
@@ -591,16 +689,15 @@ export class AnimatedSprite2D
    * source size, then a plain texture's own image dimensions. `null` when nothing
    * knows — the caller falls back to stretch layout for that frame.
    */
-  private resolveFrameSourceSize(
-    frame: AnimationFrame | null,
-    frameIndex: number
-  ): AnimationSize | null {
+  private resolveFrameSourceSize(frame: AnimationFrame | null): AnimationSize | null {
     const authored = frame?.sourceSize;
     if (authored && authored.width > 0 && authored.height > 0) {
       return authored;
     }
 
-    const texture = this.frameTextures.get(frameIndex) ?? this.spritesheetTexture;
+    const texturePath = getAnimationFrameTexturePath(this.animationResource, frame);
+    const texture =
+      (texturePath ? this.frameTextures.get(texturePath) : undefined) ?? this.spritesheetTexture;
     const atlasSize = atlasSizeOf(texture);
     if (atlasSize && atlasSize.width > 0 && atlasSize.height > 0) {
       return atlasSize;
@@ -615,18 +712,15 @@ export class AnimatedSprite2D
   }
 
   /** Layout of one frame's quad, resolved through the shared editor/runtime math. */
-  private resolveFrameLayout(
-    frame: AnimationFrame | null,
-    frameIndex: number
-  ): AnimatedSpriteFrameLayout {
+  private resolveFrameLayout(frame: AnimationFrame | null): AnimatedSpriteFrameLayout {
     return resolveAnimatedSpriteFrameLayout({
       nodeWidth: this.width,
       nodeHeight: this.height,
       anchor: this.anchor,
       sizeMode: this.sizeMode,
       frame,
-      frameSourceSize: this.resolveFrameSourceSize(frame, frameIndex),
-      clipFirstFrameSourceSize: this.resolveFrameSourceSize(this.activeClip?.frames[0] ?? null, 0),
+      frameSourceSize: this.resolveFrameSourceSize(frame),
+      clipFirstFrameSourceSize: this.resolveFrameSourceSize(this.activeClip?.frames[0] ?? null),
     });
   }
 
@@ -637,7 +731,7 @@ export class AnimatedSprite2D
    */
   private updateSize(): void {
     const frame = this.getCurrentFrameData();
-    const layout = this.resolveFrameLayout(frame, this._currentFrame);
+    const layout = this.resolveFrameLayout(frame);
 
     // Size is mesh.scale over the shared unit quad — no geometry churn on resize.
     this.mesh.scale.set(layout.width, layout.height, 1);
@@ -667,7 +761,7 @@ export class AnimatedSprite2D
       return null;
     }
 
-    return resolveFramePointToLocal(point, this.resolveFrameLayout(frame, index));
+    return resolveFramePointToLocal(point, this.resolveFrameLayout(frame));
   }
 
   /**
@@ -729,8 +823,8 @@ export class AnimatedSprite2D
 
     return resolveFramePolygonToLocal(
       frame.collisionPolygon,
-      this.resolveFrameLayout(frame, index),
-      this.resolveFrameSourceSize(frame, index)
+      this.resolveFrameLayout(frame),
+      this.resolveFrameSourceSize(frame)
     );
   }
 

@@ -11,6 +11,8 @@
  * `ProjectService.rewriteResourceReferencesInText` (which handles the move-remap case).
  */
 
+import { RESOURCE_GRAPH_EXTENSIONS } from '@/core/asset-categories';
+
 /** Root folder (project-relative, no `res://`) under which inserted bundles live. */
 const LIBRARY_INSERT_ROOT = 'assets/library';
 
@@ -59,11 +61,13 @@ export function remapBundleReferences(
   return result;
 }
 
-/** File extensions whose contents may carry `res://` references and need remapping. */
+/**
+ * File extensions whose contents may carry `res://` references and need remapping: every
+ * resource-graph type (scenes, prefabs, flipbooks — the same table publish and export walk) plus
+ * scripts and generic text data.
+ */
 const TEXT_REFERENCE_EXTENSIONS = new Set([
-  'pix3scene',
-  'pix3prefab',
-  'pix3anim',
+  ...RESOURCE_GRAPH_EXTENSIONS,
   'ts',
   'js',
   'mjs',

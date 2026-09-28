@@ -27,6 +27,7 @@ import { Collider2DBehavior } from './Collider2DBehavior';
 import { PhysicsWorld2DBehavior } from './PhysicsWorld2DBehavior';
 import { RevoluteJoint2DBehavior } from './RevoluteJoint2DBehavior';
 import { PointAttachmentBehavior } from './PointAttachmentBehavior';
+import { CharacterVisual2DBehavior } from './CharacterVisual2DBehavior';
 import { NetworkedNodeBehavior } from './NetworkedNodeBehavior';
 import { ReplicatedTransformBehavior } from './ReplicatedTransformBehavior';
 import { AnimationPlayerBehavior } from '../animation/AnimationPlayerBehavior';
@@ -253,6 +254,17 @@ export function registerBuiltInScripts(registry: ScriptRegistry): void {
     category: 'Animation',
     componentClass: PointAttachmentBehavior,
     keywords: ['point', 'socket', 'attach', 'muzzle', 'hand', 'bone', 'sprite', 'animation'],
+  });
+
+  registry.registerComponent({
+    id: 'core:CharacterVisual2D',
+    displayName: 'Character Visual 2D',
+    description:
+      'Plays variant + state as a clip of an AnimatedSprite2D whose clips are named ' +
+      '<variant>.<state> (sword.idle); swap the variant, keep the state vocabulary',
+    category: 'Animation',
+    componentClass: CharacterVisual2DBehavior,
+    keywords: ['character', 'variant', 'state', 'skin', 'weapon', 'clip', 'sprite', 'animation'],
   });
 
   registry.registerComponent({

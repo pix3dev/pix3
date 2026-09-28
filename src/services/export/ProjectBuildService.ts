@@ -1,3 +1,4 @@
+import { isResourceGraphPath } from '@/core/asset-categories';
 import { injectable, inject } from '@/fw/di';
 import { parseSpineAtlasPageNames, resolveSpinePagePath } from '@pix3/runtime';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
@@ -668,9 +669,9 @@ export class ProjectBuildService {
 
   private isScannableResource(path: string): boolean {
     // Resources whose contents reference further `res://` assets: scenes and
-    // prefabs (`.pix3scene`/`.prefab`) plus `.pix3anim` flipbooks (which list
-    // their frame texture paths).
-    return /\.(pix3scene|prefab|pix3anim)$/i.test(path);
+    // prefabs plus `.pix3anim` flipbooks (which list their frame texture paths).
+    // One table with publish-to-library and insert remap (`RESOURCE_GRAPH_EXTENSIONS`).
+    return isResourceGraphPath(path);
   }
 
   /**

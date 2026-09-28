@@ -103,6 +103,10 @@ export const STRIPPABLE_RUNTIME_MODULES: readonly StrippableRuntimeModule[] = [
     keepWhenMentioned: ['PointAttachmentBehavior', 'core:PointAttachment'],
   },
   {
+    modulePath: 'behaviors/CharacterVisual2DBehavior',
+    keepWhenMentioned: ['CharacterVisual2DBehavior', 'core:CharacterVisual2D'],
+  },
+  {
     modulePath: 'behaviors/ReplicatedTransformBehavior',
     keepWhenMentioned: ['ReplicatedTransformBehavior', 'core:ReplicatedTransform'],
   },
@@ -120,7 +124,7 @@ export const STRIPPABLE_RUNTIME_MODULES: readonly StrippableRuntimeModule[] = [
   {
     modulePath: 'nodes/2D/AnimatedSprite2D',
     keepWhenMentioned: ['AnimatedSprite2D'],
-    importers: ['behaviors/PointAttachmentBehavior'],
+    importers: ['behaviors/PointAttachmentBehavior', 'behaviors/CharacterVisual2DBehavior'],
   },
   { modulePath: 'nodes/2D/UI/Bar2D', keepWhenMentioned: ['Bar2D'] },
   { modulePath: 'nodes/2D/UI/Checkbox2D', keepWhenMentioned: ['Checkbox2D'] },

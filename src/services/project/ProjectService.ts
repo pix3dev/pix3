@@ -1,3 +1,4 @@
+import { isResourceGraphPath } from '@/core/asset-categories';
 import { injectable, ServiceContainer } from '@/fw/di';
 import {
   appState,
@@ -1251,8 +1252,11 @@ export class ProjectService {
     targetPath: string,
     movedKind: FileSystemHandleKind
   ): Promise<void> {
+    // Every resource whose text lists `res://` paths — scenes, prefabs AND `.pix3anim`
+    // flipbooks (one table with publish/export/insert: `RESOURCE_GRAPH_EXTENSIONS`).
+    // Scanning only `.pix3scene` left a moved frame folder dangling from its flipbook.
     const sceneFiles = projectFiles.filter(
-      entry => entry.kind === 'file' && entry.path.endsWith('.pix3scene')
+      entry => entry.kind === 'file' && isResourceGraphPath(entry.path)
     );
 
     for (const sceneFile of sceneFiles) {

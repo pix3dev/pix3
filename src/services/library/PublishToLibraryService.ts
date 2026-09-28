@@ -36,6 +36,7 @@ import {
   collectRelativeImports,
   collectResourceReferences,
   collectUserComponentTypes,
+  isResourceGraphReference,
   isScriptReference,
   isSceneReference,
   resolveImportCandidates,
@@ -332,7 +333,7 @@ export class PublishToLibraryService {
     }
   }
 
-  /** Add one `res://` file to the bundle in the given bucket and recurse into scene/script text. */
+  /** Add one `res://` file to the bundle in the given bucket and recurse into scene/script/resource text. */
   private async collectResourceFile(
     relativePath: string,
     reference: string,
@@ -359,7 +360,11 @@ export class PublishToLibraryService {
       ctx.files.set(relativePath, blob);
     }
 
-    if (isSceneReference(reference) || isScriptReference(reference)) {
+    if (
+      isSceneReference(reference) ||
+      isScriptReference(reference) ||
+      isResourceGraphReference(reference)
+    ) {
       const nestedText = await blob.text();
       await this.collectDependencies(nestedText, ctx, inOriginalBucket, relativePath);
     }

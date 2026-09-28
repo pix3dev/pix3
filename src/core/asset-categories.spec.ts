@@ -8,6 +8,8 @@ import {
   ensureAssetTypeFolder,
   getAssetPathExtension,
   groupedCategoryExpansionKey,
+  isResourceGraphPath,
+  RESOURCE_GRAPH_EXTENSIONS,
   groupedDirectoryExpansionKey,
   splitGroupedDirectoryExpansionKey,
 } from './asset-categories';
@@ -90,5 +92,17 @@ describe('asset-categories', () => {
     expect(splitGroupedDirectoryExpansionKey(groupedCategoryExpansionKey('images'))).toBeNull();
     expect(splitGroupedDirectoryExpansionKey('bogus::assets')).toBeNull();
     expect(splitGroupedDirectoryExpansionKey('no-separator')).toBeNull();
+  });
+
+  it('walks scenes, prefabs and flipbooks as resource-graph files, nothing else', () => {
+    // The one table behind publish-to-library, playable export and insert remap.
+    expect([...RESOURCE_GRAPH_EXTENSIONS].sort()).toEqual(
+      ['pix3anim', 'pix3prefab', 'pix3scene', 'prefab'].sort()
+    );
+    expect(isResourceGraphPath('prefabs/Goblin.pix3scene')).toBe(true);
+    expect(isResourceGraphPath('sprites/goblin/goblin.PIX3ANIM')).toBe(true);
+    expect(isResourceGraphPath('sprites/goblin/idle_0001.png')).toBe(false);
+    expect(isResourceGraphPath('scripts/Enemy.ts')).toBe(false);
+    expect(isResourceGraphPath('locales/en.json')).toBe(false);
   });
 });
