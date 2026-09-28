@@ -138,6 +138,13 @@ export interface CharacterCompileSpec {
   defaultState?: string;
   /** Between variant and state in clip names. Default `.`. */
   separator?: string;
+  /**
+   * Frame anchor for every frame, normalized with y from the top (`AnimationFrame.anchor`): the
+   * point of the canvas that lands on the node's position. For a character this is the feet — a
+   * canvas whose last opaque row is 84 of 100 wants `{ x: 0.5, y: 0.85 }`, so positioning the node
+   * places the character on the ground. Default `{ x: 0.5, y: 0.5 }` (canvas centre).
+   */
+  anchor?: { x: number; y: number };
   /** Project-relative directories. Defaults: `sprites`, `prefabs`. */
   spriteDirectory?: string;
   prefabDirectory?: string;
@@ -194,6 +201,10 @@ export function compileCharacter(spec: CharacterCompileSpec): CompiledCharacter 
   const animationPath = `${spriteDirectory}/${slug}/${slug}.pix3anim`;
   const animationResourcePath = toResourcePath(animationPath);
 
+  const anchor = spec.anchor ?? { x: 0.5, y: 0.5 };
+  if (![anchor.x, anchor.y].every(v => Number.isFinite(v))) {
+    throw new Error('[character-compiler] anchor must be finite numbers.');
+  }
   const warnings: string[] = [];
   const frameFiles: CompiledCharacterFrameFile[] = [];
   const clips: AnimationClip[] = [];
@@ -239,7 +250,7 @@ export function compileCharacter(spec: CharacterCompileSpec): CompiledCharacter 
         offset: { x: 0, y: 0 },
         repeat: { x: 1, y: 1 },
         durationMultiplier: 1,
-        anchor: { x: 0.5, y: 0.5 },
+        anchor: { x: anchor.x, y: anchor.y },
         texturePath: toResourcePath(targetPath),
         boundingBox: { x: 0, y: 0, width: frame.width, height: frame.height },
         collisionPolygon: [],
