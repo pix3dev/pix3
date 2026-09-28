@@ -2,8 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   AmbientLightNode,
   AudioPlayer,
+  AnimatedSprite2D,
   Camera3D,
   DirectionalLightNode,
+  GeometryMesh,
+  type NodeBase,
   HemisphereLightNode,
   PointLightNode,
   SpotLightNode,
@@ -43,5 +46,30 @@ describe('getNodeVisuals', () => {
       color: '#a5abffff',
       icon: 'volume-2',
     });
+  });
+
+  function markInstance(node: NodeBase, instanceRootId = node.nodeId): NodeBase {
+    (node.metadata as Record<string, unknown>).__pix3Prefab = {
+      localId: node.nodeId,
+      effectiveLocalId: node.nodeId,
+      instanceRootId,
+      sourcePath: 'res://prefabs/Goblin.pix3scene',
+    };
+    return node;
+  }
+
+  it('shows the prefab icon on instance roots: sky for 2D, pink for 3D', () => {
+    expect(getNodeVisuals(markInstance(new AnimatedSprite2D({ id: 'g', name: 'Goblin' })))).toEqual(
+      { color: '#1ebde3ff', icon: 'prefab-instance' }
+    );
+    expect(getNodeVisuals(markInstance(new GeometryMesh({ id: 'c', name: 'Crate' })))).toEqual({
+      color: '#ff7ac6ff',
+      icon: 'prefab-instance',
+    });
+  });
+
+  it('keeps the node-type icon on a prefab child', () => {
+    const child = markInstance(new AnimatedSprite2D({ id: 'v', name: 'Visual' }), 'g');
+    expect(getNodeVisuals(child).icon).toBe('image');
   });
 });

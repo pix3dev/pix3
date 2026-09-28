@@ -250,9 +250,7 @@ describe.skipIf(!existsSync(ROOT))('Seven characters (real frames)', () => {
         await settle();
 
         const root = graph.rootNodes[0];
-        const sprite = root.children.find(
-          (child): child is AnimatedSprite2D => child instanceof AnimatedSprite2D
-        );
+        const sprite = root instanceof AnimatedSprite2D ? root : undefined;
         expect(sprite).toBeDefined();
         if (!sprite) return;
         const material = (sprite.children.find(c => c instanceof Mesh) as Mesh)

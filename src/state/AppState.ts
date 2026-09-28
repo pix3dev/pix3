@@ -57,6 +57,8 @@ export interface EditorTab {
   /** Optional type-specific state (camera, selection, scroll position, etc.). */
   contextState?: {
     camera?: CameraState;
+    /** 2D navigation camera; kept here so it survives a reload via the persisted tab session. */
+    camera2D?: CameraState;
     selection?: TabSelectionState;
     codeEditor?: CodeEditorContextState;
     [key: string]: unknown;

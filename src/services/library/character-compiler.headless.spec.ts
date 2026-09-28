@@ -61,7 +61,7 @@ describe('compiled character in a headless game', () => {
       await game.start('scenes/main.pix3scene');
       await game.flush();
 
-      const visual = game.findNode('Visual');
+      const visual = game.findNode('Goblin');
       expect(visual).toBeInstanceOf(AnimatedSprite2D);
       const sprite = visual as AnimatedSprite2D;
       const character = game

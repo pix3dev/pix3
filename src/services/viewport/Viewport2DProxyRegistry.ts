@@ -144,6 +144,13 @@ export interface Viewport2DProxyRegistryDeps {
   installProxyEffects(node: NodeBase, material: THREE.Material): void;
   disposeObject3D(root: THREE.Object3D): void;
   getOrthographicCamera(): THREE.OrthographicCamera | undefined;
+  /**
+   * An AnimatedSprite2D proxy's drawn quad moved or resized (its `.pix3anim` or a
+   * frame texture finished loading, or the frame changed size). Selection frames
+   * are measured off that quad, so a frame built before the load — e.g. the
+   * selection restored on page reload — must be re-measured. Optional.
+   */
+  onAnimatedSprite2DLayoutChanged?(nodeId: string): void;
 }
 
 /**
@@ -396,7 +403,7 @@ export class Viewport2DProxyRegistry {
    */
   updateSprite2DAnchorMarkerVisibility(): void {
     const selectedIds = new Set(appState.selection.nodeIds);
-    for (const [nodeId, visualRoot] of this.sprite2DVisuals) {
+    for (const [nodeId, visualRoot] of [...this.sprite2DVisuals, ...this.animatedSprite2DVisuals]) {
       const anchorMarker = visualRoot.userData.anchorMarker as THREE.Group | undefined;
       if (anchorMarker) {
         anchorMarker.visible = selectedIds.has(nodeId);
@@ -563,6 +570,14 @@ export class Viewport2DProxyRegistry {
     sizeGroup.add(mesh);
     root.add(sizeGroup);
 
+    // Pivot marker at the node origin — where the node's position is, which with a
+    // frame anchor (a character's feet) is NOT the centre of the drawn quad. It
+    // lives on the root, not on the laid-out sizeGroup, so the frame layout's
+    // offset/scale never moves it. Hidden until the node is selected.
+    const anchorMarker = this.createSprite2DAnchorMarker(node, 1, 1);
+    root.add(anchorMarker);
+    root.userData.anchorMarker = anchorMarker;
+
     root.userData.isAnimatedSprite2DVisualRoot = true;
     root.userData.nodeId = node.nodeId;
     root.userData.sizeGroup = sizeGroup;
@@ -701,7 +716,11 @@ export class Viewport2DProxyRegistry {
     }
   }
 
-  private createSprite2DAnchorMarker(_node: Sprite2D, width: number, height: number): THREE.Group {
+  private createSprite2DAnchorMarker(
+    _node: Sprite2D | AnimatedSprite2D,
+    width: number,
+    height: number
+  ): THREE.Group {
     const marker = new THREE.Group();
     marker.position.set(0, 0, 0.01);
     marker.layers.set(LAYER_2D);
@@ -1179,8 +1198,40 @@ export class Viewport2DProxyRegistry {
       ),
     });
 
+    const changed =
+      sizeGroup.scale.x !== layout.width ||
+      sizeGroup.scale.y !== layout.height ||
+      sizeGroup.position.x !== layout.offsetX ||
+      sizeGroup.position.y !== layout.offsetY;
     sizeGroup.scale.set(layout.width, layout.height, 1);
     sizeGroup.position.set(layout.offsetX, layout.offsetY, 0);
+    if (changed) {
+      this.deps.onAnimatedSprite2DLayoutChanged?.(node.nodeId);
+    }
+  }
+
+  /**
+   * The rectangle an AnimatedSprite2D's proxy actually draws, in node-local space
+   * (y up): the laid-out quad after `sizeMode`, node anchor and per-frame anchor.
+   * `null` before the node has a proxy. Selection frames and hover outlines use
+   * this so they wrap the visible frame instead of a centred `width × height` box.
+   */
+  getAnimatedSprite2DLocalRect(
+    node: AnimatedSprite2D
+  ): { minX: number; minY: number; maxX: number; maxY: number } | null {
+    const visualRoot = this.animatedSprite2DVisuals.get(node.nodeId);
+    const sizeGroup = visualRoot?.userData.sizeGroup as THREE.Object3D | undefined;
+    if (!sizeGroup) {
+      return null;
+    }
+    const halfWidth = Math.abs(sizeGroup.scale.x) / 2;
+    const halfHeight = Math.abs(sizeGroup.scale.y) / 2;
+    return {
+      minX: sizeGroup.position.x - halfWidth,
+      minY: sizeGroup.position.y - halfHeight,
+      maxX: sizeGroup.position.x + halfWidth,
+      maxY: sizeGroup.position.y + halfHeight,
+    };
   }
 
   /**

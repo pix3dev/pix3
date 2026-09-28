@@ -754,6 +754,13 @@ export class EditorTabService {
 
     const sceneId = this.deriveSceneIdFromResource(tab.resourceId);
 
+    // Seed the 2D camera before the load: the viewport restores it as soon as the scene content
+    // syncs, and without a remembered state it falls back to the scene's initial framing.
+    const camera2D = tab.contextState?.camera2D;
+    if (camera2D && !appState.scenes.navigation2DCameraStates[sceneId]) {
+      appState.scenes.navigation2DCameraStates[sceneId] = camera2D;
+    }
+
     // Load if needed.
     const alreadyLoaded = Boolean(appState.scenes.descriptors[sceneId]);
     if (!alreadyLoaded) {
@@ -874,6 +881,10 @@ export class EditorTabService {
       if (camera) {
         tab.contextState = { ...(tab.contextState ?? {}), camera };
         appState.scenes.editorCameraStates[sceneId] = camera;
+      }
+      const camera2D = appState.scenes.navigation2DCameraStates[sceneId];
+      if (camera2D) {
+        tab.contextState = { ...(tab.contextState ?? {}), camera2D: { ...camera2D } };
       }
 
       // Save selection state.

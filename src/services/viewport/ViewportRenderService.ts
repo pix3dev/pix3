@@ -89,6 +89,7 @@ import {
 } from '@/services/core/page-activity';
 import { BackgroundTicker } from '@/services/core/background-ticker';
 import { isPointerBlocked } from './peek-gating';
+import { isPrefabScenePath } from '@/features/scene/prefab-utils';
 import { GestureStateService } from './GestureStateService';
 
 // The transform tool is UI state (`appState.ui.transformMode`) — the four `view.transform-mode-*`
@@ -313,6 +314,7 @@ export class ViewportRendererService {
     installProxyEffects: (node, material) => this.installProxyEffects(node, material),
     disposeObject3D: root => this.disposeObject3D(root),
     getOrthographicCamera: () => this.orthographicCamera,
+    onAnimatedSprite2DLayoutChanged: nodeId => this.onProxyLayoutChanged(nodeId),
   });
   // Owns the editor-viewport texture/billboard sync for the 3D node types
   // (Sprite3D, Particles3D, GeometryMesh). Wired via closures because the
@@ -337,7 +339,7 @@ export class ViewportRendererService {
     sync2DServiceFrameThickness: () => this.sync2DServiceFrameThickness(),
     refreshGizmoPositions: () => this.refreshGizmoPositions(),
     hasSelectionOverlay: () => this.selection2DOverlay !== undefined,
-    reset2DView: () => this.reset2DView(),
+    frameInitial2DView: () => this.frameInitial2DView(),
     shouldPauseForWindowFocus: () => this.shouldPauseForWindowFocus(),
     isPaused: () => this.isPaused,
     markRenderDirty: () => {
@@ -423,6 +425,9 @@ export class ViewportRendererService {
     update2DSelectionOverlayForNodes: nodeIds => this.update2DSelectionOverlayForNodes(nodeIds),
     requestRender: () => this.requestRender(),
   });
+  /** Camera produced by the initial prefab fit, while it may still be refined. */
+  private pendingInitial2DFit: { sceneId: string; x: number; y: number; zoom: number } | null =
+    null;
   private readonly invalidateOnControlsChange = () => {
     this.renderRequested = true;
   };
@@ -640,6 +645,8 @@ export class ViewportRendererService {
       }
 
       if (this.shouldRefreshSceneNodeData(currentNodeDataChangeSignal)) {
+        // An edit ends the initial-fit window: re-framing under the user's hands would be jarring.
+        this.pendingInitial2DFit = null;
         this.refreshSceneNodeData();
       }
     };
@@ -1598,6 +1605,60 @@ export class ViewportRendererService {
     this.requestRender();
   }
 
+  /**
+   * First view of a scene with no remembered 2D camera. A prefab is a small branch authored at the
+   * origin, so the default view (the whole base viewport frame) leaves it as a speck in the middle
+   * of an empty frame — it opens framed on its content instead, like the Show All button. Screens
+   * and levels keep the frame view: their layout is relative to it.
+   */
+  private frameInitial2DView(): void {
+    const sceneId = appState.scenes.activeSceneId;
+    const filePath = sceneId ? appState.scenes.descriptors[sceneId]?.filePath : undefined;
+    if (sceneId && filePath && isPrefabScenePath(filePath)) {
+      this.fit2DViewToSceneContent();
+      this.recordInitial2DFit(sceneId);
+      return;
+    }
+    this.pendingInitial2DFit = null;
+    this.reset2DView();
+  }
+
+  /**
+   * The initial prefab fit runs as soon as the scene syncs, before an AnimatedSprite2D proxy has
+   * its `.pix3anim` and texture: its bounds are still the placeholder box centred on the node
+   * origin, so the frame anchor (a character's feet) later shifts the art off-centre. Remember the
+   * camera we produced and re-fit when a proxy's layout settles — unless the user has moved the
+   * camera, edited the scene or started a preview since, which ends the window.
+   */
+  private recordInitial2DFit(sceneId: string): void {
+    const camera = this.orthographicCamera;
+    this.pendingInitial2DFit = camera
+      ? { sceneId, x: camera.position.x, y: camera.position.y, zoom: camera.zoom }
+      : null;
+  }
+
+  private settleInitial2DFit(): void {
+    const pending = this.pendingInitial2DFit;
+    const camera = this.orthographicCamera;
+    if (!pending || !camera) return;
+    // A playing preview changes frame layouts every tick; following it would make the camera jitter.
+    const previewing =
+      this.previewAnimationActions.size > 0 || this.previewTicker.hasActivePreview();
+    const untouched =
+      !previewing &&
+      pending.sceneId === appState.scenes.activeSceneId &&
+      appState.ui.navigationMode === '2d' &&
+      camera.position.x === pending.x &&
+      camera.position.y === pending.y &&
+      camera.zoom === pending.zoom;
+    if (!untouched) {
+      this.pendingInitial2DFit = null;
+      return;
+    }
+    this.fit2DViewToSceneContent();
+    this.recordInitial2DFit(pending.sceneId);
+  }
+
   private fit2DViewToSceneContent(): void {
     if (!this.orthographicCamera) {
       return;
@@ -2395,6 +2456,14 @@ export class ViewportRendererService {
       );
     }
 
+    // AnimatedSprite2D markers sit on the proxy root (unscaled by the frame layout).
+    for (const visualRoot of this.proxyRegistry.animatedSprite2DVisuals.values()) {
+      const anchorMarker = visualRoot.userData.anchorMarker as THREE.Group | undefined;
+      if (anchorMarker) {
+        this.proxyRegistry.updateSprite2DAnchorMarker(anchorMarker, 1, 1, thickness);
+      }
+    }
+
     if (this.selection2DOverlay) {
       this.transformTool2d.updateHandlePositions(
         this.selection2DOverlay,
@@ -2958,6 +3027,16 @@ export class ViewportRendererService {
       const visualRoot = this.proxyRegistry.animatedSprite2DVisuals.get(node.nodeId);
       if (visualRoot) {
         this.proxyRegistry.syncAnimatedSprite2DVisual(node, visualRoot);
+        const anchorMarker = visualRoot.userData.anchorMarker as THREE.Group | undefined;
+        if (anchorMarker) {
+          anchorMarker.visible = appState.selection.nodeIds.includes(node.nodeId);
+          this.proxyRegistry.updateSprite2DAnchorMarker(
+            anchorMarker,
+            1,
+            1,
+            getFrameThicknessWorldPx(this.orthographicCamera?.zoom ?? 1)
+          );
+        }
       }
     } else if (node instanceof TiledSprite2D) {
       const visualRoot = this.proxyRegistry.tiledSprite2DVisuals.get(node.nodeId);
@@ -3931,13 +4010,21 @@ export class ViewportRendererService {
         new THREE.Vector3(-ax * w, (1 - ay) * h, 0),
       ];
     } else if (node instanceof AnimatedSprite2D) {
-      const halfWidth = (node.width ?? 64) / 2;
-      const halfHeight = (node.height ?? 64) / 2;
+      // The quad the proxy actually draws (sizeMode native, node + frame anchor),
+      // so the frame hugs the visible sprite rather than a centred width × height
+      // box that a frame anchor (a character's feet) pushes off the art. Before
+      // the proxy exists: the centred box.
+      const rect = this.proxyRegistry.getAnimatedSprite2DLocalRect(node) ?? {
+        minX: -(node.width ?? 64) / 2,
+        minY: -(node.height ?? 64) / 2,
+        maxX: (node.width ?? 64) / 2,
+        maxY: (node.height ?? 64) / 2,
+      };
       corners = [
-        new THREE.Vector3(-halfWidth, -halfHeight, 0),
-        new THREE.Vector3(halfWidth, -halfHeight, 0),
-        new THREE.Vector3(halfWidth, halfHeight, 0),
-        new THREE.Vector3(-halfWidth, halfHeight, 0),
+        new THREE.Vector3(rect.minX, rect.minY, 0),
+        new THREE.Vector3(rect.maxX, rect.minY, 0),
+        new THREE.Vector3(rect.maxX, rect.maxY, 0),
+        new THREE.Vector3(rect.minX, rect.maxY, 0),
       ];
     } else if (node instanceof SpineSkeleton2D) {
       // Setup-pose AABB (skeleton-local, NOT centered on the origin) — stable
@@ -4151,6 +4238,20 @@ export class ViewportRendererService {
     // Apply zoom compensation immediately so handles have the correct screen-space size.
     this.refreshGizmoPositions();
     this.selection2DHud.update();
+  }
+
+  /**
+   * A selected AnimatedSprite2D's drawn quad changed after its selection frame was
+   * built (the `.pix3anim` / frame texture loads asynchronously, so a selection
+   * restored on page reload is measured off the pre-load centred box). Re-measure.
+   */
+  private onProxyLayoutChanged(nodeId: string): void {
+    this.settleInitial2DFit();
+    if (!this.selection2DOverlay?.nodeIds.includes(nodeId)) {
+      return;
+    }
+    this.refreshGizmoPositions();
+    this.requestRender();
   }
 
   private refreshGizmoPositions(): void {

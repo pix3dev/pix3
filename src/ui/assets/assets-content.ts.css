@@ -227,10 +227,12 @@ pix3-assets-content .thumb img {
 }
 
 /* Frame-count badge on a collapsed managed sprite folder. */
+/* Top-right: the bottom-right corner belongs to the play button (.anim-play-btn),
+   which a managed sprite folder always has. */
 pix3-assets-content .sprite-badge {
   position: absolute;
+  top: 4px;
   right: 4px;
-  bottom: 4px;
   padding: 0 4px;
   border-radius: var(--radius-1);
   background: var(--bg-2);

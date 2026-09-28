@@ -89,6 +89,8 @@ describe('compileCharacter', () => {
     expect(out.animation.clips[3].loop).toBe(false); // die too
 
     expect(out.prefabYaml).toContain('type: core:CharacterVisual2D');
+    expect(out.prefabYaml).toContain('type: AnimatedSprite2D'); // the root IS the sprite
+    expect(out.prefabYaml).not.toContain('Group2D');
     expect(out.prefabYaml).toContain('variant: sword');
     expect(out.prefabYaml).toContain('state: idle');
     expect(out.prefabYaml).toContain('animationResourcePath: res://sprites/goblin/goblin.pix3anim');

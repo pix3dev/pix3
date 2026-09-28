@@ -58,7 +58,7 @@ function sheetResource(): string {
   });
 }
 
-function createRegistry(resourceText: string) {
+function createRegistry(resourceText: string, onAnimatedSprite2DLayoutChanged = vi.fn()) {
   const assetLoader = new AssetLoader({
     readBlob: async () => new Blob(),
     readText: async () => '',
@@ -73,9 +73,10 @@ function createRegistry(resourceText: string) {
     installProxyEffects: () => {},
     disposeObject3D: () => {},
     getOrthographicCamera: () => undefined,
+    onAnimatedSprite2DLayoutChanged,
   });
 
-  return { registry, assetLoader, requestRender };
+  return { registry, assetLoader, requestRender, onAnimatedSprite2DLayoutChanged };
 }
 
 /** Let the resource read + the frame texture load settle. */
@@ -209,5 +210,108 @@ describe('Viewport2DProxyRegistry — 2D blend mode', () => {
     node.blendMode = 'normal';
     registry.apply2DVisualMaterialState(node, visualRoot);
     expect(materialOf(visualRoot).blending).toBe(THREE.NormalBlending);
+  });
+});
+
+describe('Viewport2DProxyRegistry — AnimatedSprite2D drawn rect and pivot marker', () => {
+  /** A 100×100 character canvas whose frame anchor is the feet row (y 0.85 from the top). */
+  function characterResource(): string {
+    return JSON.stringify({
+      version: '1.0.0',
+      texturePath: '',
+      clips: [
+        {
+          name: 'idle',
+          frames: [
+            {
+              texturePath: FRAME_1,
+              anchor: { x: 0.5, y: 0.85 },
+              sourceSize: { width: 100, height: 100 },
+            },
+          ],
+        },
+      ],
+    });
+  }
+
+  it('reports the laid-out quad, offset by the frame anchor, not a centred box', async () => {
+    const { registry, assetLoader } = createRegistry(characterResource());
+    seedTexture(assetLoader, FRAME_1, 100);
+    const node = new AnimatedSprite2D({
+      id: 'character',
+      animationResourcePath: RESOURCE_PATH,
+      currentClip: 'idle',
+      sizeMode: 'native',
+      width: 100,
+      height: 100,
+    });
+    expect(registry.getAnimatedSprite2DLocalRect(node)).toBeNull(); // no proxy yet
+
+    const visualRoot = registry.createAnimatedSprite2DVisual(node);
+    registry.animatedSprite2DVisuals.set(node.nodeId, visualRoot);
+    await settle();
+    registry.syncAnimatedSprite2DVisual(node, visualRoot);
+
+    // Feet at the node origin: the canvas spans 85 px above it and 15 px below (y up).
+    const rect = registry.getAnimatedSprite2DLocalRect(node);
+    expect(rect?.minX).toBeCloseTo(-50);
+    expect(rect?.maxX).toBeCloseTo(50);
+    expect(rect?.minY).toBeCloseTo(-15);
+    expect(rect?.maxY).toBeCloseTo(85);
+  });
+
+  it('reports a quad change once the resource lands, so a selection restored on reload re-measures', async () => {
+    const { registry, assetLoader, onAnimatedSprite2DLayoutChanged } =
+      createRegistry(characterResource());
+    seedTexture(assetLoader, FRAME_1, 100);
+    const node = new AnimatedSprite2D({
+      id: 'character-reload',
+      animationResourcePath: RESOURCE_PATH,
+      currentClip: 'idle',
+      sizeMode: 'native',
+      width: 100,
+      height: 100,
+    });
+    const visualRoot = registry.createAnimatedSprite2DVisual(node);
+    registry.animatedSprite2DVisuals.set(node.nodeId, visualRoot);
+    onAnimatedSprite2DLayoutChanged.mockClear();
+    await settle();
+
+    // The frame anchor moved the quad up once the .pix3anim was read.
+    expect(onAnimatedSprite2DLayoutChanged).toHaveBeenCalledWith('character-reload');
+    onAnimatedSprite2DLayoutChanged.mockClear();
+    registry.syncAnimatedSprite2DVisual(node, visualRoot);
+    expect(onAnimatedSprite2DLayoutChanged).not.toHaveBeenCalled(); // unchanged → silent
+  });
+
+  it('carries a pivot marker at the node origin, shown only while the node is selected', async () => {
+    const { appState } = await import('@/state');
+    const { registry, assetLoader } = createRegistry(characterResource());
+    seedTexture(assetLoader, FRAME_1, 100);
+    const node = new AnimatedSprite2D({
+      id: 'character-marker',
+      animationResourcePath: RESOURCE_PATH,
+      sizeMode: 'native',
+    });
+    const visualRoot = registry.createAnimatedSprite2DVisual(node);
+    registry.animatedSprite2DVisuals.set(node.nodeId, visualRoot);
+    await settle();
+
+    const marker = visualRoot.userData.anchorMarker as THREE.Group;
+    expect(marker.parent).toBe(visualRoot); // on the root: the frame layout never moves it
+    expect(marker.position.x).toBe(0);
+    expect(marker.position.y).toBe(0);
+    expect(marker.visible).toBe(false);
+
+    const previous = [...appState.selection.nodeIds];
+    appState.selection.nodeIds = [node.nodeId];
+    try {
+      registry.updateSprite2DAnchorMarkerVisibility();
+      expect(marker.visible).toBe(true);
+    } finally {
+      appState.selection.nodeIds = previous;
+    }
+    registry.updateSprite2DAnchorMarkerVisibility();
+    expect(marker.visible).toBe(false);
   });
 });

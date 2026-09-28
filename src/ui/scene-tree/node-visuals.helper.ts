@@ -2,6 +2,7 @@ import { NodeBase } from '@pix3/runtime';
 import { Node2D } from '@pix3/runtime';
 import { Node3D } from '@pix3/runtime';
 import { Sprite2D } from '@pix3/runtime';
+import { AnimatedSprite2D } from '@pix3/runtime';
 import { TiledSprite2D } from '@pix3/runtime';
 import { SpineSkeleton2D } from '@pix3/runtime';
 import { Group2D } from '@pix3/runtime';
@@ -25,10 +26,14 @@ import { GeometryMesh } from '@pix3/runtime';
 import { Sprite3D } from '@pix3/runtime';
 import { Particles3D } from '@pix3/runtime';
 import { AudioPlayer } from '@pix3/runtime';
+import { isPrefabInstanceRoot } from '@/features/scene/prefab-utils';
 
 // Color constants for node types — aligned to the presence palette in src/index.css
 const NODE_2D_COLOR = '#1ebde3ff'; // --presence-5 (sky)
 const NODE_3D_COLOR = '#ff7f6cff'; // --presence-2 (coral)
+// Prefab / nested-scene instance roots get their own icon, tinted by dimension.
+const PREFAB_2D_COLOR = NODE_2D_COLOR; // sky
+const PREFAB_3D_COLOR = '#ff7ac6ff'; // pink
 
 /**
  * Determines the visual representation (color and icon) for a scene node in the UI.
@@ -37,13 +42,20 @@ const NODE_3D_COLOR = '#ff7f6cff'; // --presence-2 (coral)
  * @returns An object with the color and icon name for the node.
  */
 export function getNodeVisuals(node: NodeBase): { color: string; icon: string } {
+  if (isPrefabInstanceRoot(node)) {
+    if (node instanceof Node3D) {
+      return { color: PREFAB_3D_COLOR, icon: 'prefab-instance' };
+    }
+    return { color: PREFAB_2D_COLOR, icon: 'prefab-instance' };
+  }
   if (node instanceof TiledSprite2D) {
     return { color: NODE_2D_COLOR, icon: 'grid' };
   }
   if (node instanceof SpineSkeleton2D) {
     return { color: NODE_2D_COLOR, icon: 'activity' };
   }
-  if (node instanceof Sprite2D) {
+  // AnimatedSprite2D extends Node2D, not Sprite2D, so it needs its own check.
+  if (node instanceof Sprite2D || node instanceof AnimatedSprite2D) {
     return { color: NODE_2D_COLOR, icon: 'image' };
   }
   if (node instanceof Joystick2D) {

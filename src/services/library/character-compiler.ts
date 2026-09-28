@@ -12,7 +12,7 @@
  * ```text
  * sprites/<slug>/<slug>.pix3anim          clips named <variant>.<state> (sword.idle, bow.attack)
  * sprites/<slug>/sword_idle_0001.png      one file per frame, <clip-prefix>_<nnnn>
- * prefabs/<Name>.pix3scene                Group2D root + core:CharacterVisual2D → AnimatedSprite2D Visual
+ * prefabs/<Name>.pix3scene                AnimatedSprite2D root carrying core:CharacterVisual2D
  * ```
  *
  * No timestamps, ids or randomness: the same input yields byte-identical output (the Store's
@@ -285,17 +285,27 @@ export function compileCharacter(spec: CharacterCompileSpec): CompiledCharacter 
   const animation: AnimationResource = { version: '1.0.0', texturePath: '', clips };
   const animationJson = `${JSON.stringify(animation, null, 2)}\n`;
 
-  // A fresh object per node — sharing one would make the YAML writer emit an anchor/alias pair.
-  const transform = () => ({ position: [0, 0], scale: [1, 1], rotation: 0 });
+  // The character IS the sprite: one AnimatedSprite2D root carrying the component. Selecting the
+  // character then selects the drawn quad (the viewport frames it and shows the pivot — the feet —
+  // at the node position); a Group2D wrapper would frame a centred box the frame anchor pushes off
+  // the art. Items in hand go under the sprite with core:PointAttachment.
   const prefab = {
     version: '1.0.0',
     metadata: { name, description: `${name} — 2D character (variant/state flipbook)` },
     root: [
       {
         id: slug,
-        type: 'Group2D',
+        type: 'AnimatedSprite2D',
         name,
-        properties: { width: size.width, height: size.height, transform: transform() },
+        properties: {
+          animationResourcePath,
+          currentClip: defaultClipName,
+          isPlaying: true,
+          sizeMode: 'native',
+          width: size.width,
+          height: size.height,
+          transform: { position: [0, 0], scale: [1, 1], rotation: 0 },
+        },
         components: [
           {
             id: `${slug}-character`,
@@ -304,23 +314,7 @@ export function compileCharacter(spec: CharacterCompileSpec): CompiledCharacter 
             config: { variant: defaultVariant, state: defaultState, separator },
           },
         ],
-        children: [
-          {
-            id: `${slug}-visual`,
-            type: 'AnimatedSprite2D',
-            name: 'Visual',
-            properties: {
-              animationResourcePath,
-              currentClip: defaultClipName,
-              isPlaying: true,
-              sizeMode: 'native',
-              width: size.width,
-              height: size.height,
-              transform: transform(),
-            },
-            children: [],
-          },
-        ],
+        children: [],
       },
     ],
   };

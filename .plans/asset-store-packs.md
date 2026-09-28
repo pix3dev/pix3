@@ -197,7 +197,7 @@ Download source — отдельное действие с указанием р
 Реализовано в Phase 0 как выход `compileCharacter` (`src/services/library/character-compiler.ts`):
 
 ```text
-prefabs/Goblin.pix3scene              Group2D root (+ core:CharacterVisual2D) → AnimatedSprite2D Visual
+prefabs/Goblin.pix3scene              AnimatedSprite2D root + core:CharacterVisual2D (без обёртки)
 sprites/goblin/goblin.pix3anim        клипы sword.idle, sword.run, …, bow.die (и без варианта: die)
 sprites/goblin/sword_idle_0001.png    managed sprite folder, <clip-prefix>_<nnnn>
 LICENSE.txt / NOTICE.txt              атрибуция (§5.3)
@@ -213,11 +213,16 @@ components:
     config: { variant: sword, state: idle, separator: '.' }
 ```
 
-`spriteNodeId` пустой = первый `AnimatedSprite2D`-ребёнок корня. Descriptor-файла нет: набор
+Корень prefab — сам `AnimatedSprite2D` (2026-09-28, по живой проверке в редакторе): обёртка Group2D
+давала рамку выделения 100×100 по центру позиции, которую якорь кадра сдвигал с персонажа. Теперь
+выбор персонажа выбирает спрайт, рамка вьюпорта идёт по нарисованному квадрату кадра
+(`Viewport2DProxyRegistry.getAnimatedSprite2DLocalRect`), а маркер якоря (у выбранной ноды) стоит в
+позиции ноды, то есть на линии ног. `spriteNodeId` пустой = сам host, иначе первый
+`AnimatedSprite2D`-ребёнок. Descriptor-файла нет: набор
 variants/states читается из имён клипов (`getVariants()` / `getStates(variant)`), facets для Store
 компилятор считает из тех же имён. FPS, loop, кадры, events, points и размеры — только в `.pix3anim`.
 
-Visual: `sizeMode: native`, `animationResourcePath: res://sprites/goblin/goblin.pix3anim`,
+Спрайт: `sizeMode: native`, `animationResourcePath: res://sprites/goblin/goblin.pix3anim`,
 `currentClip: sword.idle`, `isPlaying: true`. В native-режиме `width`/`height` не участвуют в
 раскладке — размер кадра берётся из `sourceSize`, который компилятор проставляет каждому кадру
 (для Seven 100×100). Точка привязки проверяется по исходным кадрам при живой приёмке.

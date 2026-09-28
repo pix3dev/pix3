@@ -24,8 +24,8 @@ export interface ViewportNavigationDeps {
   refreshGizmoPositions(): void;
   /** Whether a 2D selection overlay is currently active. */
   hasSelectionOverlay(): boolean;
-  /** Recenter the 2D camera to the scene's default view (used as restore fallback). */
-  reset2DView(): void;
+  /** Frame a scene that has no remembered 2D camera yet (used as restore fallback). */
+  frameInitial2DView(): void;
   /** Whether rendering is currently paused because the window lost focus. */
   shouldPauseForWindowFocus(): boolean;
   /** Whether the viewport render loop is paused. */
@@ -239,7 +239,7 @@ export class ViewportNavigation {
 
     const cameraState = appState.scenes.navigation2DCameraStates[sceneId];
     if (!cameraState) {
-      this.deps.reset2DView();
+      this.deps.frameInitial2DView();
       return;
     }
 

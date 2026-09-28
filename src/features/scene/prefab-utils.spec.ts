@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { NodeBase } from '@pix3/runtime';
-import { isInstancePlacementProperty, type PrefabMetadata } from './prefab-utils';
+import {
+  isInstancePlacementProperty,
+  isPrefabScenePath,
+  type PrefabMetadata,
+} from './prefab-utils';
 
 /**
  * Minimal NodeBase stand-in — the prefab-utils helpers only read `nodeId` and
@@ -57,5 +61,19 @@ describe('isInstancePlacementProperty', () => {
   it('returns false for a plain (non-prefab) node', () => {
     const plain = fakeNode('plain', null);
     expect(isInstancePlacementProperty(plain, 'position')).toBe(false);
+  });
+});
+
+describe('isPrefabScenePath', () => {
+  it('matches scenes under any prefabs/ folder', () => {
+    expect(isPrefabScenePath('res://prefabs/Knight.pix3scene')).toBe(true);
+    expect(isPrefabScenePath('prefabs/ui/dialog-1a.pix3scene')).toBe(true);
+    expect(isPrefabScenePath('res://levels/prefabs/Crate.pix3scene')).toBe(true);
+  });
+
+  it('does not match ordinary scenes or look-alike names', () => {
+    expect(isPrefabScenePath('res://scenes/main.pix3scene')).toBe(false);
+    expect(isPrefabScenePath('res://my-prefabs/Knight.pix3scene')).toBe(false);
+    expect(isPrefabScenePath('res://scenes/prefabs.pix3scene')).toBe(false);
   });
 });
