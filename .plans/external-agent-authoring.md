@@ -1085,3 +1085,153 @@ snapshot `registerGameDebug`; все шаблоны 120 кадров чисто,
 `10795bc7`/`da41b044`; живой клик по «Work With → Your Own Agent» в браузере; прогон реального
 Claude Code/Codex (не субагента) по протоколу; `smoke --input` (D6); `W_UNUSED_ASSET` на
 `recipe-blank-2d` (шаблон намеренно возит библиотеку форм); влитие ветки в `main`.
+
+### 11.13 Возобновление: выпуск 1.6.2 и реальный агент на DeepCore (2026-10-02)
+
+**English task interpretation:** update DeepCore's agent kit and npm runtime dependency,
+publish CLI/runtime 1.6.2, then run a fresh external Claude Code or Codex session on the
+forge or UI art pack and record friction using the trial protocol.
+
+Перепроверено: Pix3 `main` = `677f254c` и совпадает с удалённым `main`; рабочие деревья
+обоих проектов перед началом чистые. DeepCore = `ddf0b21`. Ветка external-agent-authoring
+уже в `main`; историческое «не влита» в §11.12 больше не описывает текущий статус.
+`npm view` по-прежнему возвращает CLI **1.6.0**, runtime **1.6.1**, тогда как корень Pix3
+и оба исходных пакета имеют версию **1.6.2**.
+
+Подготовка выполнена:
+- DeepCore: `pix3 kit --update` обновил kit до 1.6.2; собственные `AGENTS.md`/`CLAUDE.md`
+  сохранены. `.mcp.json` закреплён на `npx -y @pix3/cli@1.6.2 mcp --workspace`.
+  При запуске CLI из checkout нужен `PIX3_CLI_DEV=0`: иначе installer намеренно пишет
+  локальный абсолютный путь вместо npm-конфигурации. Повторная установка из настоящего
+  упакованного CLI подтвердила те же файлы без изменений.
+- CLI: **245/245** тестов, оба CLI tsconfig проходят `tsc --noEmit`.
+- Runtime InputService: **52/52** тестов, включая Ctrl/Meta-wheel и разделение scroll/zoom.
+- Оба пакета прошли `npm pack --dry-run` и собраны в настоящие `.tgz` вне репозитория,
+  `/tmp/pix3-release-1.6.2/`. CLI из распакованного tarball запускается и устанавливает kit.
+- DeepCore `check`: **0 ошибок, 4 предупреждения**, typecheck чистый. Убрано
+  `W_KIT_OUTDATED`; остаются runtime 1.6.1, width 1040 у toolbar-background,
+  PBR-стены для universal и unused deepcore-game-logo.jpg. Runtime/package-lock ещё не
+  обновлены: установка опубликованной 1.6.2 должна предшествовать изменению зависимостей.
+- Базовый `smoke src/assets/scenes/main-scene.pix3scene --frames 600`: PASS, 600 кадров,
+  312 нод до/после, 0 ошибок, 2.09 с; одна Rapier deprecation warning. Это проверка запуска,
+  без ввода/рендера/звука, а не доказательство игрового поведения.
+- `git status --short samples/` пуст; сцены и игровой код не менялись.
+
+**Блокер выпуска:** `npm whoami` → E401; `gh` отсутствует, GH/GITHUB/NPM/NODE_AUTH tokens
+не заданы. В подключённом Chrome npm показывает Sign In, GitHub settings — гостевой 404
+с Sign in. Запрошен вход владельца; страницы настроек открыты. Наличие Trusted Publisher
+не подтверждено, публикация и деплой не запускались. Claude Code установлен и сообщает
+`loggedIn: true`, но реальный trial ждёт npm-выпуска, как требует порядок задачи.
+
+Порядок продолжения после входа:
+1. В npm проверить Trusted Publisher **для обоих пакетов**: GitHub owner `pix3dev`,
+   repository `pix3`, workflow `publish-packages.yml` (environment не задан в publish jobs).
+2. Запустить publish для runtime и CLI на `main`: две manual dispatch (`runtime`, `cli`)
+   либо тег `runtime-v1.6.2`. **Manual `both` сейчас означает runtime + bridge и пропускает
+   CLI**; `all` дополнительно публикует bridge, что этой задаче не требуется.
+3. Независимо проверить обе версии через npm registry и холодный
+   `npx -y @pix3/cli@1.6.2 --version`. Затем в DeepCore `npm install @pix3/runtime@^1.6.2`,
+   повторить `check`/typecheck и smoke; package.json и lockfile должны обновиться вместе.
+4. Только после подтверждения npm выставить GitHub Actions variable
+   `VITE_PIX3_CLI_CONFIRMED_VERSION=1.6.2`, запустить editor deploy и проверить Work With.
+5. Свежая настоящая сессия Claude Code из DeepCore, через опубликованный MCP, задача ниже.
+   Записать t_first_write/check/game_run/verified, вопросы, число вызовов, format errors,
+   hashes `expect`, changedDuringRun и все обходные пути. Не считать headless smoke
+   доказательством клика по кузнице, списания железа или сохранения прогресса.
+
+Выбранная задача trial: **кузница из gameplay roadmap, этап 3**. Промпт:
+«Добавь в существующий лагерь кузницу: добытое железо хранится как ресурс, кузница улучшает
+инструмент за железо, стоимость и пределы в config, прогресс сохраняется с миграцией старых
+сейвов. При нехватке железа покупка ничего не списывает. Подключи к существующим store/UI,
+прочитай план и Pix3 kit, проверь check и игру через MCP с expect. Не включай лифт и не
+меняй режим seed. Покажи доказательство успешной покупки, отказа и восстановления сейва».
+
+Расхождение с переданным контекстом: в текущем `src/scripts/config/camp.ts`
+**campConfig.enabled уже true**. Флаг не менялся; агент должен сохранить фактическое значение.
+Метрики реального trial пока **не собраны**.
+
+### 11.14 Выпуск подтверждён; реальный Codex CLI на кузнице DeepCore (2026-10-02)
+
+Пользователь успешно запустил publish workflow. Независимые `npm view` подтвердили
+**@pix3/cli 1.6.2 и @pix3/runtime 1.6.2**; `npx -y @pix3/cli@1.6.2 --version` вне
+монорепозитория вернул 1.6.2. DeepCore обновлён обычным
+`npm install @pix3/runtime@^1.6.2`: package.json, установленный пакет и локальный lockfile
+теперь 1.6.2. Lockfile здесь исторически игнорируется `.gitignore`, не добавлялся принудительно.
+Kit остаётся 1.6.2, `.mcp.json` — опубликованный npm CLI. Оба версионных предупреждения сняты.
+
+**Реальные процессы, не субагенты:**
+- Claude Code 2.1.287, свежий `claude -p`, MCP из `.mcp.json`: Pix3 MCP подключился, но
+  первый запрос к модели получил **403 oauth_not_allowed_for_organization** — организация
+  запретила подписку Claude Code. Агент не начал работу, не менял файлы, расход API $0.
+- Fallback: свежий **Codex CLI 0.159.0-alpha.12.1**, default model **gpt-6.1-sol**,
+  один промпт кузницы из §11.13. MCP настроен аргументами этой сессии по `pix3 setup codex`
+  (`npx -y @pix3/cli@1.6.2 mcp --workspace --project …`, tool timeout 180 с); глобальный
+  конфиг не менялся. Настройка сверена с [официальной документацией MCP](https://learn.chatgpt.com/docs/extend/mcp?surface=cli).
+  Session/thread: `01a0fcf4-0d52-73d2-835f-c5614da9ceb5`. Никакой переписки с оператором
+  внутри trial и никаких субагентов. Существующий `serve` 1.6.2 из checkout оставлен
+  запущенным; внешний MCP — действительно опубликованный пакет. Chrome был скрыт,
+  workspace connected, lease held, keepalive работал. Отдельный reconnect после рестарта
+  serve этим прогоном **не проверялся**.
+
+| Метрика от запуска Codex | Результат |
+| --- | --- |
+| Первая запись игровых файлов (mtime диска) | 190.1 с |
+| Первый зелёный check | 308.3 с |
+| Первые зелёные 196 тестов | 325.0 с |
+| Живое доказательство покупки | 531.5 с |
+| Живой отказ при нехватке железа | 543.6 с |
+| Независимый restart без setup fixture, 6 условий сохранения | 595.0 с |
+| Завершение всей сессии, включая миграцию и очистку | 927.6 с (15.5 мин) |
+| Вопросы / промпты | 0 / 1 |
+| Вызовы по JSONL | 47 shell + 18 MCP + 1 file-change |
+| Валидно при первом check / ошибки формата production-кода | да / 0 |
+
+Время первой записи сверено по mtime, check/tests — по готовым выходным файлам,
+MCP/завершение — по timestamp журнала Codex. Это задача на несколько систем с миграцией
+и испытательным стендом; не подставлять её время в медиану простых recipe-задач §11.12.
+
+**Результат:** кузница в существующем лагере. Железо собирается в отдельный постоянный
+запас (в том числе дроном при полном рюкзаке), не продаётся с рюкзаком. Пять улучшений
+за 10/20/40/80/160 железа повышают существующий damageLevel. Цены, лимит, количество
+железа с pickup — в config. Сейв v2, миграция старых сейвов; camp flag и seed mode сохранены.
+Временная fixture создала 12 настоящих iron droppables и собрала их через
+DroppableItemsSystem.collectResource. Покупка/отказ — физические taps реальной кнопки,
+не прямой вызов buyForge. Покупка: iron 12→2, forge 0→1, damage 2→3, gold 321→321;
+множитель 1.5625→1.953125. Restart восстановил покупку и seed. Старый v1 сохранил
+старые gold/damage, новые iron/forge = 0. Барьеры: matchesAgent/matchesDisk true,
+changedDuringRun пуст. После удаления fixture финальная игра прошла 120 кадров без новых
+ошибок, реальный клик открытия лагеря и отказ при нулевом железе подтверждены.
+
+**Независимый операторский контроль:** прямое чтение game debug и localStorage через CDP
+совпало с предсказанными 12−10=2 и 1.25³=1.953125; screenshot показал видимую строку
+кузницы внутри панели. Все поля исходного сейва совпали после восстановления, кроме
+ожидаемых schema version/lastSeenAt; iron/forge = 0, временный sessionStorage backup удалён.
+Свидетельства в DeepCore `.plans/forge-evidence/`: `summary.json`, исходные routine reports,
+сохранённая временная fixture, финальный check/tests/runtime, `operator-verification.json`
+и `operator-ui.png`. Fixture и её команды отсутствуют в `src/scripts`.
+
+**Friction, с точным различием продукта и стенда:**
+1. Авторизация Claude сообщает loggedIn, но реальный API даёт организационный 403.
+   MCP подключился; дефекта Pix3 здесь не установлено. Перешли на Codex.
+2. `npx` из корня Pix3 сначала дал `pix3: not found` при локальном workspace-пакете.
+   Повтор из `/tmp` и DeepCore успешен. Это не считать сломанным npm tarball.
+3. Routine без `description` отклонена понятным сообщением; агент добавил поле, PASS.
+4. `trial.forge.restorePlayer` не доставилась: registry требует lowercase/kebab-case
+   с namespaces. Агент исправил на `trial.forge.restoreplayer`, восстановление PASS.
+   Это ошибка временной fixture, не ошибка кузницы; CLI check её не ловит.
+5. Финальный `until ready=true` дал `PRECONDITION ALREADY MET` (0 кадров, не доказательство).
+   Агент повторил настоящий прогон на 120 кадров, без ложного PASS по готовности.
+6. Автоматическая ротация newest-20 reports удаляла старые **tracked** отчёты DeepCore,
+   а reachability менялась от прогона. Старые tracked файлы восстановлены; доказательства
+   вынесены в `.plans/`. Папка reports не является безопасным долговременным хранилищем.
+
+Финальные 36 файлов / **196 тестов** прошли, check **0 ошибок, 2 предупреждения**
+(toolbar width 1040; PBR на universal). Unused-logo warning исчезла после штатной генерации
+resource catalog в pretest; ассет не удалялся и его игровое использование не доказано.
+Документация DeepCore AGENTS/roadmap обновлена. Коммитов, push или новой публикации агент
+не делал. `git status samples/` Pix3 пуст; старые reachability/reports DeepCore без diff.
+
+Остаётся подтвердить `VITE_PIX3_CLI_CONFIRMED_VERSION=1.6.2` и editor deploy: доступ к
+GitHub settings в этой сессии не появился, пользователю отправлен конкретный запрос.
+Work With → Your Own Agent в опубликованном редакторе и отдельный скрытый reconnect
+по-прежнему не считать проверенными. Лифт/арт-пак остаются отдельными задачами.
