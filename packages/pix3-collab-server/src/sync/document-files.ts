@@ -2,6 +2,12 @@ import fs from 'fs';
 import path from 'path';
 import * as Y from 'yjs';
 import { resolveContainedPath } from '../core/storage/contained-path.js';
+import {
+  SCENE_DOCUMENT_FORMAT,
+  SCENE_FIELD_PREFIX,
+  sceneFieldsFromSnapshot,
+  sceneSnapshotFromFields,
+} from '../shared/scene-crdt-document.js';
 
 /**
  * The disk side of a collaboration document: scenes and scripts mirrored into the project directory
@@ -139,6 +145,29 @@ export function loadScriptsFromDisk(scriptsDir: string, scriptsMap: Y.Map<unknow
   }
 }
 
+/** Reconstruct the current scene without modifying its immutable compatibility snapshot. */
+function currentSceneSnapshot(scene: Y.Map<unknown>): string {
+  const snapshot = scene.get('snapshot');
+  if (typeof snapshot !== 'string') {
+    throw new Error('Collaborative scene has no base snapshot.');
+  }
+  const fields = sceneFieldsFromSnapshot(snapshot);
+  for (const [key, value] of scene.entries()) {
+    if (!key.startsWith(SCENE_FIELD_PREFIX)) continue;
+    if (
+      typeof value === 'object' &&
+      value !== null &&
+      'kind' in value &&
+      value.kind === 'deleted'
+    ) {
+      fields.delete(key);
+    } else {
+      fields.set(key, value);
+    }
+  }
+  return sceneSnapshotFromFields(fields);
+}
+
 /**
  * Mirrors the document's scenes and scripts into `projectDir`, deleting files the document no
  * longer carries. Returns what was written and what was refused.
@@ -148,6 +177,7 @@ export function persistDocumentToDisk(projectDir: string, document: Y.Doc): Pers
   fs.mkdirSync(projectDir, { recursive: true });
 
   const sceneFilePaths = new Set<string>();
+  const writtenScenePaths = new Set<string>();
   const scenesMap = document.getMap<Y.Map<unknown>>('scenes');
   for (const [sceneId, value] of scenesMap.entries()) {
     if (!(value instanceof Y.Map)) {
@@ -156,7 +186,8 @@ export function persistDocumentToDisk(projectDir: string, document: Y.Doc): Pers
 
     const filePathValue = value.get('filePath');
     const snapshotValue = value.get('snapshot');
-    if (typeof snapshotValue !== 'string') {
+    const hasFieldDocument = value.get('format') === SCENE_DOCUMENT_FORMAT;
+    if (!hasFieldDocument && typeof snapshotValue !== 'string') {
       continue;
     }
 
@@ -172,9 +203,29 @@ export function persistDocumentToDisk(projectDir: string, document: Y.Doc): Pers
       continue;
     }
 
+    let snapshot: string;
+    if (hasFieldDocument) {
+      // A malformed or partial CRDT entry still claims this path. Keep its last good file out of
+      // deletion reconciliation even when the current fields cannot safely be reconstructed.
+      sceneFilePaths.add(fullPath);
+      try {
+        snapshot = currentSceneSnapshot(value);
+      } catch (error) {
+        console.warn(
+          `[pix3-collab] Refused malformed scene ${sceneId}; keeping its existing file:`,
+          error instanceof Error ? error.message : String(error)
+        );
+        continue;
+      }
+    } else {
+      // Legacy documents retain their exact YAML, including comments and formatting.
+      snapshot = snapshotValue as string;
+    }
+
     fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-    fs.writeFileSync(fullPath, snapshotValue, 'utf-8');
+    fs.writeFileSync(fullPath, snapshot, 'utf-8');
     sceneFilePaths.add(fullPath);
+    writtenScenePaths.add(fullPath);
   }
   reconcileFiles(projectDir, sceneFilePaths, '.pix3scene');
 
@@ -199,7 +250,7 @@ export function persistDocumentToDisk(projectDir: string, document: Y.Doc): Pers
   reconcileFiles(scriptsDir, scriptFilePaths, '.ts');
 
   return {
-    scenesWritten: sceneFilePaths.size,
+    scenesWritten: writtenScenePaths.size,
     scriptsWritten: scriptFilePaths.size,
     rejected,
   };

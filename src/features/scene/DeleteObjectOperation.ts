@@ -136,7 +136,8 @@ export class DeleteObjectOperation implements Operation<OperationInvokeResult> {
     const index = parent ? parent.children.indexOf(node) : sceneGraph.rootNodes.indexOf(node);
 
     const childrenInfo: DeletedNodeInfo[] = [];
-    for (const child of node.children) {
+    // Each recursive removal mutates node.children, so traverse a stable copy.
+    for (const child of [...node.children]) {
       if (child instanceof NodeBase) {
         const childInfo = this.deleteNodeAndChildren(sceneGraph, child);
         if (childInfo) {
@@ -180,7 +181,8 @@ export class DeleteObjectOperation implements Operation<OperationInvokeResult> {
       return;
     }
 
-    for (const deletedInfo of this.deletedNodes) {
+    // Indices were recorded at removal time; undo removals in the opposite order.
+    for (const deletedInfo of [...this.deletedNodes].reverse()) {
       this.restoreNodeAndChildren(sceneGraph, deletedInfo);
     }
 
@@ -206,9 +208,8 @@ export class DeleteObjectOperation implements Operation<OperationInvokeResult> {
   ): void {
     sceneGraph.nodeMap.set(info.node.nodeId, info.node);
 
-    for (const childInfo of info.children) {
+    for (const childInfo of [...info.children].reverse()) {
       this.restoreNodeAndChildren(sceneGraph, childInfo);
-      info.node.add(childInfo.node);
     }
 
     if (info.parentId) {

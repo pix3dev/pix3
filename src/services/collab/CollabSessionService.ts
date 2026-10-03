@@ -1,5 +1,4 @@
 import { injectable, ServiceContainer } from '@/fw/di';
-import type * as Y from 'yjs';
 import { appState } from '@/state';
 import { SceneManager } from '@pix3/runtime';
 import { CollaborationService } from '@/services/collab/CollaborationService';
@@ -60,10 +59,7 @@ export class CollabSessionService {
 
     const existingFilePath = binding.getSceneFilePath(ydoc, sceneId);
     const descriptor = appState.scenes.descriptors[sceneId];
-    const sceneEntry = ydoc.getMap<Y.Map<unknown>>('scenes').get(sceneId);
-    const { Map: YMap } = await import('yjs');
-    const snapshot = sceneEntry instanceof YMap ? sceneEntry.get('snapshot') : undefined;
-    if (typeof snapshot !== 'string' || !snapshot.trim()) {
+    if (!binding.hasScene(ydoc, sceneId)) {
       ydoc.transact(() => {
         binding.initializeYDocFromScene(
           ydoc,
@@ -116,6 +112,14 @@ export class CollabSessionService {
         resolve();
         return;
       }
+      if (collabService.connectionStatus === 'disconnected') {
+        reject(
+          new Error(
+            collabService.connectionError ?? 'Unable to connect to the collaboration server.'
+          )
+        );
+        return;
+      }
 
       const timeoutId = window.setTimeout(() => {
         unsubscribe();
@@ -130,7 +134,11 @@ export class CollabSessionService {
         } else if (status === 'disconnected') {
           window.clearTimeout(timeoutId);
           unsubscribe();
-          reject(new Error('Unable to connect to the collaboration server.'));
+          reject(
+            new Error(
+              collabService.connectionError ?? 'Unable to connect to the collaboration server.'
+            )
+          );
         }
       });
     });

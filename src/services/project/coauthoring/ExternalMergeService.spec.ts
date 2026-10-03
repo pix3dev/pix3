@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appState, resetAppState } from '@/state';
+import { OperationService } from '@/services/core/OperationService';
 import { entryKey, genAtWrite } from '@/services/project/external-merge/protected-set';
 import { ACK_FILE } from './coauthoring-paths';
 import { CHANGED_NODES_HIGHLIGHT_MS } from './ExternalMergeService';
 import { ProtectedSetService } from './ProtectedSetService';
+import { wire } from './memory-storage.spec-helper';
 import {
   SCENE_ID,
   SCENE_PATH,
@@ -28,6 +30,52 @@ afterEach(() => {
 });
 
 describe('ExternalMergeService — the four outcomes through the batch consumer', () => {
+  it.each([false, true])(
+    'reloads an inactive scene without clearing the active history (target history: %s)',
+    async targetHasHistory => {
+      const h = await createMergeHarness();
+      const operations = new OperationService();
+      try {
+        const targetHistory = operations.history;
+        if (targetHasHistory) {
+          targetHistory.push({ metadata: {}, undo: vi.fn(), redo: vi.fn() });
+        }
+        appState.scenes.descriptors['other-scene'] = {
+          ...appState.scenes.descriptors[SCENE_ID],
+          id: 'other-scene',
+          name: 'Other',
+          filePath: 'res://scenes/other.pix3scene',
+        };
+        appState.scenes.activeSceneId = 'other-scene';
+        const activeHistory = operations.history;
+        activeHistory.push({
+          metadata: { commandId: 'edit-other' },
+          undo: vi.fn(),
+          redo: vi.fn(),
+        });
+        // Keep the harness's real reload/context and use actual per-scene history.
+        vi.spyOn(operations, 'invoke').mockImplementation((op, options) =>
+          h.operations.invoke(op, options)
+        );
+        wire(h.merge, { operations });
+        h.agentWrites(agentScene({ ax: 55 }));
+
+        expect(await h.merge.applyExternalVersion(SCENE_ID, SCENE_RES)).toBe('reloaded');
+        expect(h.positionOfA()).toEqual([55, 20]);
+        expect(appState.scenes.activeSceneId).toBe('other-scene');
+        expect(targetHistory.canUndo).toBe(false);
+        expect(activeHistory.canUndo).toBe(true);
+        expect(appState.operations.lastUndoableCommandId).toBe('edit-other');
+        expect(h.logger.info).toHaveBeenCalledWith(
+          'Main was changed outside Pix3 and reloaded' +
+            (targetHasHistory ? ' — undo history was cleared.' : '.')
+        );
+      } finally {
+        operations.dispose();
+      }
+    }
+  );
+
   it('empty P: plain reload from A (fast path), nothing written back, no banner', async () => {
     const h = await createMergeHarness();
     h.agentWrites(agentScene({ ax: 55 }));

@@ -89,7 +89,7 @@ describe('SceneCRDTBinding', () => {
       .getYDoc()
       .getMap<Y.Map<unknown>>('scenes')
       .get('scene-1');
-    expect(sceneMapAfterCommit?.get('snapshot')).toBe('serialized-scene');
+    expect(sceneMapAfterCommit?.get('snapshot')).toBe('version: 1.0.0\nroot: []\n');
   });
 
   it('keeps inspector preview updates local and syncs only commit updates', async () => {
@@ -125,7 +125,7 @@ describe('SceneCRDTBinding', () => {
     await commitCommand.execute(createCommandContext(operationService));
 
     const commitSceneMap = collabService.getYDoc().getMap<Y.Map<unknown>>('scenes').get('scene-1');
-    expect(commitSceneMap?.get('snapshot')).toBe('serialized-scene');
+    expect(commitSceneMap?.get('snapshot')).toBe('version: 1.0.0\nroot: []\n');
   });
 });
 
@@ -142,7 +142,7 @@ function createBinding(): SceneCRDTBinding {
     value: () => ({
       getSceneGraph: () => sceneGraph,
       getActiveSceneGraph: () => sceneGraph,
-      serializeScene: () => 'serialized-scene',
+      serializeScene: () => 'version: 1.0.0\nroot: []\n',
     }),
     configurable: true,
   });

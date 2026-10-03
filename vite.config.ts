@@ -43,6 +43,8 @@ export default defineConfig(async ({ mode }) => {
        */
       dedupe: ['three'],
       alias: {
+        '@pix3/collab-document': resolve(__dirname, 'packages/pix3-collab-server/src/shared/scene-crdt-document.ts'),
+        '@pix3/collab-protocol': resolve(__dirname, 'packages/pix3-collab-server/src/shared/collaboration-protocol.ts'),
         '@': resolve(__dirname, 'src'),
         '@/core': resolve(__dirname, 'src/core'),
         '@/services': resolve(__dirname, 'src/services'),

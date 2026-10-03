@@ -69,7 +69,8 @@ export class SaveAsSceneOperation implements Operation<OperationInvokeResult> {
 
     logger.info('Saving scene as...');
 
-    // Serialize the scene
+    // An edit completed during the write may not be in the serialized bytes.
+    const changeSignalAtSerialize = state.scenes.nodeDataChangeSignal;
     const sceneYaml = sceneManager.serializeScene(sceneGraph);
 
     // Validate that we have content to save
@@ -171,10 +172,12 @@ export class SaveAsSceneOperation implements Operation<OperationInvokeResult> {
     }
 
     // Only update scene descriptor if we saved to project
-    let descriptor = state.scenes.descriptors[sceneId];
+    const descriptor = state.scenes.descriptors[sceneId];
     if (isInProject && descriptor) {
       descriptor.filePath = savedFilePath || this.params.filePath;
-      descriptor.isDirty = false;
+      if (state.scenes.nodeDataChangeSignal === changeSignalAtSerialize) {
+        descriptor.isDirty = false;
+      }
       descriptor.lastSavedAt = Date.now();
 
       // If we saved using a handle inside the project, ensure the descriptor has the up-to-date handle.
@@ -246,9 +249,10 @@ export class SaveAsSceneOperation implements Operation<OperationInvokeResult> {
         },
         redo: () => {
           // Redo just restores the saved state (only applies if saved in project)
-          if (isInProject && descriptor) {
+          const afterDescriptor = afterSnapshot.scenes.descriptors[sceneId];
+          if (isInProject && descriptor && afterDescriptor) {
             descriptor.filePath = savedFilePath || this.params.filePath;
-            descriptor.isDirty = false;
+            descriptor.isDirty = afterDescriptor.isDirty;
             descriptor.lastSavedAt = Date.now();
           }
         },

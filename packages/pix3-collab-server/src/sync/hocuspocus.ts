@@ -11,6 +11,13 @@ import { verifyToken } from '../core/auth/auth-middleware.js';
 import { getProjectByShareToken, getUserRole } from '../core/projects/projects-service.js';
 import { resolveContainedPath } from '../core/storage/contained-path.js';
 import {
+  CLIENT_SCENE_FORMAT_ERROR,
+  COLLABORATION_METADATA_MAP,
+  SCENE_FORMAT_PARAMETER,
+  SCENE_FORMAT_VERSION,
+  SERVER_SCENE_FORMAT_KEY,
+} from '../shared/collaboration-protocol.js';
+import {
   loadScenesFromDisk,
   loadScriptsFromDisk,
   persistDocumentToDisk,
@@ -34,7 +41,14 @@ export function createHocuspocusServer(): CollaborationServer {
   const crdtDb = openCrdtDb();
 
   const hocuspocus = new Hocuspocus({
-    async onAuthenticate({ token, connectionConfig, documentName }) {
+    async onAuthenticate({ token, connectionConfig, documentName, requestParameters }) {
+      if (requestParameters.get(SCENE_FORMAT_PARAMETER) !== String(SCENE_FORMAT_VERSION)) {
+        // Hocuspocus serializes `reason`, not Error.message, into permission-denied replies.
+        throw Object.assign(new Error(CLIENT_SCENE_FORMAT_ERROR), {
+          reason: CLIENT_SCENE_FORMAT_ERROR,
+        });
+      }
+
       // Document name format: project:{projectId}
       const projectId = documentName.replace(/^project:/, '');
 
@@ -76,6 +90,14 @@ export function createHocuspocusServer(): CollaborationServer {
 
       loadScenesFromDisk(projectDir, scenesMap);
       loadScriptsFromDisk(path.resolve(projectDir, 'scripts'), scriptsMap);
+    },
+
+    async afterLoadDocument({ document }) {
+      // Run after persisted state and disk snapshots have loaded, including existing rooms.
+      const metadata = document.getMap(COLLABORATION_METADATA_MAP);
+      if (metadata.get(SERVER_SCENE_FORMAT_KEY) !== SCENE_FORMAT_VERSION) {
+        metadata.set(SERVER_SCENE_FORMAT_KEY, SCENE_FORMAT_VERSION);
+      }
     },
 
     async onStoreDocument({ documentName, document }) {

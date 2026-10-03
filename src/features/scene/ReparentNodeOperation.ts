@@ -183,6 +183,12 @@ export class ReparentNodeOperation implements Operation<OperationInvokeResult> {
         metadata: hierarchy.metadata,
       };
     }
+
+    // Autosave may have cleared the flag since the original move.
+    const descriptor = state.scenes.descriptors[activeSceneId];
+    if (descriptor) {
+      descriptor.isDirty = true;
+    }
   }
 
   private async redoReparent(context: OperationContext): Promise<void> {

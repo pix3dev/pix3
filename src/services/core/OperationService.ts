@@ -36,6 +36,8 @@ export type OperationEvent =
       readonly didMutate: boolean;
       /** True when the mutation was committed through history and is safe to sync in collaboration. */
       readonly pushedToHistory: boolean;
+      /** Scene active when execution began, before any asynchronous work or tab switch. */
+      readonly sceneId?: string | null;
       /**
        * Who asked for it (`OperationInvokeOptions.origin`, default `user`); an operation tagged
        * `NON_HUMAN_OPERATION_TAG` reports `external` whatever it was invoked with.
@@ -69,6 +71,7 @@ export type OperationEventListener = (event: OperationEvent) => void;
 
 interface ExecutionResult {
   readonly context: OperationContext;
+  readonly sceneId: string | null;
   readonly metadata: OperationMetadata;
   readonly result: OperationInvokeResult;
 }
@@ -112,6 +115,7 @@ export class OperationService {
   // never operates on another scene's (detached) nodes. `history` always resolves
   // to the active scene's stack; buckets for closed scenes are pruned.
   private readonly histories = new Map<string, HistoryManager>();
+  private readonly historyVersions = new WeakMap<HistoryManager, number>();
   private historyCapacity: number | undefined;
   private readonly seedHistory?: HistoryManager;
   private subscribedHistory: HistoryManager | null = null;
@@ -135,7 +139,11 @@ export class OperationService {
 
   /** Active scene's undo/redo stack (created on first access for that scene). */
   get history(): HistoryManager {
-    const key = this.state.scenes.activeSceneId ?? NO_SCENE_HISTORY_KEY;
+    return this.getHistory(this.state.scenes.activeSceneId);
+  }
+
+  private getHistory(sceneId: string | null): HistoryManager {
+    const key = sceneId ?? NO_SCENE_HISTORY_KEY;
     let manager = this.histories.get(key);
     if (!manager) {
       // Reuse the injected/seed manager for the very first bucket so tests and
@@ -160,6 +168,8 @@ export class OperationService {
     this.disposeHistorySubscription();
     this.subscribedHistory = manager;
     this.disposeHistorySubscription = manager.subscribe(snapshot => {
+      const lastEntry = snapshot.undoEntries[snapshot.undoEntries.length - 1];
+      this.state.operations.lastUndoableCommandId = lastEntry?.metadata.commandId ?? null;
       this.emit({
         type: 'history:changed',
         snapshot,
@@ -177,7 +187,7 @@ export class OperationService {
         continue;
       }
       if (key === NO_SCENE_HISTORY_KEY || !this.state.scenes.descriptors[key]) {
-        this.histories.get(key)?.clear();
+        this.invalidateHistory(this.histories.get(key)!);
         this.histories.delete(key);
       }
     }
@@ -211,7 +221,8 @@ export class OperationService {
       execution.context.state,
       execution.result.didMutate,
       false,
-      resolveOrigin(execution.metadata, options)
+      resolveOrigin(execution.metadata, options),
+      execution.sceneId
     );
     return execution.result as TInvokeResult;
   }
@@ -222,27 +233,37 @@ export class OperationService {
   ): Promise<boolean> {
     this.ensureWritable(operation.metadata.id);
     this.repointHistory();
+    const context = this.resolveContext(options.context);
+    const sceneId = context.state.scenes.activeSceneId;
+    const history = this.getHistory(sceneId);
+    const historyVersion = this.historyVersions.get(history) ?? 0;
     this.logger.debug('invokeAndPush: Starting operation', {
       operationId: operation.metadata.id,
       operationTitle: operation.metadata.title,
     });
 
-    const execution = await this.executeOperation(operation, options);
+    const execution = await this.executeOperation(operation, options, context);
     let pushed = false;
     try {
-      if (execution.result.didMutate && execution.result.commit) {
+      // A tab switch must not move this commit into another scene. A close or
+      // reload invalidates the old graph, so its pending commits must be dropped.
+      this.repointHistory();
+      this.pruneClosedScenes();
+      const historyIsCurrent =
+        this.histories.get(sceneId ?? NO_SCENE_HISTORY_KEY) === history &&
+        (this.historyVersions.get(history) ?? 0) === historyVersion;
+      if (execution.result.didMutate && execution.result.commit && historyIsCurrent) {
         this.logger.debug('invokeAndPush: Operation mutated, pushing to history', {
           operationId: execution.metadata.id,
           commitLabel: execution.result.commit.label,
           coalesceKey: options.coalesceKey ?? execution.metadata.coalesceKey,
         });
-        this.pushToHistory(execution.metadata, execution.result.commit, options);
-        execution.context.state.operations.lastUndoableCommandId = execution.metadata.id;
+        this.pushToHistory(history, execution.metadata, execution.result.commit, options);
         pushed = true;
         this.logger.debug('invokeAndPush: Successfully pushed to history', {
           operationId: execution.metadata.id,
-          canUndo: this.history.canUndo,
-          canRedo: this.history.canRedo,
+          canUndo: history.canUndo,
+          canRedo: history.canRedo,
         });
       } else {
         this.logger.debug('invokeAndPush: Operation did not mutate or has no commit', {
@@ -257,7 +278,8 @@ export class OperationService {
         execution.context.state,
         execution.result.didMutate,
         pushed,
-        resolveOrigin(execution.metadata, options)
+        resolveOrigin(execution.metadata, options),
+        execution.sceneId
       );
     }
 
@@ -340,9 +362,23 @@ export class OperationService {
     }
   }
 
-  clearHistory(): void {
-    this.history.clear();
-    this.state.operations.lastUndoableCommandId = null;
+  /** Clear one scene's history, returning whether it had undo/redo entries. */
+  clearHistory(sceneId: string | null = this.state.scenes.activeSceneId): boolean {
+    this.repointHistory();
+    const history = this.histories.get(sceneId ?? NO_SCENE_HISTORY_KEY);
+    const hadHistory = !!history && (history.canUndo || history.canRedo);
+    if (history) {
+      this.invalidateHistory(history);
+    }
+    if (sceneId === this.state.scenes.activeSceneId) {
+      this.state.operations.lastUndoableCommandId = null;
+    }
+    return hadHistory;
+  }
+
+  private invalidateHistory(history: HistoryManager): void {
+    this.historyVersions.set(history, (this.historyVersions.get(history) ?? 0) + 1);
+    history.clear();
   }
 
   setHistoryCapacity(capacity: number): void {
@@ -402,16 +438,17 @@ export class OperationService {
 
   private async executeOperation<TInvokeResult extends OperationInvokeResult>(
     operation: Operation<TInvokeResult>,
-    options: OperationInvokeOptions
+    options: OperationInvokeOptions,
+    context = this.resolveContext(options.context)
   ): Promise<ExecutionResult> {
-    const context = this.resolveContext(options.context);
+    const sceneId = context.state.scenes.activeSceneId;
     const metadata = operation.metadata;
     this.beginOperation(metadata, context.state);
 
     try {
       const result = await operation.perform(context);
       const normalized = this.normalizeInvokeResult(result, options);
-      return { context, metadata, result: normalized as OperationInvokeResult };
+      return { context, sceneId, metadata, result: normalized as OperationInvokeResult };
     } catch (error) {
       this.failOperation(metadata, context.state, error);
       throw error;
@@ -442,6 +479,7 @@ export class OperationService {
   }
 
   private pushToHistory(
+    history: HistoryManager,
     metadata: OperationMetadata,
     commit: OperationCommit,
     options: OperationInvokeOptions
@@ -467,7 +505,7 @@ export class OperationService {
     const coalesceKey = entryInit.metadata.coalesceKey;
 
     if (coalesceKey) {
-      const currentUndoEntries = this.history.snapshot().undoEntries;
+      const currentUndoEntries = history.snapshot().undoEntries;
       const previous = currentUndoEntries[currentUndoEntries.length - 1];
       if (previous?.metadata.coalesceKey === coalesceKey) {
         this.logger.debug('pushToHistory: Coalescing operation with previous', {
@@ -475,7 +513,7 @@ export class OperationService {
           coalesceKey,
           previousCommandId: previous.metadata.commandId,
         });
-        this.history.replaceLast(entryInit);
+        history.replaceLast(entryInit);
         return;
       }
     }
@@ -488,7 +526,7 @@ export class OperationService {
       hasRedo: !!commit.redo,
     });
 
-    this.history.push(entryInit);
+    history.push(entryInit);
   }
 
   private resolveContext(partial?: Partial<OperationContext>): OperationContext {
@@ -531,7 +569,8 @@ export class OperationService {
     state: AppState,
     didMutate: boolean,
     pushedToHistory: boolean,
-    origin: OperationOrigin
+    origin: OperationOrigin,
+    sceneId: string | null
   ): void {
     this.logger.debug('completeOperation: Finishing', {
       operationId: metadata.id,
@@ -546,14 +585,12 @@ export class OperationService {
       state.operations.lastCommandId = metadata.id;
       state.scenes.nodeDataChangeSignal = state.scenes.nodeDataChangeSignal + 1;
     }
-    if (pushedToHistory) {
-      state.operations.lastUndoableCommandId = metadata.id;
-    }
     this.emit({
       type: 'operation:completed',
       metadata,
       didMutate,
       pushedToHistory,
+      sceneId,
       origin,
       timestamp: Date.now(),
     });

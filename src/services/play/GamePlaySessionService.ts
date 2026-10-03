@@ -537,10 +537,9 @@ export class GamePlaySessionService {
 
   /**
    * Undo a launch that never reached a scene. `isPlaying` is what the Game tab, the Flow stage,
-   * `play_start` and every agent verification read — leaving it on after a failed start hands them
-   * a game that does not exist, and the next start is refused as "already running", so the stage
-   * stays black for the rest of the session. Turning it back off makes the failure recoverable:
-   * the Restart button and `play_start` both work again.
+   * `play_start` and every agent verification read — leaving it on after a failed start makes a
+   * stopped runtime appear to be playing.
+   * Release the failed runtime and turn play mode back off so another start can retry cleanly.
    */
   private async abortFailedStart(): Promise<void> {
     this.startFailed = true;
@@ -676,10 +675,10 @@ export class GamePlaySessionService {
       if (this.abandonStaleStart(generation, renderer, runner)) {
         return;
       }
-      this.profilerSessionService.endSession();
       this.updateHostRunningState(false);
       const detail = error instanceof Error ? error.message : String(error);
       this.runtimeErrorBridge.reportPlayModeFailure(`Failed to start the scene: ${detail}`, error);
+      await this.abortFailedStart();
       throw error;
     }
   }

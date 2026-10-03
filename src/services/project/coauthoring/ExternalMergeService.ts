@@ -476,9 +476,7 @@ export class ExternalMergeService {
       }),
       { origin: 'external' }
     );
-    const history = this.operations.history;
-    const hadHistory = history.canUndo || history.canRedo;
-    this.operations.clearHistory();
+    const hadHistory = this.operations.clearHistory(sceneId);
     const name = appState.scenes.descriptors[sceneId]?.name || toProjectPath(filePath);
     this.logger.info(
       `${name} was changed outside Pix3 and reloaded` +

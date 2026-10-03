@@ -4,6 +4,13 @@ import { injectable } from '@/fw/di';
 import { appState } from '@/state';
 import type { CollabAuthSource, CollabRole } from '@/state/AppState';
 import { subscribe } from 'valtio/vanilla';
+import {
+  COLLABORATION_METADATA_MAP,
+  SCENE_FORMAT_PARAMETER,
+  SCENE_FORMAT_VERSION,
+  SERVER_SCENE_FORMAT_ERROR,
+  SERVER_SCENE_FORMAT_KEY,
+} from '@pix3/collab-protocol';
 
 export type CollabConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'synced';
 
@@ -33,6 +40,7 @@ export class CollaborationService {
   private connectEpoch = 0;
 
   connectionStatus: CollabConnectionStatus = 'disconnected';
+  connectionError: string | null = null;
 
   /** Flag to prevent echo loop: set to true when processing remote updates */
   isRemoteUpdate = false;
@@ -48,6 +56,7 @@ export class CollaborationService {
   private getWebSocketUrl(): string {
     const wsUrl = new URL('/collaboration', this.getServerBaseUrlInternal());
     wsUrl.protocol = wsUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+    wsUrl.searchParams.set(SCENE_FORMAT_PARAMETER, String(SCENE_FORMAT_VERSION));
     return wsUrl.toString();
   }
 
@@ -60,6 +69,10 @@ export class CollaborationService {
   ): Promise<void> {
     // Clean up any existing connection before awaiting so rapid reconnects don't stack.
     this.disconnect();
+    if (this.connectionError && appState.project.errorMessage === this.connectionError) {
+      appState.project.errorMessage = null;
+    }
+    this.connectionError = null;
 
     // Guard against a double-connect race: capture the epoch before the lazy
     // imports and abort silently if another connect()/disconnect() intervened.
@@ -98,22 +111,48 @@ export class CollaborationService {
     // Resolve auth token: explicit override (share token for guests), then JWT from session
     const token = options.tokenOverride ?? appState.auth.user?.token ?? '';
 
-    // Server synchronization
-    this.provider = new HocuspocusProvider({
+    // A transport connection alone is not usable until the server capability is checked.
+    this.setConnectionStatus('connecting');
+    if (epoch !== this.connectEpoch) return;
+    const document = this.ydoc;
+    const provider = new HocuspocusProvider({
       url: this.getWebSocketUrl(),
       name: roomName,
       document: this.ydoc,
       token,
-      onStatus: ({ status }: { status: string }) => {
-        this.setConnectionStatus(status as CollabConnectionStatus);
+      // This service owns the socket; a rejected capability must stop its reconnect loop.
+      preserveConnection: false,
+      onStatus: ({ status }) => {
+        if (epoch !== this.connectEpoch) return;
+        this.setConnectionStatus(status === 'connected' ? 'connecting' : status);
       },
-      onSynced: () => {
+      onSynced: ({ state }) => {
+        if (epoch !== this.connectEpoch || !state) return;
+        const serverFormat = document
+          .getMap(COLLABORATION_METADATA_MAP)
+          .get(SERVER_SCENE_FORMAT_KEY);
+        if (serverFormat !== SCENE_FORMAT_VERSION) {
+          this.failConnection(SERVER_SCENE_FORMAT_ERROR);
+          return;
+        }
         this.setConnectionStatus('synced');
       },
+      onAuthenticationFailed: ({ reason }) => {
+        if (epoch !== this.connectEpoch) return;
+        this.failConnection(reason || 'Unable to authenticate with the collaboration server.');
+      },
       onDisconnect: () => {
+        if (epoch !== this.connectEpoch) return;
         this.setConnectionStatus('disconnected');
       },
     });
+    // A provider may invoke callbacks while being constructed. Never revive a rejected
+    // connection (or replace a newer connection started by a status listener).
+    if (epoch !== this.connectEpoch) {
+      provider.destroy();
+      return;
+    }
+    this.provider = provider;
 
     // Set awareness (presence) data
     this.provider.awareness?.setLocalStateField('user', {
@@ -135,8 +174,12 @@ export class CollaborationService {
       this.updateLocalSelectionAwareness();
     });
     this.updateLocalSelectionAwareness();
+  }
 
-    this.setConnectionStatus('connecting');
+  private failConnection(reason: string): void {
+    this.connectionError = reason;
+    appState.project.errorMessage = reason;
+    this.disconnect();
   }
 
   disconnect(): void {

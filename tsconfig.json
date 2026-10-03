@@ -31,6 +31,8 @@
     "rootDir": ".",
     /* Path mapping */
     "paths": {
+      "@pix3/collab-document": ["./packages/pix3-collab-server/src/shared/scene-crdt-document.ts"],
+      "@pix3/collab-protocol": ["./packages/pix3-collab-server/src/shared/collaboration-protocol.ts"],
       "@/*": [
         "./src/*"
       ],

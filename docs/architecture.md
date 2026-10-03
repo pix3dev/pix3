@@ -209,6 +209,32 @@ undo/redo selection cleanup symmetric); scene-create commands share
 `CreateNodeBaseCommand` + `scene-command-utils.ts` (`requireActiveScene`,
 created-node payload from selection).
 
+## Collaboration scene synchronization
+
+`SceneCRDTBinding` uses scene wire format 2: an immutable YAML bootstrap snapshot plus flat Y.Map
+field registers. Node membership, parent and sibling rank are independent registers; script
+components are keyed by component ID, and object/config leaves merge independently. Unchanged
+siblings retain ranks, so inserting a node does not overwrite another user's reparent. Vectors and
+other non-component arrays are atomic values; concurrent changes to the same value use Yjs conflict
+resolution. Explicit scalar/deleted ancestors mask stale descendant fields. Concurrent tree cycles
+are broken deterministically at the smallest node ID.
+
+The shared codec is `packages/pix3-collab-server/src/shared/scene-crdt-document.ts`, imported by the
+editor as `@pix3/collab-document` and by the server's disk mirror. The mirror reconstructs merged
+fields before writing scene files; it preserves the last good file if reconstruction fails. Stored
+snapshot-only rooms migrate on their first committed edit, including concurrent first edits.
+
+Remote asset loads carry a generation guard and dispose superseded graphs. Installation waits for
+pending local operations, and binding baselines the actual installed graph before catching up to
+room state. Local commits are diffed against that baseline, never against unseen remote changes.
+Operations identify their originating scene, so a tab switch cannot publish another tab's edits.
+
+Deploy the format-2 collaboration server before the editor, then refresh existing editor clients.
+The websocket format gate rejects snapshot-only clients, and the editor requires the server's
+advertised format support. Do not roll a migrated server back to snapshot-only persistence: its
+stored capability metadata and field documents require the format-2 implementation. The change
+is a protocol rollout; stored legacy scenes are supported, mixed live client versions are not.
+
 ## Script Component System
 
 Pix3 includes a unified script component system for attaching runtime logic to nodes:

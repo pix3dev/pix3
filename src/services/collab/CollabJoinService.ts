@@ -144,6 +144,10 @@ export class CollabJoinService {
         resolve();
         return;
       }
+      if (collabService.connectionStatus === 'disconnected') {
+        reject(new Error(collabService.connectionError ?? 'Disconnected from collab server'));
+        return;
+      }
 
       const timeout = setTimeout(() => {
         cleanup();
@@ -160,7 +164,7 @@ export class CollabJoinService {
         } else if (status === 'disconnected') {
           clearTimeout(timeout);
           cleanup();
-          reject(new Error('Disconnected from collab server'));
+          reject(new Error(collabService.connectionError ?? 'Disconnected from collab server'));
         }
       });
     });
