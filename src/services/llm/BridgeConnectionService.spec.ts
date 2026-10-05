@@ -122,6 +122,7 @@ describe('bridge discovery parsing', () => {
     expect(provider.id).toBe('codex');
     expect(provider.defaultBaseUrl).toBe('http://127.0.0.1:8484/agents/codex/v1');
     expect(provider.models.map(model => model.id)).toContain('gpt-5.6-sol');
+    expect(provider.models.map(model => model.id)).toContain('gpt-6.1-sol');
     expect(provider.models[0].capabilities.supportsTools).toBe(false);
   });
 

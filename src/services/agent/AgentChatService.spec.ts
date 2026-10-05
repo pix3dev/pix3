@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { appState } from '@/state';
+import { AgentKeepaliveService } from '@/services/project/workspace/AgentKeepaliveService';
+import { isEditorActive, isEditorKeepAlive } from '@/services/core/page-activity';
 import {
   AgentChatService,
   LLM_REQUEST_TIMEOUT_MS,
@@ -81,6 +83,7 @@ const buildService = (fakes: Fakes): AgentChatService => {
     chat: fakes.chat,
   };
   const overrides: Record<string, unknown> = {
+    keepalive: { initialize: vi.fn(), setEmbeddedAgentRunning: vi.fn() },
     settings: {
       getSelectedProvider: () => provider,
       getSelectedModelId: () => 'fake-model',
@@ -160,6 +163,53 @@ const buildService = (fakes: Fakes): AgentChatService => {
 };
 
 describe('AgentChatService', () => {
+  it.each(['success', 'aborted', 'error'] as const)(
+    'keeps an unfocused editor active during a provider wait and releases it after %s',
+    async outcome => {
+      let finish: (result: LlmResult) => void = () => {};
+      let fail: (error: Error) => void = () => {};
+      let started: () => void = () => {};
+      const waiting = new Promise<void>(resolve => {
+        started = resolve;
+      });
+      const response = new Promise<LlmResult>((resolve, reject) => {
+        finish = resolve;
+        fail = reject;
+      });
+      const service = buildService({
+        chat: vi.fn(() => {
+          started();
+          return response;
+        }),
+        execute: vi.fn(),
+        put: vi.fn(async () => undefined),
+      });
+      const keepalive = new AgentKeepaliveService();
+      Object.defineProperty(service, 'keepalive', { value: keepalive });
+      const previousSetting = appState.ui.keepEditorRunningForAgent;
+      appState.ui.keepEditorRunningForAgent = true;
+      try {
+        const sending = service.send('hello');
+        await waiting;
+        expect(isEditorKeepAlive()).toBe(true);
+        expect(
+          isEditorActive({ visibilityState: 'hidden', hasFocus: () => false } as Document)
+        ).toBe(true);
+        if (outcome === 'success') finish(textResult('done'));
+        else {
+          if (outcome === 'aborted') service.stop();
+          fail(new LlmError(outcome === 'aborted' ? 'aborted' : 'missing-key', 'ended'));
+        }
+        await sending;
+        expect(service.isRunning()).toBe(false);
+        expect(isEditorKeepAlive()).toBe(false);
+      } finally {
+        keepalive.dispose();
+        appState.ui.keepEditorRunningForAgent = previousSetting;
+      }
+    }
+  );
+
   beforeEach(() => {
     appState.project.id = 'proj-1';
   });
@@ -205,6 +255,28 @@ describe('AgentChatService', () => {
       content: [{ type: 'text', text: 'hello!' }],
     });
     expect(state.totalUsage).toEqual({ inputTokens: 10, outputTokens: 5 });
+  });
+
+  it('shows transient streamed text before completion without inserting partial history', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => {
+      release = resolve;
+    });
+    const chat = vi.fn(async (params: ChatParams) => {
+      params.onDelta?.({ type: 'text', text: 'hello' });
+      await gate;
+      return textResult('hello!');
+    });
+    const service = buildService({ chat, execute: vi.fn(), put: vi.fn(async () => undefined) });
+    const pending = service.send('hi');
+    await vi.waitFor(() => expect(service.getState().streamingText).toBe('hello'));
+    expect(service.getState().responsePhase).toBe('text');
+    expect(service.getState().messages).toHaveLength(1);
+    release();
+    await pending;
+    expect(service.getState().streamingText).toBe('');
+    expect(service.getState().responsePhase).toBeNull();
+    expect(service.getState().messages).toHaveLength(2);
   });
 
   it('stamps each assistant turn with the provider that produced it', async () => {
@@ -2003,6 +2075,41 @@ describe('AgentChatService', () => {
       ...toolCallResult('scene_tree', id),
       usage: { inputTokens: 800, outputTokens: 10 },
     });
+
+    it.each([48226, null])(
+      'does not compact on cumulative CLI usage with context %s',
+      async contextInputTokens => {
+        const chat = vi.fn();
+        for (let index = 0; index < 4; index++) {
+          chat.mockResolvedValueOnce({
+            ...toolCallResult('scene_tree', `c${index}`),
+            usage: {
+              inputTokens: 277217,
+              outputTokens: 472,
+              contextInputTokens,
+              contextWindow: 258400,
+            },
+          });
+        }
+        chat.mockResolvedValueOnce(textResult('done'));
+        const service = buildService({
+          chat,
+          execute: vi.fn(async () => ({})),
+          put: vi.fn(async () => undefined),
+          contextWindow: 200000,
+          maxToolIterations: 6,
+        });
+        await service.send('remove bumpers');
+        expect(chat).toHaveBeenCalledTimes(5);
+        expect(service.getState().compactedAtIndices).toEqual([]);
+        expect(JSON.stringify(service.getState().messages)).not.toContain('Context is filling');
+        expect(service.getState().turnMetrics[1]).toMatchObject({
+          contextInputTokens,
+          contextWindow: 258400,
+        });
+        expect(service.getState().totalUsage.inputTokens).toBe(4 * 277217 + 10);
+      }
+    );
 
     it('nudges once at the 60% watermark without touching the history', async () => {
       const chat = vi

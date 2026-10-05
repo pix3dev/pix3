@@ -154,6 +154,8 @@ import {
 } from '@/services/agent/create-node-registry';
 import { ConvertNodeTypeCommand } from '@/features/scene/ConvertNodeTypeCommand';
 import { ReparentNodeCommand } from '@/features/scene/ReparentNodeCommand';
+import { DeleteObjectCommand } from '@/features/scene/DeleteObjectCommand';
+import { isPrefabChildNode } from '@/features/scene/prefab-utils';
 
 /** JSON Schema for a tool's input. */
 export type JsonSchema = Record<string, unknown>;
@@ -1065,6 +1067,20 @@ export class AgentToolRegistry {
           additionalProperties: false,
         },
         handler: args => this.convertNodeType(args),
+      },
+      {
+        name: 'delete_nodes',
+        description:
+          'Delete nodes and their entire subtrees from the active scene (undoable), then save the scene. Pass explicit nodeIds from scene_tree; selection is not required. Removes template objects without moving or hiding them. Prefab instance children are locked: delete the instance root instead. Returns all deletedNodeIds, including descendants. Use this instead of editing .pix3scene files.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            nodeIds: { type: 'array', items: { type: 'string' }, minItems: 1 },
+          },
+          required: ['nodeIds'],
+          additionalProperties: false,
+        },
+        handler: args => this.deleteNodes(args),
       },
       {
         name: 'move_node',
@@ -3042,13 +3058,53 @@ export class AgentToolRegistry {
     return { ok: true, nodeId, nodeType: node?.type ?? toType, name: node?.name };
   }
 
-  /**
-   * Move a node to a new parent and/or change its sibling order (z-order for 2D), via the
-   * ReparentNodeCommand gateway so it is undoable. The insertion index is computed against the
-   * target parent's children EXCLUDING the moved node — matching ReparentNodeOperation, which
-   * detaches the node before splicing it back in (so index 0 = first/behind, siblings.length =
-   * last/on-top for 2D paint order).
-   */
+  private async deleteNodes(args: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (appState.project.status !== 'ready') {
+      return { ok: false, error: 'No project is open — cannot delete nodes.' };
+    }
+    if (
+      !Array.isArray(args.nodeIds) ||
+      args.nodeIds.length === 0 ||
+      !args.nodeIds.every(id => typeof id === 'string' && id.length > 0)
+    ) {
+      return { ok: false, error: 'nodeIds must be a non-empty array of node ids.' };
+    }
+    await this.ensureActiveScene();
+    const graph = this.sceneManager.getActiveSceneGraph();
+    if (!graph) return { ok: false, error: 'No active scene — open a scene first.' };
+    const nodeIds = [...new Set(args.nodeIds as string[])];
+    // Validate the whole request before dispatch: never silently delete only some targets.
+    for (const nodeId of nodeIds) {
+      const node = graph.nodeMap.get(nodeId);
+      if (!(node instanceof NodeBase)) {
+        return { ok: false, error: `Node "${nodeId}" not found in the active scene.` };
+      }
+      if (isPrefabChildNode(node)) {
+        return {
+          ok: false,
+          error: `Node "${nodeId}" is a locked prefab child; delete its instance root instead.`,
+        };
+      }
+    }
+    // Ancestors subsume descendants, regardless of the argument order (important for undo).
+    const targets = new Set(nodeIds);
+    const roots = nodeIds.filter(id => {
+      let parent = graph.nodeMap.get(id)?.parentNode;
+      while (parent) {
+        if (targets.has(parent.nodeId)) return false;
+        parent = parent.parentNode;
+      }
+      return true;
+    });
+    const before = new Set(graph.nodeMap.keys());
+    const didMutate = await this.dispatcher.execute(new DeleteObjectCommand({ nodeIds: roots }));
+    if (!didMutate) return { ok: false, error: 'Could not delete the requested nodes.' };
+    const deletedNodeIds = [...before].filter(id => !graph.nodeMap.has(id));
+    await this.saveActiveSceneBestEffort();
+    return { ok: true, deletedNodeIds };
+  }
+
+  /** Reparent/reorder through the gateway, with an index excluding the moved node. */
   private async moveNode(args: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (appState.project.status !== 'ready') {
       return { ok: false, error: 'No project is open — cannot move a node.' };

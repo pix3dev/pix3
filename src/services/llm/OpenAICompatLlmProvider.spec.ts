@@ -22,6 +22,148 @@ const bodyOf = (fetchImpl: ReturnType<typeof vi.fn>): Record<string, unknown> =>
 describe('OpenAICompatLlmProvider', () => {
   const provider = new OpenAICompatLlmProvider();
 
+  it('emits text before completion and assembles interleaved tools across split UTF-8 SSE chunks', async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const stream = new ReadableStream<Uint8Array>({
+      start(c) {
+        controller = c;
+      },
+    });
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(stream, {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+    );
+    const onDelta = vi.fn();
+    let settled = false;
+    const pending = provider
+      .chat(
+        { messages: [], onDelta },
+        {
+          apiKey: '',
+          modelId: 'deepseek',
+          baseUrl: BASE,
+          fetchImpl,
+        }
+      )
+      .then(result => {
+        settled = true;
+        return result;
+      });
+    const encoder = new TextEncoder();
+    const push = (delta: unknown, finish_reason: string | null = null) => {
+      const bytes = encoder.encode(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\r\n\r\n`
+      );
+      for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+    };
+    push({ content: 'Привет' });
+    await vi.waitFor(() => expect(onDelta).toHaveBeenCalledWith({ type: 'text', text: 'Привет' }));
+    expect(settled).toBe(false);
+    expect(bodyOf(fetchImpl)).toMatchObject({
+      stream: true,
+      stream_options: { include_usage: true },
+    });
+    push({
+      tool_calls: [
+        { index: 1, id: 'b', function: { name: 'second', arguments: '{"b":' } },
+        { index: 0, id: 'a', function: { name: 'first', arguments: '{"a":' } },
+      ],
+    });
+    push(
+      {
+        tool_calls: [
+          { index: 0, function: { arguments: '1}' } },
+          { index: 1, function: { arguments: '2}' } },
+        ],
+      },
+      'tool_calls'
+    );
+    controller.enqueue(
+      encoder.encode(
+        'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":9}}\n\ndata: [DONE]\n\n'
+      )
+    );
+    const result = await pending;
+    expect(result.content).toEqual([
+      { type: 'text', text: 'Привет' },
+      { type: 'tool-use', id: 'a', name: 'first', input: { a: 1 } },
+      { type: 'tool-use', id: 'b', name: 'second', input: { b: 2 } },
+    ]);
+    expect(result.usage).toMatchObject({ inputTokens: 12, outputTokens: 9 });
+  });
+
+  it.each([
+    ['truncated', { content: 'partial' }, null],
+    [
+      'invalid arguments',
+      { tool_calls: [{ index: 0, id: 'a', function: { name: 'write', arguments: '{' } }] },
+      'tool_calls',
+    ],
+  ])(
+    'rejects %s streams instead of returning executable tool calls',
+    async (_name, delta, finish_reason) => {
+      const response = new Response(
+        `data: ${JSON.stringify({ choices: [{ index: 0, delta, finish_reason }] })}\n\n`,
+        {
+          headers: { 'Content-Type': 'text/event-stream' },
+        }
+      );
+      await expect(
+        provider.chat(
+          { messages: [], onDelta: vi.fn() },
+          {
+            apiKey: '',
+            modelId: 'test',
+            baseUrl: BASE,
+            fetchImpl: vi.fn(async () => response),
+          }
+        )
+      ).rejects.toBeInstanceOf(LlmError);
+    }
+  );
+
+  it('accepts JSON from endpoints that ignore the streaming request', async () => {
+    const result = await provider.chat(
+      { messages: [], onDelta: vi.fn() },
+      {
+        apiKey: '',
+        modelId: 'test',
+        baseUrl: BASE,
+        fetchImpl: vi.fn(async () =>
+          okJson({ choices: [{ message: { content: 'hello' }, finish_reason: 'stop' }] })
+        ),
+      }
+    );
+    expect(result.content).toEqual([{ type: 'text', text: 'hello' }]);
+  });
+
+  it('cancels a pending stream read when the user stops the request', async () => {
+    const cancel = vi.fn();
+    const stream = new ReadableStream<Uint8Array>({ cancel });
+    const abort = new AbortController();
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(stream, {
+          headers: { 'Content-Type': 'text/event-stream' },
+        })
+    );
+    const pending = provider.chat(
+      { messages: [], onDelta: vi.fn(), signal: abort.signal },
+      {
+        apiKey: '',
+        modelId: 'test',
+        baseUrl: BASE,
+        fetchImpl,
+      }
+    );
+    await Promise.resolve();
+    abort.abort();
+    await expect(pending).rejects.toMatchObject({ kind: 'aborted' });
+    expect(cancel).toHaveBeenCalled();
+  });
+
   /**
    * Batching (`.plans/agent-one-shot-generation.md` §4.2) needs every lane to survive N tool calls
    * in ONE response. OpenAI puts them in a `tool_calls` ARRAY, and the round trip is where this

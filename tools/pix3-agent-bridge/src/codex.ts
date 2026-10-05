@@ -170,12 +170,13 @@ const model = (id: string, label: string, description: string, toolsEnabled: boo
     supportsSystemPrompt: true,
     maxOutputTokens: 32_000,
     contextWindow: 200_000,
-    reasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+    reasoningEfforts: ['low', 'medium', 'high', 'xhigh', ...(id === 'gpt-6.1-sol' ? ['max'] : [])],
   },
   pricing: { inputPer1M: 0, outputPer1M: 0 },
 });
 
 export const codexModels = (toolsEnabled: boolean) => [
+  model('gpt-6.1-sol', 'GPT-6.1 Sol (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),
   model('gpt-6-sol', 'GPT-6 Sol (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),
   model('gpt-6-luna', 'GPT-6 Luna (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),
   model('gpt-6-astra', 'GPT-6 Astra (Codex)', 'Runs through your Codex CLI sign-in.', toolsEnabled),

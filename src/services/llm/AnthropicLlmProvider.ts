@@ -343,6 +343,10 @@ const extractUsage = (payload: unknown): LlmUsage | undefined => {
   // Anthropic's `input_tokens` counts only the fresh (non-cached) prompt; the cached portions are
   // reported separately. Sum them so `inputTokens` stays the full, cache-inclusive context size.
   return {
+    ...(usage.context_input_tokens === null || typeof usage.context_input_tokens === 'number'
+      ? { contextInputTokens: usage.context_input_tokens }
+      : {}),
+    ...(typeof usage.context_window === 'number' ? { contextWindow: usage.context_window } : {}),
     inputTokens:
       typeof usage.input_tokens === 'number'
         ? usage.input_tokens + cacheRead + cacheCreation

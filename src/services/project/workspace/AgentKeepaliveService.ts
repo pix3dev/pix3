@@ -13,6 +13,8 @@ import { setEditorKeepAlive } from '@/services/core/page-activity';
  * pauses are off:
  *
  *   keepalive = setting on AND (
+ *       the in-editor agent is running (including provider waits)
+ *    OR
  *       presence attached               — the server's `agent-presence` (MCP heartbeats), also
  *                                         {@link PRESENCE_STALE_MS} after the socket dropped
  *    OR a call is in flight, or the last one finished < {@link RECENT_CALL_MS} ago
@@ -41,6 +43,7 @@ export const PRESENCE_STALE_MS = 5 * 60_000;
 export const RECONNECT_KEEPALIVE_MS = 5 * 60_000;
 
 export interface AgentKeepaliveReasons {
+  readonly embeddedAgent: boolean;
   readonly presence: boolean;
   readonly calls: boolean;
   readonly play: boolean;
@@ -49,6 +52,7 @@ export interface AgentKeepaliveReasons {
 
 @injectable()
 export class AgentKeepaliveService {
+  private embeddedAgentRunning = false;
   private readonly inflight = new Set<string>();
   private lastCallEndedAt: number | null = null;
   private agentPlay = false;
@@ -78,6 +82,12 @@ export class AgentKeepaliveService {
   /** The bridge got a call (tool calls, barrier, manifest — any agent activity). */
   noteCallStarted(id: string): void {
     this.inflight.add(id);
+    this.recompute();
+  }
+
+  /** A whole in-editor turn, not just its tool calls; released as soon as the turn settles. */
+  setEmbeddedAgentRunning(running: boolean): void {
+    this.embeddedAgentRunning = running;
     this.recompute();
   }
 
@@ -113,7 +123,7 @@ export class AgentKeepaliveService {
       workspace.status === 'reconnecting' &&
       this.reconnectKeptSince !== null &&
       now - this.reconnectKeptSince < RECONNECT_KEEPALIVE_MS;
-    return { presence, calls, play, reconnect };
+    return { embeddedAgent: this.embeddedAgentRunning, presence, calls, play, reconnect };
   }
 
   subscribe(listener: () => void): () => void {
@@ -126,6 +136,7 @@ export class AgentKeepaliveService {
     this.disposers = [];
     this.clearExpiry();
     this.inflight.clear();
+    this.embeddedAgentRunning = false;
     this.listeners.clear();
     this.apply(false);
   }
@@ -146,7 +157,14 @@ export class AgentKeepaliveService {
     }
     const reasons = this.reasons();
     const enabled = appState.ui.keepEditorRunningForAgent;
-    this.apply(enabled && (reasons.presence || reasons.calls || reasons.play || reasons.reconnect));
+    this.apply(
+      enabled &&
+        (reasons.embeddedAgent ||
+          reasons.presence ||
+          reasons.calls ||
+          reasons.play ||
+          reasons.reconnect)
+    );
     this.scheduleExpiry();
   }
 

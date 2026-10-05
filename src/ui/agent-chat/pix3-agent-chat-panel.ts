@@ -380,7 +380,10 @@ const latestContextMetric = (
   let best: AgentTurnMetric | undefined;
   for (const [key, metric] of Object.entries(turnMetrics)) {
     const index = Number(key);
-    if (index > bestIndex && metric.inputTokens !== undefined) {
+    if (
+      index > bestIndex &&
+      (metric.contextInputTokens !== undefined || metric.inputTokens !== undefined)
+    ) {
       bestIndex = index;
       best = metric;
     }
@@ -1199,6 +1202,18 @@ export class AgentChatPanel extends ComponentBase {
           ${rows.length === 0
             ? this.renderEmptyState()
             : rows.map(row => this.renderRow(row, running, firstPendingId))}
+          ${running && chatState?.streamingText
+            ? html` <div class="agent-left-row">
+                <span class="agent-avatar-gutter"></span>
+                <div class="agent-reply-content">
+                  <div class="agent-message is-assistant">
+                    <div class="agent-message-md">
+                      ${renderMarkdownLite(chatState.streamingText)}
+                    </div>
+                  </div>
+                </div>
+              </div>`
+            : null}
           ${showThinking ? this.renderRunningIndicator() : null} ${this.renderPendingQuestion()}
         </div>
         ${this.debugView !== 'none' ? this.renderDebugDrawer() : null} ${this.renderBanners()}
@@ -2169,6 +2184,17 @@ export class AgentChatPanel extends ComponentBase {
 
   private renderRunningIndicator() {
     const activeTool = this.chatState?.activeTool;
+    const phase = this.chatState?.responsePhase;
+    const progress =
+      phase === 'tool'
+        ? `Preparing ${this.chatState?.preparingTool ?? 'action'}…`
+        : phase === 'text'
+          ? 'Writing response…'
+          : phase === 'receiving'
+            ? 'Receiving response…'
+            : phase === 'waiting'
+              ? 'Waiting for model…'
+              : 'Preparing request…';
     // Show what the running tool is acting on (file/node/command), pulled from the pending call.
     const descriptor = activeTool ? this.activeToolDescriptor(activeTool) : '';
     return html`
@@ -2181,7 +2207,7 @@ export class AgentChatPanel extends ComponentBase {
             ? html`Running <code>${activeTool}</code>${descriptor
                   ? html` <span class="agent-row-arg">${descriptor}</span>`
                   : null}…`
-            : 'Thinking…'}
+            : progress}
         </div>
       </div>
     `;
@@ -2586,12 +2612,17 @@ export class AgentChatPanel extends ComponentBase {
     const chatState = this.chatState;
     if (!chatState) return null;
     const metric = latestContextMetric(chatState.turnMetrics);
-    if (metric?.inputTokens === undefined) return null;
-    const used = metric.inputTokens;
-    const cached = Math.min(metric.cacheReadTokens ?? 0, used);
+    if (!metric) return null;
+    const used =
+      metric.contextInputTokens !== undefined ? metric.contextInputTokens : metric.inputTokens;
+    if (used === undefined || used === null) return null;
+    // Agent backends' cache usage is cumulative across internal calls, not this context snapshot.
+    const cached =
+      metric.contextInputTokens !== undefined ? 0 : Math.min(metric.cacheReadTokens ?? 0, used);
 
-    const contextWindow = this.modelCatalog.getModel(this.providerId, this.modelId)?.capabilities
-      .contextWindow;
+    const contextWindow =
+      metric.contextWindow ??
+      this.modelCatalog.getModel(this.providerId, this.modelId)?.capabilities.contextWindow;
     const usage = chatState.totalUsage;
     const sessionTip =
       usage.inputTokens || usage.outputTokens

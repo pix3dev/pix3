@@ -240,6 +240,28 @@ class BridgeAgentCliProvider extends AnthropicLlmProvider {
     this.models =
       id === 'codex'
         ? [
+            seed('gpt-6.1-sol', 'GPT-6.1 Sol (Codex)', 200_000, [
+              'low',
+              'medium',
+              'high',
+              'xhigh',
+              'max',
+            ]),
+            seed('gpt-6-sol', 'GPT-6 Sol (Codex)', 200_000, ['low', 'medium', 'high', 'xhigh']),
+            seed('gpt-6-luna', 'GPT-6 Luna (Codex)', 200_000, [
+              'low',
+              'medium',
+              'high',
+              'xhigh',
+              'max',
+            ]),
+            seed('gpt-6-astra', 'GPT-6 Astra (Codex)', 200_000, [
+              'low',
+              'medium',
+              'high',
+              'xhigh',
+              'max',
+            ]),
             seed('gpt-5.6-sol', 'GPT-5.6 Sol (Codex)', 200_000, ['low', 'medium', 'high', 'xhigh']),
             seed('gpt-5.6-terra', 'GPT-5.6 Terra (Codex)', 200_000, [
               'low',

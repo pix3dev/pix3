@@ -16,9 +16,9 @@ describe('CodexSession editor tools', () => {
   it('offers the GPT-6 Codex models', () => {
     assert.deepEqual(
       codexModels(true)
-        .slice(0, 3)
+        .slice(0, 4)
         .map(model => model.id),
-      ['gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra']
+      ['gpt-6.1-sol', 'gpt-6-sol', 'gpt-6-luna', 'gpt-6-astra']
     );
   });
   it('always exposes the editor tool catalog', () => {

@@ -46,6 +46,7 @@ import { ProjectRoutineStore } from '@/services/agent/ProjectTraceStore';
 import { BRIDGE_TOKEN_SECRET_ID } from '@/services/llm/BridgeProviders';
 import { BridgeConnectionService } from '@/services/llm/BridgeConnectionService';
 import { PeekService } from '@/services/viewport/PeekService';
+import { AgentKeepaliveService } from '@/services/project/workspace/AgentKeepaliveService';
 import {
   AgentChatHistoryStore,
   type AgentConversationMeta,
@@ -126,8 +127,11 @@ export interface AgentTurnMetric {
   readonly origin?: AgentTurnOrigin;
   /** Wall-clock time for the provider request (ms). */
   readonly elapsedMs: number;
-  /** Full (cache-inclusive) prompt size the model read this turn. */
+  /** Cache-inclusive input consumption; agent backends can run several internal model calls. */
   readonly inputTokens?: number;
+  /** Agent backends report their last internal request separately from accumulated usage. */
+  readonly contextInputTokens?: number | null;
+  readonly contextWindow?: number;
   readonly outputTokens?: number;
   /** Prompt tokens the provider actually served from cache (reported after the fact). */
   readonly cacheReadTokens?: number;
@@ -154,6 +158,10 @@ export interface AgentPendingQuestion {
 }
 
 export interface AgentChatState {
+  /** Ephemeral provider progress; never persisted or sent back as conversation history. */
+  readonly streamingText?: string;
+  readonly responsePhase?: 'waiting' | 'receiving' | 'text' | 'tool' | null;
+  readonly preparingTool?: string | null;
   readonly status: AgentChatStatus;
   /** Wire-format conversation history (the single source of truth; the UI derives its view). */
   readonly messages: readonly LlmMessage[];
@@ -414,6 +422,7 @@ const STATE_CHANGING_TOOLS = new Set([
   'create_node',
   'convert_node_type',
   'move_node',
+  'delete_nodes',
   'add_component',
   'set_component_property',
   'remove_component',
@@ -545,6 +554,9 @@ const IDLE_STATE: AgentChatState = {
  */
 @injectable()
 export class AgentChatService {
+  @inject(AgentKeepaliveService)
+  private readonly keepalive!: AgentKeepaliveService;
+
   @inject(AgentSettingsService)
   private readonly settings!: AgentSettingsService;
 
@@ -1358,11 +1370,17 @@ export class AgentChatService {
       });
       const assistantIndex = this.state.messages.length;
       this.appendMessage({ role: 'assistant', content: result.content });
-      this.lastRequestInputTokens = result.usage?.inputTokens ?? this.lastRequestInputTokens;
+      const contextInputTokens =
+        result.usage?.contextInputTokens !== undefined
+          ? result.usage.contextInputTokens
+          : result.usage?.inputTokens;
+      this.lastRequestInputTokens = contextInputTokens ?? this.lastRequestInputTokens;
       this.recordTurnMetric(assistantIndex, {
         origin,
         elapsedMs,
         inputTokens: result.usage?.inputTokens,
+        contextInputTokens: result.usage?.contextInputTokens,
+        contextWindow: result.usage?.contextWindow,
         outputTokens: result.usage?.outputTokens,
         cacheReadTokens: result.usage?.cacheReadTokens,
         cacheCreationTokens: result.usage?.cacheCreationTokens,
@@ -1549,8 +1567,11 @@ export class AgentChatService {
 
       // Context management (§5.6). Fill ratio comes from the turn we just received; models that
       // report no window opt out of all of this silently.
+      const effectiveContextWindow = result.usage?.contextWindow ?? contextWindow;
       const fillRatio =
-        contextWindow && result.usage?.inputTokens ? result.usage.inputTokens / contextWindow : 0;
+        effectiveContextWindow && contextInputTokens
+          ? contextInputTokens / effectiveContextWindow
+          : 0;
       if (fillRatio >= CONTEXT_NUDGE_RATIO && fillRatio < CONTEXT_COMPACT_RATIO && !contextNudged) {
         contextNudged = true;
         resultContent.push({
@@ -1631,6 +1652,8 @@ export class AgentChatService {
         origin,
         elapsedMs: performance.now() - startedAt,
         inputTokens: result.usage?.inputTokens,
+        contextInputTokens: result.usage?.contextInputTokens,
+        contextWindow: result.usage?.contextWindow,
         outputTokens: result.usage?.outputTokens,
       });
     } catch {
@@ -1677,9 +1700,16 @@ export class AgentChatService {
     provider: LlmProvider,
     params: ChatParams,
     ctx: LlmRequestContext,
-    signal: AbortSignal
+    signal: AbortSignal,
+    showProgress = true
   ): Promise<LlmResult> {
     const attempt = new AbortController();
+    let settled = false;
+    let streamingText = '';
+    let phase: AgentChatState['responsePhase'] = 'waiting';
+    let preparingTool: string | null = null;
+    let paintTimer: ReturnType<typeof setTimeout> | undefined;
+    if (showProgress) this.setState({ streamingText, responsePhase: phase, preparingTool });
     const forwardAbort = (): void => attempt.abort();
     if (signal.aborted) {
       attempt.abort();
@@ -1700,9 +1730,41 @@ export class AgentChatService {
       }, LLM_REQUEST_TIMEOUT_MS);
     });
     return Promise.race([
-      provider.chat({ ...params, signal: attempt.signal }, ctx),
+      provider.chat(
+        {
+          ...params,
+          signal: attempt.signal,
+          onDelta: !showProgress
+            ? params.onDelta
+            : delta => {
+                if (settled || attempt.signal.aborted) return;
+                params.onDelta?.(delta);
+                if (delta.type === 'text') {
+                  streamingText += delta.text;
+                  phase = 'text';
+                } else if (delta.type === 'tool-use-start') {
+                  preparingTool = delta.name;
+                  phase = 'tool';
+                } else if (delta.type === 'tool-use-input') {
+                  phase = 'tool';
+                } else if (phase === 'waiting') {
+                  phase = 'receiving';
+                }
+                if (paintTimer === undefined)
+                  paintTimer = setTimeout(() => {
+                    paintTimer = undefined;
+                    this.setState({ streamingText, responsePhase: phase, preparingTool });
+                  }, 50);
+              },
+        },
+        ctx
+      ),
       deadline,
     ]).finally(() => {
+      settled = true;
+      if (paintTimer !== undefined) clearTimeout(paintTimer);
+      if (showProgress)
+        this.setState({ streamingText: '', responsePhase: null, preparingTool: null });
       if (timer !== undefined) {
         clearTimeout(timer);
       }
@@ -1789,7 +1851,8 @@ export class AgentChatService {
           signal,
         },
         ctx,
-        signal
+        signal,
+        false
       );
       handoff = result.content
         .filter((block): block is LlmTextBlock => block.type === 'text')
@@ -2292,7 +2355,7 @@ export class AgentChatService {
       '',
       'Rules:',
       '- Use the provided tools to inspect and change the project; never guess scene or file contents you can read.',
-      '- Scene changes go through set_property / create_node / convert_node_type / move_node / run_command — they are undoable, so ALWAYS prefer them over hand-editing .pix3scene files. If set_property fails, fix the CALL (pass value as a real JSON object/number/array — {"x":10,"y":-20}, 90, [1,1] — never a quoted string); do NOT fall back to str_replace / fs_write on the scene file to work around it.',
+      '- Scene changes go through set_property / create_node / convert_node_type / move_node / delete_nodes / run_command — they are undoable, so ALWAYS prefer them over hand-editing .pix3scene files. To remove objects, call delete_nodes with explicit nodeIds from scene_tree (it also removes descendants). If set_property fails, fix the CALL (pass value as a real JSON object/number/array — {"x":10,"y":-20}, 90, [1,1] — never a quoted string); do NOT fall back to str_replace / fs_write on the scene file to work around it.',
       '- To reparent a node OR change draw order, use move_node — never reorder nodes by hand-editing the .pix3scene. For 2D, paint order follows sibling order (a LATER sibling draws ON TOP): to put one node above another, move_node it to placement:"front" or afterSiblingId of the node it must cover. To lift a 2D node above nodes it is NOT a sibling of (or without touching the tree at all), set_property zIndex instead — higher draws on top, it is inherited by the subtree, and ties fall back to tree order.',
       '- Rotation units differ by surface: set_property and the runtime (rotationZ) use RADIANS, but the .pix3scene `transform.rotation` field is DEGREES. If you ever do edit the scene YAML by hand, write degrees (90), not radians (1.5708).',
       '- If a node property is recomputed every frame by a script/component (e.g. a controller that drives position along a path), a one-off scene/property edit will NOT hold at runtime — configure the script instead (set_component_property on its exposed fields). If the behaviour genuinely needs a script code change, make it and say so in your reply.',
@@ -2664,6 +2727,10 @@ export class AgentChatService {
 
   private setState(patch: Partial<AgentChatState>): void {
     this.state = { ...this.state, ...patch };
+    if (patch.status !== undefined) {
+      this.keepalive.initialize();
+      this.keepalive.setEmbeddedAgentRunning(this.isRunning());
+    }
     for (const listener of this.listeners) {
       listener(this.state);
     }

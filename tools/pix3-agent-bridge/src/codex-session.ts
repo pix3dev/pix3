@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import { conversationKey } from './agy-conversations.ts';
 import { agentLaunchEnv } from './executables.ts';
+import { CodexUsageReader, type CodexTokenUsage, type CodexUsageSnapshot } from './codex-usage.ts';
 import { agyShimPath } from './mcp-shim.ts';
 import { ToolRelay } from './tool-relay.ts';
 import { Deferred, type Logger } from './util.ts';
@@ -22,6 +23,7 @@ export interface CodexSessionOptions {
   readonly mcpUrl: string;
   readonly mcpToken: string;
   readonly conversationId?: string;
+  readonly readUsage?: (threadId: string | null) => CodexUsageSnapshot | undefined;
   readonly onTurnEnd?: (conversationId: string | null, transcriptLen: number, chatKey: string) => void;
   readonly spawner?: (file: string, args: string[], options: { cwd: string; env: NodeJS.ProcessEnv }) => ChildProcessWithoutNullStreams;
 }
@@ -94,6 +96,9 @@ export class CodexSession implements ManagedSession {
   private requestLen = 0;
   private promptTokens = 0;
   private outputTokens = 0;
+  private cachedInputTokens = 0;
+  private readonly usageReader = new CodexUsageReader(path.join(process.env.CODEX_HOME || path.join(os.homedir(), '.codex'), 'sessions'));
+  private reportedUsage: CodexTokenUsage = { input: 0, output: 0, cached: 0 };
   private turnStartedAt = 0;
   private producedInTurn = false;
   private wedgedSince: number | null = null;
@@ -176,6 +181,8 @@ export class CodexSession implements ManagedSession {
     if (!this.conversationId) {
       preamble = 'You are the assistant inside the Pix3 editor. The project is held in the browser, ' +
         'not in this scratch directory. Use only the pix3 MCP tools for editor work. ' +
+        'When discovering tools, filter ALL_TOOLS by exact tool names and print names first; ' +
+        'never dump the full catalog or all descriptions. Read descriptions only for the few tools needed. ' +
         'Do not use shell, file editing, or other local tools. The following are operating instructions for ' +
         `this Pix3 chat:\n<operating-instructions>\n${system}\n</operating-instructions>\n\n`;
     } else if (system !== this.lastSystem) {
@@ -192,6 +199,8 @@ export class CodexSession implements ManagedSession {
     this.textBlocks = [];
     this.promptTokens = 0;
     this.outputTokens = 0;
+    this.cachedInputTokens = 0;
+    this.reportedUsage = this.readUsage()?.total ?? this.reportedUsage;
     const args = codexLaunchArgs({
       conversationId: this.conversationId,
       model: this.model,
@@ -241,6 +250,7 @@ export class CodexSession implements ManagedSession {
     } else if (event.type === 'turn.completed' && isRecord(event.usage)) {
       this.promptTokens = typeof event.usage.input_tokens === 'number' ? event.usage.input_tokens : 0;
       this.outputTokens = typeof event.usage.output_tokens === 'number' ? event.usage.output_tokens : 0;
+      this.cachedInputTokens = typeof event.usage.cached_input_tokens === 'number' ? event.usage.cached_input_tokens : 0;
     } else if (event.type === 'turn.failed' || event.type === 'error') {
       const detail = isRecord(event.error) && typeof event.error.message === 'string'
         ? event.error.message : JSON.stringify(event).slice(0, 500);
@@ -312,11 +322,29 @@ export class CodexSession implements ManagedSession {
       ]);
     }
     this.options.onTurnEnd?.(this.conversationId, this.transcriptLen, this.chatKey);
+    const snapshot = this.readUsage();
+    // One CLI turn may contain many model calls, invisible to the editor's HTTP loop. Keep the
+    // accumulated cost separate from the final request's context, and don't recount resumed turns.
+    const total = snapshot?.total ?? (reason === 'end_turn'
+      ? { input: this.promptTokens, output: this.outputTokens, cached: this.cachedInputTokens }
+      : this.reportedUsage);
+    const input = Math.max(0, total.input - this.reportedUsage.input);
+    const cached = Math.min(input, Math.max(0, total.cached - this.reportedUsage.cached));
+    const output = Math.max(0, total.output - this.reportedUsage.output);
+    this.reportedUsage = total;
     waiting.resolve({ status: 200, body: {
       id: `msg_codex_${randomUUID().replace(/-/g, '').slice(0, 24)}`,
       type: 'message', role: 'assistant', model: this.model, content, stop_reason: reason,
-      usage: { input_tokens: this.promptTokens, output_tokens: Math.max(1, this.outputTokens) },
+      usage: {
+        input_tokens: input - cached, cache_read_input_tokens: cached, output_tokens: output,
+        context_input_tokens: snapshot?.contextInput ?? null,
+        ...(snapshot?.contextWindow ? { context_window: snapshot.contextWindow } : {}),
+      },
     } });
+  }
+
+  private readUsage(): CodexUsageSnapshot | undefined {
+    return this.options.readUsage ? this.options.readUsage(this.conversationId) : this.usageReader.read(this.conversationId);
   }
 
   private markWedged(): void {

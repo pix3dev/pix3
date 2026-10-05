@@ -22,6 +22,36 @@ const bodyOf = (fetchImpl: ReturnType<typeof vi.fn>): Record<string, unknown> =>
 describe('AnthropicLlmProvider', () => {
   const provider = new AnthropicLlmProvider();
 
+  it.each([48226, null])(
+    'preserves bridge context %s separately from cumulative billing',
+    async context => {
+      const fetchImpl = vi.fn(async () =>
+        okJson({
+          content: [{ type: 'text', text: 'done' }],
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 44513,
+            cache_read_input_tokens: 232704,
+            output_tokens: 472,
+            context_input_tokens: context,
+            context_window: 258400,
+          },
+        })
+      );
+      const result = await provider.chat(
+        { messages: [{ role: 'user', content: 'go' }] },
+        { apiKey: 'test', modelId: 'gpt-6-luna', baseUrl: BASE, fetchImpl }
+      );
+      expect(result.usage).toMatchObject({
+        inputTokens: 277217,
+        cacheReadTokens: 232704,
+        outputTokens: 472,
+        contextInputTokens: context,
+        contextWindow: 258400,
+      });
+    }
+  );
+
   it('posts to /messages with the browser-access header and maps system + tools', async () => {
     const fetchImpl = vi.fn(async () =>
       okJson({ content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' })

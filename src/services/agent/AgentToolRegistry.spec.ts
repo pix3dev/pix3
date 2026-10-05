@@ -20,6 +20,7 @@ import { AddComponentCommand } from '@/features/scripts/AddComponentCommand';
 import { RemoveComponentCommand } from '@/features/scripts/RemoveComponentCommand';
 import { UpdateComponentPropertyCommand } from '@/features/scripts/UpdateComponentPropertyCommand';
 import { ReparentNodeCommand } from '@/features/scene/ReparentNodeCommand';
+import { DeleteObjectCommand } from '@/features/scene/DeleteObjectCommand';
 import { normalizeTheme } from '@/services/uikit';
 import type { KitManifest } from '@/services/uikit-editor/UiKitProjectWriter';
 
@@ -2494,6 +2495,92 @@ describe('AgentToolRegistry', () => {
       expect(result.nodeId).toBe('fresh');
       expect(String(result.skinWarning)).toContain('ui-kit.json is not valid JSON');
       expect(String(result.skinWarning)).toContain('skin_ui');
+    });
+  });
+
+  describe('delete_nodes', () => {
+    const setup = () => {
+      appState.project.status = 'ready';
+      const child = makeNode({ nodeId: 'child', metadata: {} });
+      const parent = makeNode({ nodeId: 'parent', children: [child], metadata: {} });
+      Object.defineProperty(child, 'parentNode', { value: parent });
+      const other = makeNode({ nodeId: 'other', metadata: {} });
+      const graph = {
+        nodeMap: new Map([
+          ['parent', parent],
+          ['child', child],
+          ['other', other],
+        ]),
+      };
+      const dispatcher = {
+        execute: vi.fn(async (command: unknown) => {
+          if (command instanceof DeleteObjectCommand) {
+            graph.nodeMap.delete('parent');
+            graph.nodeMap.delete('child');
+          }
+          return true;
+        }),
+      };
+      const registry = buildRegistry({
+        dispatcher,
+        sceneManager: { getActiveSceneGraph: () => graph },
+      });
+      const save = vi
+        .spyOn(
+          registry as unknown as { saveActiveSceneBestEffort(): Promise<void> },
+          'saveActiveSceneBestEffort'
+        )
+        .mockResolvedValue();
+      return { registry, dispatcher, graph, save };
+    };
+
+    it('dispatches one undoable deletion, collapses overlapping targets and saves', async () => {
+      const { registry, dispatcher, graph, save } = setup();
+      expect(
+        await registry.execute('delete_nodes', { nodeIds: ['child', 'parent', 'parent'] })
+      ).toEqual({ ok: true, deletedNodeIds: ['parent', 'child'] });
+      expect(dispatcher.execute).toHaveBeenCalledTimes(1);
+      expect(dispatcher.execute.mock.calls[0][0]).toBeInstanceOf(DeleteObjectCommand);
+      expect(dispatcher.execute.mock.calls[0][0]).toMatchObject({
+        params: { nodeIds: ['parent'] },
+      });
+      expect(graph.nodeMap.has('other')).toBe(true);
+      expect(save).toHaveBeenCalledOnce();
+    });
+
+    it('rejects invalid or missing ids before deleting anything', async () => {
+      const { registry, dispatcher } = setup();
+      for (const nodeIds of [[], ['parent', 'missing'], ['parent', 3], undefined]) {
+        expect(await registry.execute('delete_nodes', { nodeIds })).toMatchObject({ ok: false });
+      }
+      expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+
+    it('rejects locked prefab children without deleting other targets', async () => {
+      const { registry, dispatcher, graph } = setup();
+      Object.defineProperty(graph.nodeMap.get('child')!, 'metadata', {
+        value: {
+          __pix3Prefab: {
+            localId: 'child',
+            effectiveLocalId: 'child',
+            instanceRootId: 'parent',
+            sourcePath: 'prefab.pix3scene',
+          },
+        },
+      });
+      expect(await registry.execute('delete_nodes', { nodeIds: ['other', 'child'] })).toMatchObject(
+        { ok: false, error: expect.stringContaining('locked prefab child') }
+      );
+      expect(dispatcher.execute).not.toHaveBeenCalled();
+    });
+
+    it('does not report success or save when the gateway refuses deletion', async () => {
+      const { registry, dispatcher, save } = setup();
+      dispatcher.execute.mockResolvedValue(false);
+      expect(await registry.execute('delete_nodes', { nodeIds: ['parent'] })).toMatchObject({
+        ok: false,
+      });
+      expect(save).not.toHaveBeenCalled();
     });
   });
 

@@ -199,6 +199,10 @@ export class OpenAICompatLlmProvider implements LlmProvider {
 
     const fetchImpl = ctx.fetchImpl ?? globalThis.fetch.bind(globalThis);
     const body = this.buildBody(params, ctx.modelId);
+    if (params.onDelta) {
+      body.stream = true;
+      body.stream_options = { include_usage: true };
+    }
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       ...this.extraHeaders(),
@@ -222,6 +226,9 @@ export class OpenAICompatLlmProvider implements LlmProvider {
       throw new LlmError('network', this.networkErrorMessage, undefined, { cause: error });
     }
 
+    if (response.ok && response.headers.get('content-type')?.includes('text/event-stream')) {
+      return readStream(response, params);
+    }
     const payload = await readJson(response);
 
     if (!response.ok) {
@@ -404,6 +411,140 @@ const parseArguments = (raw: unknown): unknown => {
     return JSON.parse(raw) as unknown;
   } catch {
     return { _raw: raw };
+  }
+};
+
+/** Decode SSE incrementally; tool arguments are executable only after a complete response. */
+const readStream = async (response: Response, params: ChatParams): Promise<LlmResult> => {
+  if (!response.body) throw new LlmError('empty', 'The provider returned no response stream.');
+  const reader = response.body.getReader();
+  const abort = (): void => {
+    void reader.cancel().catch(() => undefined);
+  };
+  params.signal?.addEventListener('abort', abort, { once: true });
+  const decoder = new TextDecoder();
+  const calls = new Map<
+    number,
+    { id: string; name: string; arguments: string; announced: boolean }
+  >();
+  let text = '';
+  let buffer = '';
+  let data: string[] = [];
+  let finishReason = '';
+  let usage: unknown;
+  let done = false;
+  const emit = (): void => {
+    if (data.length === 0) return;
+    const frame = data.join('\n');
+    data = [];
+    if (frame.trim() === '[DONE]') {
+      done = true;
+      return;
+    }
+    let payload: unknown;
+    try {
+      payload = JSON.parse(frame) as unknown;
+    } catch {
+      throw new LlmError('unknown', 'The provider returned invalid streaming JSON.');
+    }
+    const error = extractErrorMessage(payload);
+    if (error) throw new LlmError('http', error);
+    if (!isRecord(payload)) return;
+    if (payload.usage) usage = payload.usage;
+    if (!Array.isArray(payload.choices)) return;
+    const choice = payload.choices.find(
+      c => isRecord(c) && (c.index === 0 || c.index === undefined)
+    );
+    if (!isRecord(choice)) return;
+    if (typeof choice.finish_reason === 'string') finishReason = choice.finish_reason;
+    if (!isRecord(choice.delta)) return;
+    const delta = choice.delta;
+    if (typeof delta.reasoning_content === 'string' && delta.reasoning_content) {
+      params.onDelta?.({ type: 'activity' });
+    }
+    if (typeof delta.content === 'string' && delta.content) {
+      text += delta.content;
+      params.onDelta?.({ type: 'text', text: delta.content });
+    }
+    if (!Array.isArray(delta.tool_calls)) return;
+    for (const item of delta.tool_calls) {
+      if (!isRecord(item) || typeof item.index !== 'number') continue;
+      const call = calls.get(item.index) ?? { id: '', name: '', arguments: '', announced: false };
+      calls.set(item.index, call);
+      if (typeof item.id === 'string') call.id += item.id;
+      const fn = isRecord(item.function) ? item.function : {};
+      if (typeof fn.name === 'string') call.name += fn.name;
+      if (call.id && call.name && !call.announced) {
+        params.onDelta?.({ type: 'tool-use-start', id: call.id, name: call.name });
+        call.announced = true;
+      }
+      if (typeof fn.arguments === 'string') {
+        call.arguments += fn.arguments;
+        params.onDelta?.({ type: 'tool-use-input', id: call.id, partialJson: fn.arguments });
+      }
+    }
+  };
+  const consume = (chunk: string, final = false): void => {
+    buffer += chunk;
+    let newline: number;
+    while ((newline = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, newline).replace(/\r$/, '');
+      buffer = buffer.slice(newline + 1);
+      if (!line) emit();
+      else if (line.startsWith('data:')) data.push(line.slice(5).replace(/^ /, ''));
+    }
+    if (final) {
+      if (buffer.startsWith('data:'))
+        data.push(buffer.slice(5).replace(/^ /, '').replace(/\r$/, ''));
+      emit();
+    }
+  };
+  try {
+    while (!done) {
+      if (params.signal?.aborted) throw new LlmError('aborted', 'The request was cancelled.');
+      const chunk = await reader.read();
+      consume(decoder.decode(chunk.value, { stream: !chunk.done }), chunk.done);
+      if (chunk.done) break;
+    }
+    if (!finishReason)
+      throw new LlmError('network', 'The response stream ended before completion.');
+    for (const call of calls.values()) {
+      if (!call.id || !call.name) throw new LlmError('unknown', 'Incomplete streamed tool call.');
+      try {
+        JSON.parse(call.arguments || '{}');
+      } catch {
+        throw new LlmError('unknown', 'The model returned incomplete tool arguments.');
+      }
+    }
+    return parseResponse({
+      choices: [
+        {
+          message: {
+            content: text,
+            tool_calls: [...calls.entries()]
+              .sort(([a], [b]) => a - b)
+              .map(([, call]) => ({
+                id: call.id,
+                type: 'function',
+                function: { name: call.name, arguments: call.arguments },
+              })),
+          },
+          finish_reason: finishReason,
+        },
+      ],
+      usage,
+    });
+  } catch (error) {
+    if (isAbortError(error) || params.signal?.aborted)
+      throw new LlmError('aborted', 'The request was cancelled.');
+    if (error instanceof LlmError) throw error;
+    throw new LlmError('network', 'Network error reading the response stream.', undefined, {
+      cause: error,
+    });
+  } finally {
+    params.signal?.removeEventListener('abort', abort);
+    await reader.cancel().catch(() => undefined);
+    reader.releaseLock();
   }
 };
 

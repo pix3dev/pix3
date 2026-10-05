@@ -532,6 +532,20 @@ class MyService {
 - Scroll-to-bottom on new entries
 - Clear all logs functionality
 
+## Agent response streaming
+
+Vibe and Studio share the agent chat. OpenAI-compatible providers request SSE streaming when the chat supplies `onDelta`: text appears while the model generates it, and the status distinguishes preparing the request, waiting for the model, receiving a response, writing text, and preparing a tool call. Providers returning ordinary JSON still work. Streaming improves visibility and time to first visible text; it does not reduce the model's processing time or make a buffering gateway send data sooner.
+
+`OpenAICompatLlmProvider` decodes UTF-8 SSE across network chunk boundaries, joins tool argument fragments by call index, and reads the final usage event. A streamed tool call is returned to the agent loop only after a completion marker and valid JSON arguments; incomplete streams surface an error. Reasoning-content chunks signal activity without displaying or storing reasoning text. `AgentChatService` keeps the partial response in ephemeral state outside conversation history, batches UI updates every 50 ms, and clears it on completion, retry, cancellation or error. Conversation compaction stays outside the user-visible stream. The existing tool rows show execution after the complete call arrives.
+
+## In-editor Codex tools and context accounting
+
+The in-editor Codex lane uses the same agent tools as other chat providers. `delete_nodes { nodeIds: [...] }` removes explicit nodes and their subtrees through `DeleteObjectCommand`, then saves the active scene. It validates every target first, refuses locked prefab children, collapses overlapping parent/child targets, and returns `deletedNodeIds`. This tool is separate from the external workspace agent channel, whose allow-list does not expose scene mutations. Deletion and the following save retain the editor's existing separate undo entries.
+
+The bridge's Codex model catalog and the editor's fallback catalog include `gpt-6.1-sol`. The bridge catalog is a list of supported selections, not a check of the signed-in account's entitlement; inference errors still report unavailable access.
+
+Codex may make several internal model requests during one editor turn. Its cumulative input/output usage measures consumption, not context occupancy. The bridge reads the matching local thread's bounded rollout tail for `last_token_usage.input_tokens` and `model_context_window`, transports these separately as `context_input_tokens` and `context_window`, and reports accumulated usage as deltas so resumed turns are not counted again. The editor's meter and compaction use the context snapshot and runtime window. If the CLI log is unavailable, the meter hides the unknown snapshot instead of substituting cumulative usage. Tool discovery instructions ask for filtered names before selected descriptions to avoid dumping the entire catalog.
+
 ## Theme & Styling
 
 Pix3 uses CSS custom properties for theming:

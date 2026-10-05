@@ -107,9 +107,14 @@ export interface LlmUsage {
    * Total prompt tokens for this request, **cache-inclusive** — the full context the model read
    * (system + tools + history), whether or not parts of it were served from cache. Providers whose
    * native counter splits cached tokens out (Anthropic) sum them back in so this stays comparable
-   * across providers and matches the pre-caching meaning of "context size".
+   * across providers. Agent backends may run several model calls inside one request: then this is
+   * their accumulated consumption and `contextInputTokens` carries the separate context snapshot.
    */
   readonly inputTokens?: number;
+  /** Last model request's context for agent backends with several internal calls. Null = unknown. */
+  readonly contextInputTokens?: number | null;
+  /** Actual window reported by the running model, overriding catalog estimates. */
+  readonly contextWindow?: number;
   readonly outputTokens?: number;
   /**
    * Subset of {@link inputTokens} served from cache instead of re-processed (billed cheaply). Maps
@@ -149,6 +154,7 @@ export interface LlmCacheHint {
  * a UI to `onDelta`; providers in this phase may return the full response and never emit deltas.
  */
 export type LlmStreamDelta =
+  | { readonly type: 'activity' }
   | { readonly type: 'text'; readonly text: string }
   | { readonly type: 'tool-use-start'; readonly id: string; readonly name: string }
   | { readonly type: 'tool-use-input'; readonly id: string; readonly partialJson: string };

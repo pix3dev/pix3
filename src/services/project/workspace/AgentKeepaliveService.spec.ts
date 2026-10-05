@@ -36,6 +36,22 @@ const attach = (attached: boolean, status: 'connected' | 'reconnecting' = 'conne
 };
 
 describe('AgentKeepaliveService', () => {
+  it('keeps an embedded turn alive, respects the setting, and preserves external presence', async () => {
+    service.setEmbeddedAgentRunning(true);
+    expect(isEditorKeepAlive()).toBe(true);
+    appState.ui.keepEditorRunningForAgent = false;
+    await flush();
+    expect(isEditorKeepAlive()).toBe(false);
+    appState.ui.keepEditorRunningForAgent = true;
+    await flush();
+    expect(isEditorKeepAlive()).toBe(true);
+    attach(true);
+    service.setEmbeddedAgentRunning(false);
+    expect(isEditorKeepAlive()).toBe(true);
+    attach(false);
+    expect(isEditorKeepAlive()).toBe(false);
+  });
+
   it('is off with no agent involved', () => {
     expect(service.isKeepAlive()).toBe(false);
     expect(appState.project.coauthoring.agentKeepalive).toBe(false);

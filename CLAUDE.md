@@ -8,6 +8,8 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 
 | Task                                                                    | File → section (grep the heading text)                                                                                            |
 | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Vibe / Studio agent streaming and provider progress                     | `docs/architecture.md` → "Agent response streaming"                                                                               |
+| In-editor Codex node deletion, model catalog, context meter and cumulative usage | `docs/architecture.md` → "In-editor Codex tools and context accounting" |
 | Does the engine already do X? / engine-vs-game decision                 | `docs/nodes-and-systems.md` → "engine-vs-game decision", then the Nodes/Systems catalog                                           |
 | All properties of one node type                                         | `docs/node-types-reference.md` → `### <NodeName>` (summary table at "Node Properties Quick Reference")                            |
 | Write a game script / runtime API from a `Script`                       | `docs/nodes-and-systems.md` → "Scripts-facing runtime API" + the new-node checklist                                               |
@@ -27,7 +29,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | Colour renders too dark in 3D / authoring a `color` property            | this file → "Authored colours convert exactly once"                                                                               |
 | Why the exported .html weighs what it does / export size                | this file → "Playable export size"                                                                                                |
 | Viewport not repainting / render-on-demand                              | this file → "Editor viewport renders on demand"                                                                                   |
-| Editor pauses in background / keepalive for agents (`isEditorActive`, `BackgroundTicker`, presence heartbeat) | `docs/pix3-specification.md` → "Agent keepalive"; code `src/services/project/workspace/AgentKeepaliveService.ts`, `src/services/core/background-ticker.ts` |
+| Editor pauses in background / keepalive for running Vibe/Studio turns and external agents (`isEditorActive`, `BackgroundTicker`, presence heartbeat) | `docs/pix3-specification.md` → "Agent keepalive"; code `src/services/project/workspace/AgentKeepaliveService.ts`, `src/services/core/background-ticker.ts` |
 | A viewport inset/overlay draws in the wrong place / `setViewport` units | this file → "Viewport insets are sized in device pixels"                                                                          |
 | 2D character with weapon/outfit variants and states, flipbook clip switching from a script, Store `character2d` compiler | `docs/nodes-and-systems.md` → "Character with variants/states"; `AnimatedSprite2D.play` in `docs/node-types-reference.md`; plan `.plans/asset-store-packs.md` |
 | Tween a value, fade / cross-fade a node, ball trail                      | `docs/nodes-and-systems.md` → "Tweens (scene.tween)"; the `trail` line under "Juice & time-scale"                     |
