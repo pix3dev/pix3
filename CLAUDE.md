@@ -29,6 +29,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | 2D draw order, overlay flag, texture-goes-black bug                     | this file → "2D overlay rendering"                                                                                                |
 | Colour renders too dark in 3D / authoring a `color` property            | this file → "Authored colours convert exactly once"                                                                               |
 | Why the exported .html weighs what it does / export size                | this file → "Playable export size"                                                                                                |
+| Exported HUD off screen / authored viewport differs from the editor    | this file → "Exported viewport and HUD"                                                                                           |
 | Viewport not repainting / render-on-demand                              | this file → "Editor viewport renders on demand"                                                                                   |
 | Editor pauses in background / keepalive for running Vibe/Studio turns and external agents (`isEditorActive`, `BackgroundTicker`, presence heartbeat) | `docs/pix3-specification.md` → "Agent keepalive"; code `src/services/project/workspace/AgentKeepaliveService.ts`, `src/services/core/background-ticker.ts` |
 | A viewport inset/overlay draws in the wrong place / `setViewport` units | this file → "Viewport insets are sized in device pixels"                                                                          |
@@ -165,6 +166,15 @@ The 2D layer is a separate render pass with an orthographic camera, drawn over t
 ### Spine is an optional, host-injected dependency (non-obvious)
 
 `SpineSkeleton2D` renders through `@esotericsoftware/spine-threejs` (`~4.3`), which the runtime **never imports**: `packages/pix3-runtime/src/core/spine/spine-module.ts` hand-declares the structural subset it uses, and the host registers a loader (`setSpineModuleLoader(() => import('@esotericsoftware/spine-threejs'))` — `src/core/lazy-spine.ts`, called from `main.ts` and `player-main.ts`). Reasons: consumer projects compile our TS sources, so a type import would make Spine mandatory for every game; the Spine Runtimes License is a poor fit for an always-installed dependency; and the literal dynamic import must live in the host for its bundler to emit a lazy chunk. Two more load-bearing details: atlas **pages must never go through the pre-launch atlas** (their UVs come from the `.atlas` file — the loader reads page blobs directly and `TextureAtlasService` excludes them), and spine adds its batch meshes **lazily**, so the editor proxy re-stamps `LAYER_2D` on the view's children after every update (three.js layers are per-object, not inherited; the runtime's per-frame `assign2DLayers` covers play mode).
+
+### Exported viewport and HUD
+
+`ProjectBuildService` writes the project's `viewportBaseSize` into the generated scene
+manifest as `runtimeViewportBaseSize`. The shared runtime bootstrap passes that size to
+`SceneRunner`, just like the editor and cloud player. This applies to ZIP, single-file HTML,
+and generated npm builds. Without it, a portrait scene authored at 1080×1920 runs against
+the default 1920×1080 layout reference and its edge-anchored HUD lands off screen.
+Projects without a manifest retain the default 1920×1080 reference.
 
 ### Playable export size (non-obvious)
 

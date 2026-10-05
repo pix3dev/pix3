@@ -193,6 +193,28 @@ describe('ProjectBuildService', () => {
     expect(fs.writes).toEqual([]);
   });
 
+  it.each([
+    { width: 1080, height: 1920 },
+    { width: 1280, height: 720 },
+  ])(
+    'ships the authored viewport $width × $height to the exported runner',
+    async viewportBaseSize => {
+      const service = new ProjectBuildService();
+      attachStubs(service, createInMemoryFs({ 'scenes/main.pix3scene': 'root: []' }));
+      const context = createContext();
+      context.state.project.manifest = {
+        viewportBaseSize,
+      } as CommandContext['state']['project']['manifest'];
+      const model = await service.buildRuntimeProjectModel(context);
+      const manifest = model.files.get('src/generated/scene-manifest.ts') ?? '';
+      const serialized = manifest.match(/runtimeViewportBaseSize = (.+) as const;/)?.[1];
+      expect(JSON.parse(serialized ?? 'null')).toEqual(viewportBaseSize);
+      expect(model.files.get('src/main.ts')).toMatch(
+        /new SceneRunner\([\s\S]*?assetLoader,\s*runtimeViewportBaseSize\s*\)/
+      );
+    }
+  );
+
   it('collects asset references from project script dependencies', async () => {
     const fs = createInMemoryFs({
       'package.json': JSON.stringify({ name: 'project-demo' }, null, 2),

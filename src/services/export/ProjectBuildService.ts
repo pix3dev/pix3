@@ -7,10 +7,13 @@ import type { CommandContext } from '@/core/command';
 import {
   createDefaultQualitySettings,
   DEFAULT_TARGET_PLATFORM,
+  DEFAULT_VIEWPORT_BASE_WIDTH,
+  DEFAULT_VIEWPORT_BASE_HEIGHT,
   resolveExportSettings,
   type ExportSettings,
   type QualitySettings,
   type ProjectFontFace,
+  type ProjectManifest,
 } from '@/core/ProjectManifest';
 import { createGlobMatcher } from '@/services/export/glob-match';
 import { collectNetKindPrefabPaths } from '@/core/net-kind-paths';
@@ -257,7 +260,11 @@ export class ProjectBuildService {
         quality,
         localization,
         context.state.project.manifest?.fonts ?? [],
-        { usesSpine, usesPostProcessing, usesNetwork }
+        { usesSpine, usesPostProcessing, usesNetwork },
+        context.state.project.manifest?.viewportBaseSize ?? {
+          width: DEFAULT_VIEWPORT_BASE_WIDTH,
+          height: DEFAULT_VIEWPORT_BASE_HEIGHT,
+        }
       ),
       usesSpine,
       usesPostProcessing,
@@ -1163,7 +1170,8 @@ export class ProjectBuildService {
       readonly usesSpine: boolean;
       readonly usesPostProcessing: boolean;
       readonly usesNetwork: boolean;
-    }
+    },
+    viewportBaseSize: ProjectManifest['viewportBaseSize']
   ): ReadonlyMap<string, string> {
     const replacements: Record<string, string> = {
       PROJECT_NAME: projectName,
@@ -1188,7 +1196,8 @@ export class ProjectBuildService {
         quality,
         localization,
         this.collectNetKindPrefabPaths(assetPaths),
-        fonts
+        fonts,
+        viewportBaseSize
       )
     );
     files.set('src/generated/spine-runtime.ts', this.buildSpineRuntimeModule(usage.usesSpine));
@@ -1354,7 +1363,8 @@ export class ProjectBuildService {
     quality: QualitySettings,
     localization: RuntimeLocalizationConfig,
     netKindPrefabPaths: readonly string[],
-    fonts: readonly ProjectFontFace[] = []
+    fonts: readonly ProjectFontFace[],
+    viewportBaseSize: ProjectManifest['viewportBaseSize']
   ): string {
     const scenePathsJson = JSON.stringify(scenePaths, null, 2);
     const activeJson = JSON.stringify(activeScenePath);
@@ -1378,6 +1388,7 @@ export class ProjectBuildService {
     return [
       'export const scenePaths = ' + scenePathsJson + ' as const;',
       'export const activeScenePath = ' + activeJson + ';',
+      'export const runtimeViewportBaseSize = ' + JSON.stringify(viewportBaseSize) + ' as const;',
       'export const runtimeQuality = ' + qualityJson + ' as const;',
       'export const runtimeLocalization = ' + localizationJson + ' as const;',
       'export const runtimeFonts = ' + fontsJson + ' as const;',

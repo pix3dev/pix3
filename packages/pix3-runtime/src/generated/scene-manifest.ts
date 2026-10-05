@@ -1,5 +1,6 @@
 export const scenePaths: readonly string[] = [];
 export const activeScenePath = '';
+export const runtimeViewportBaseSize = { width: 1920, height: 1080 } as const;
 export const runtimeQuality: {
   readonly antialias: boolean;
   readonly shadows: boolean;

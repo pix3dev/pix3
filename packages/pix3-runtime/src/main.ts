@@ -17,6 +17,7 @@ import {
   activeScenePath,
   scenePaths,
   runtimeQuality,
+  runtimeViewportBaseSize,
   runtimeLocalization,
   runtimeFonts,
 } from './generated/scene-manifest';
@@ -66,7 +67,13 @@ async function bootstrap(): Promise<void> {
   });
   renderer.attach(app);
 
-  const runner = new SceneRunner(sceneManager, renderer, audioService, assetLoader);
+  const runner = new SceneRunner(
+    sceneManager,
+    renderer,
+    audioService,
+    assetLoader,
+    runtimeViewportBaseSize
+  );
   // Multiplayer session (D5): owned by the runner, not by the scene, so it survives
   // `changeScene`. Offline and inert until a game script calls
   // `this.scene.network.connect(...)`. The generated module also installs the
