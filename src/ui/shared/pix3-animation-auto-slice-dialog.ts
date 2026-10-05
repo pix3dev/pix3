@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { ProjectStorageService } from '@/services/project/ProjectStorageService';
 import './pix3-animation-auto-slice-dialog.ts.css';
@@ -83,7 +84,7 @@ export class AnimationAutoSliceDialog extends ComponentBase {
     const frameCount = this.columns * this.rows;
 
     return html`
-      <div class="dialog-backdrop" @click=${this.onBackdropClick}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onBackdropClick)}>
         <div class="dialog-content" @click=${(event: Event) => event.stopPropagation()}>
           <h2 class="dialog-title">Slice Spritesheet</h2>
           <div class="dialog-layout">

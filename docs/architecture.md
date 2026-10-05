@@ -382,6 +382,7 @@ Pix3 implements a comprehensive service layer providing core functionality:
 ### Utility Services
 
 - **DialogService**: Native-like dialogs for confirmations and prompts
+- **Modal backdrop dismissal**: All dismissible editor overlays bind `@click` through `dismissOnBackdropClick` (`src/ui/shared/backdrop-dismiss.ts`). A primary pointer press and release must both hit the backdrop; selecting text inside a dialog and releasing outside keeps it open. The Lit directive preserves the component callback context and removes its pointer listeners when disconnected. Cancel buttons and Escape keep their existing behavior.
 - **LoggingService**: Centralized logging with level filtering (debug/info/warn/error)
 - **TemplateService**: Provides scene templates and project templates
 - **AssetFileActivationService**: Activates assets from browser into scene

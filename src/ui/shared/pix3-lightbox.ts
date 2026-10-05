@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { IconService, IconSize } from '@/services/editor/IconService';
 import {
@@ -306,7 +307,11 @@ export class Pix3Lightbox extends ComponentBase {
     }
     const multiple = view.items.length > 1;
     return html`
-      <div class="lightbox" @click=${() => this.onBackdropClick()} @keydown=${() => {}}>
+      <div
+        class="lightbox"
+        @click=${dismissOnBackdropClick(() => this.onBackdropClick())}
+        @keydown=${() => {}}
+      >
         <div
           class="lightbox__dialog"
           role="dialog"

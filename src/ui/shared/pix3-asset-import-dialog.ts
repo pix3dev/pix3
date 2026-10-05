@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { createRef, ref } from 'lit/directives/ref.js';
 import { AssetImportService } from '@/services/assets/AssetImportService';
@@ -65,7 +66,7 @@ export class AssetImportDialog extends ComponentBase {
     const importLabel = this.isImporting ? 'Importing…' : count > 0 ? `Import ${count}` : 'Import';
 
     return html`
-      <div class="dialog-backdrop" @click=${this.onBackdropClick}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onBackdropClick)}>
         <div
           class="dialog-content"
           role="dialog"

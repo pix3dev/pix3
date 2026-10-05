@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { IconService } from '@/services/editor/IconService';
 import { NodeRegistry, type NodeTypeInfo } from '@/services/scene/NodeRegistry';
@@ -36,7 +37,7 @@ export class Pix3NodeTypePicker extends ComponentBase {
     );
 
     return html`
-      <div class="dialog-backdrop" @click=${this.onBackdropClick}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onBackdropClick)}>
         <div
           class="dialog-content node-type-picker-content"
           role="dialog"

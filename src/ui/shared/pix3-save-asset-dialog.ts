@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, property, state } from '@/fw';
 import { createRef, ref } from 'lit/directives/ref.js';
 import './pix3-save-asset-dialog.ts.css';
@@ -66,7 +67,7 @@ export class SaveAssetDialog extends ComponentBase {
     const canSave = this.fileName.trim().length > 0;
 
     return html`
-      <div class="dialog-backdrop" @click=${this.onCancel}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onCancel)}>
         <div
           class="dialog-content"
           role="dialog"

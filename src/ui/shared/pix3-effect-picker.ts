@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, property, state, inject } from '@/fw';
 import {
   effectSupportsTarget,
@@ -59,7 +60,7 @@ export class EffectPicker extends ComponentBase {
     const selected = effects.find(e => e.id === this.selectedEffectId) ?? null;
 
     return html`
-      <div class="dialog-backdrop" @click=${this.onBackdropClick}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onBackdropClick)}>
         <div
           class="dialog-content behavior-picker-content"
           @click=${(e: Event) => e.stopPropagation()}

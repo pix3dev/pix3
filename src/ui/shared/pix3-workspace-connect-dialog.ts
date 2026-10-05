@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { appState } from '@/state';
 import { ProjectService } from '@/services/project/ProjectService';
@@ -73,7 +74,7 @@ export class Pix3WorkspaceConnectDialog extends ComponentBase {
 
   protected render() {
     return html`
-      <div class="workspace-connect-backdrop" @click=${this.onCancel}>
+      <div class="workspace-connect-backdrop" @click=${dismissOnBackdropClick(this.onCancel)}>
         <form
           class="workspace-connect-content"
           role="dialog"

@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, property, state } from '@/fw';
 import './pix3-playable-export-dialog.ts.css';
 
@@ -56,7 +57,7 @@ export class Pix3PlayableExportDialog extends ComponentBase {
         : (this.scenePaths[0] ?? ''));
 
     return html`
-      <div class="dialog-backdrop" @click=${this.onBackdropClick}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onBackdropClick)}>
         <div
           class="dialog-content playable-export-dialog-content"
           role="dialog"

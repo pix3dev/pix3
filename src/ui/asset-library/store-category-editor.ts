@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { nothing } from 'lit';
 import * as ApiClient from '@/services/cloud/ApiClient';
@@ -237,7 +238,7 @@ export class StoreCategoryEditor extends ComponentBase {
   protected render() {
     const roots = topLevelCategories(this.categories);
     return html`
-      <div class="sce-overlay" @click=${() => this.close()}>
+      <div class="sce-overlay" @click=${dismissOnBackdropClick(() => this.close())}>
         <div
           class="sce-dialog"
           role="dialog"

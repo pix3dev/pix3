@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { query } from 'lit/decorators.js';
 import { nothing } from 'lit';
@@ -804,7 +805,7 @@ export class Pix3ShareDialog extends ComponentBase {
     }
 
     return html`
-      <div class="pix3-share-overlay" @click=${this.onOverlayClick}>
+      <div class="pix3-share-overlay" @click=${dismissOnBackdropClick(this.onOverlayClick)}>
         <div class="pix3-share-dialog" @click=${(event: Event) => event.stopPropagation()}>
           <div class="pix3-share-header">
             <div class="pix3-share-title">Share Project</div>

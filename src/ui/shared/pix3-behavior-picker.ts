@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, property, state, inject } from '@/fw';
 import { ScriptRegistry, type ComponentTypeInfo } from '@pix3/runtime';
 import { IconService } from '@/services/editor/IconService';
@@ -60,7 +61,7 @@ export class BehaviorPicker extends ComponentBase {
     const selectedScript = scripts.find(s => s.id === this.selectedScriptId);
 
     return html`
-      <div class="dialog-backdrop" @click=${this.onBackdropClick}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onBackdropClick)}>
         <div
           class="dialog-content behavior-picker-content"
           @click=${(e: Event) => e.stopPropagation()}

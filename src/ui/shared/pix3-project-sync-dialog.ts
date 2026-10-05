@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { nothing } from 'lit';
 import { subscribe } from 'valtio/vanilla';
@@ -201,7 +202,7 @@ export class ProjectSyncDialog extends ComponentBase {
           appState.project.hybridSync.linkedLocalSessionId);
 
     return html`
-      <div class="project-sync-backdrop" @click=${this.onOverlayClick}>
+      <div class="project-sync-backdrop" @click=${dismissOnBackdropClick(this.onOverlayClick)}>
         <div class="project-sync-dialog" @click=${(event: Event) => event.stopPropagation()}>
           <div class="project-sync-header">
             <div class="project-sync-title">Sync Project</div>

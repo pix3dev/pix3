@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, state } from '@/fw';
 import { appState } from '@/state';
 import {
@@ -498,7 +499,7 @@ export class EditorSettingsDialog extends ComponentBase {
     const section =
       SETTINGS_SECTIONS.find(s => s.id === this.activeSection) ?? SETTINGS_SECTIONS[0];
     return html`
-      <div class="dialog-backdrop" @click=${this.onCancel}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onCancel)}>
         <div class="dialog-content" @click=${(e: Event) => e.stopPropagation()}>
           <h2 class="dialog-title">Editor Settings</h2>
 

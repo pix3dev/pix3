@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, state, subscribe } from '@/fw';
 import { appState } from '@/state';
 import { ProjectSettingsService } from '@/services/project/ProjectSettingsService';
@@ -92,7 +93,7 @@ export class ProjectSettingsDialog extends ComponentBase {
     const autoloads = appState.project.manifest?.autoloads ?? [];
 
     return html`
-      <div class="dialog-backdrop" @click=${this.onCancel}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onCancel)}>
         <div class="dialog-content" @click=${(e: Event) => e.stopPropagation()}>
           <h2 class="dialog-title">Project Settings</h2>
 

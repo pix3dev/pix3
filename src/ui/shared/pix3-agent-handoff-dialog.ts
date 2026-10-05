@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { subscribe } from 'valtio/vanilla';
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { appState } from '@/state';
@@ -54,7 +55,7 @@ export class Pix3AgentHandoffDialog extends ComponentBase {
     const handoff = this.handoff;
     if (!handoff) return null;
     return html`
-      <div class="agent-handoff-backdrop" @click=${this.onClose}>
+      <div class="agent-handoff-backdrop" @click=${dismissOnBackdropClick(this.onClose)}>
         <div
           class="agent-handoff-content"
           role="dialog"

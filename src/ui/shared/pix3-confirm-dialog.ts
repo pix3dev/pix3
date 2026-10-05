@@ -1,4 +1,5 @@
 import { ComponentBase, customElement, html, property, state } from '@/fw';
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import type { DialogExpandableSection } from '@/services/editor/DialogService';
 import './pix3-confirm-dialog.ts.css';
 
@@ -60,7 +61,7 @@ export class ConfirmDialog extends ComponentBase {
     return html`
       <div
         class="dialog-backdrop"
-        @click=${this.onBackdropClick}
+        @click=${dismissOnBackdropClick(this.onBackdropClick)}
         @keydown=${(e: KeyboardEvent) => {
           if (e.key === 'Escape') this.dispatchCancel();
         }}

@@ -12,6 +12,49 @@ describe('ConfirmDialog', () => {
     vi.restoreAllMocks();
   });
 
+  it.each([
+    ['input', 'backdrop', false],
+    ['backdrop', 'input', false],
+    ['input', 'input', false],
+    ['backdrop', 'backdrop', true],
+  ])('dismisses only a full backdrop click: %s to %s', async (start, end, dismisses) => {
+    const dialog = document.createElement('pix3-confirm-dialog');
+    dialog.requiredInputValue = 'Project name';
+    document.body.appendChild(dialog);
+    await dialog.updateComplete;
+    const backdrop = dialog.querySelector('.dialog-backdrop')!;
+    const input = dialog.querySelector('input')!;
+    const cancelled = vi.fn();
+    dialog.addEventListener('dialog-cancelled', cancelled);
+    const target = (name: string) => (name === 'backdrop' ? backdrop : input);
+    target(start).dispatchEvent(
+      new PointerEvent('pointerdown', { bubbles: true, pointerId: 1, button: 0 })
+    );
+    target(end).dispatchEvent(
+      new PointerEvent('pointerup', { bubbles: true, pointerId: 1, button: 0 })
+    );
+    // Chromium targets the nearest common ancestor when press and release differ.
+    backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    expect(cancelled).toHaveBeenCalledTimes(dismisses ? 1 : 0);
+  });
+
+  it('ignores a cancelled pointer gesture and allows the next backdrop click', async () => {
+    const dialog = document.createElement('pix3-confirm-dialog');
+    document.body.appendChild(dialog);
+    await dialog.updateComplete;
+    const backdrop = dialog.querySelector('.dialog-backdrop')!;
+    const cancelled = vi.fn();
+    dialog.addEventListener('dialog-cancelled', cancelled);
+    backdrop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 1 }));
+    backdrop.dispatchEvent(new PointerEvent('pointercancel', { bubbles: true, pointerId: 1 }));
+    backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    expect(cancelled).not.toHaveBeenCalled();
+    backdrop.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, pointerId: 2 }));
+    backdrop.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, pointerId: 2 }));
+    backdrop.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+    expect(cancelled).toHaveBeenCalledTimes(1);
+  });
+
   it('requires an exact confirmation string before dispatching confirm', async () => {
     const dialog = document.createElement('pix3-confirm-dialog') as ConfirmDialog;
     dialog.dialogId = 'dialog-1';

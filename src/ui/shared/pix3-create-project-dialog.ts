@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { appState, type ProjectBackend } from '@/state';
 import {
@@ -95,7 +96,7 @@ export class Pix3CreateProjectDialog extends ComponentBase {
 
   protected render() {
     return html`
-      <div class="create-project-backdrop" @click=${this.onCancel}>
+      <div class="create-project-backdrop" @click=${dismissOnBackdropClick(this.onCancel)}>
         <div
           class="create-project-content ${this.step === 'template'
             ? 'create-project-content--wide'

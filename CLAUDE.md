@@ -41,6 +41,7 @@ Every doc below is bigger than the answer to any single task. **Locate the ancho
 | Inspector control primitives (buttons, switches, radio groups, sub-blocks) | `pix3-ui-conventions` skill §7; source `src/ui/object-inspector/inspector-controls.ts.css`                                       |
 | Inspector section order / a group lands in the wrong place              | `.plans/done/ui-consistency-pass.md` §3.1; source `src/ui/object-inspector/inspector-property-renderers.ts` (`SECTION_ALIAS`)         |
 | Editor UI (Lit, panels, icons, theming)                                 | `AGENTS.md` → "Component System" + `pix3-ui-conventions` skill                                                                    |
+| Editor modal closes while selecting text / backdrop dismissal          | `docs/architecture.md` → "Utility Services" (Modal backdrop dismissal); `src/ui/shared/backdrop-dismiss.ts`                       |
 | ECS / `InstancedMesh3D` bulk API                                        | `nodes-and-systems.md` → "ECS"; `node-types-reference.md` → `### InstancedMesh3D`                                                 |
 | System-overview diagrams / menu system / nav modes                      | `docs/architecture.md` (diagrams only — the spec is authoritative for prose)                                                      |
 | Build a game feature (entry point)                                      | `pix3-game-dev` skill                                                                                                             |

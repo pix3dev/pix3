@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, inject, property, state } from '@/fw';
 import { nothing } from 'lit';
 import { AssetLibraryService } from '@/services/library/AssetLibraryService';
@@ -278,12 +279,12 @@ export class StoreUploadDialog extends ComponentBase {
     return html`
       <div
         class="sud-overlay"
-        @click=${() => {
+        @click=${dismissOnBackdropClick(() => {
           // A click-away while bytes are in flight would abort the batch by surprise.
           if (!this.uploading) {
             this.close();
           }
-        }}
+        })}
       >
         <div
           class="sud-dialog"

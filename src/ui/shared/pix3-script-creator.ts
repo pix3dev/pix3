@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { ComponentBase, customElement, html, property, state } from '@/fw';
 import './pix3-script-creator.ts.css';
 
@@ -25,7 +26,7 @@ export class ScriptCreator extends ComponentBase {
     const fileName = `${fullClassName}.ts`;
 
     return html`
-      <div class="dialog-backdrop" @click=${this.onBackdropClick}>
+      <div class="dialog-backdrop" @click=${dismissOnBackdropClick(this.onBackdropClick)}>
         <div
           class="dialog-content script-creator-content"
           @click=${(e: Event) => e.stopPropagation()}

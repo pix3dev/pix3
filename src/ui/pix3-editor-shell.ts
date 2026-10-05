@@ -1,3 +1,4 @@
+import { dismissOnBackdropClick } from '@/ui/shared/backdrop-dismiss';
 import { subscribe } from 'valtio/vanilla';
 import { keyed } from 'lit/directives/keyed.js';
 
@@ -1618,7 +1619,7 @@ export class Pix3EditorShell extends ComponentBase {
     }
 
     return html`
-      <div class="auth-modal-backdrop" @click=${this.closeAuthModal}>
+      <div class="auth-modal-backdrop" @click=${dismissOnBackdropClick(this.closeAuthModal)}>
         <div class="auth-modal-shell" @click=${(event: Event) => event.stopPropagation()}>
           <pix3-auth-screen
             variant="modal"
