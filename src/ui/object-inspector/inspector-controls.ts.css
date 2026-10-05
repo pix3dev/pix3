@@ -498,3 +498,110 @@ pix3-inspector-panel .property-group-section__body {
 pix3-inspector-panel .property-group-section__body[hidden] {
   display: none;
 }
+
+/* Compact density matches the editor header and 24px scene-tree rows.
+ * Custom properties also reach the property editors' shadow roots. */
+pix3-inspector-panel {
+  --inspector-font-size: 12px;
+  --inspector-control-height: 24px;
+  font-size: var(--inspector-font-size);
+}
+
+pix3-inspector-panel .inspector-body {
+  --inspector-number-width: 88px;
+  --inspector-number-gap: 4px;
+  padding: 8px;
+  gap: 8px;
+}
+
+pix3-inspector-panel .property-section,
+pix3-inspector-panel .property-section--object,
+pix3-inspector-panel .property-group-section,
+pix3-inspector-panel .property-group-section__body,
+pix3-inspector-panel .layout-section__body,
+pix3-inspector-panel .inspector-subsection,
+pix3-inspector-panel .inspector-subsection__body {
+  gap: 4px;
+}
+
+pix3-inspector-panel .property-group-section {
+  padding: 6px 0;
+}
+
+pix3-inspector-panel .property-group-section:first-child,
+pix3-inspector-panel .property-group-section--flags {
+  padding-top: 0;
+}
+
+pix3-inspector-panel .property-group {
+  gap: 6px;
+  padding: 0;
+  min-height: 20px;
+}
+
+pix3-inspector-panel .property-label,
+pix3-inspector-panel .group-title,
+pix3-inspector-panel .section-title,
+pix3-inspector-panel .node-type,
+pix3-inspector-panel .script-name,
+pix3-inspector-panel .asset-value,
+pix3-inspector-panel .animation-clip-name,
+pix3-inspector-panel .inspector-btn,
+pix3-inspector-panel .property-input,
+pix3-inspector-panel .property-select,
+pix3-inspector-panel .size-field-input,
+pix3-inspector-panel .transform-field-input {
+  font-size: var(--inspector-font-size);
+}
+
+pix3-inspector-panel .group-toggle {
+  min-height: 20px;
+}
+
+pix3-inspector-panel .property-input,
+pix3-inspector-panel .property-select,
+pix3-inspector-panel .size-field-input,
+pix3-inspector-panel .transform-field-input {
+  height: var(--inspector-control-height);
+  padding: 0 6px;
+  font-family: var(--font-ui);
+}
+
+pix3-inspector-panel .property-color-picker {
+  width: var(--inspector-control-height);
+  min-width: var(--inspector-control-height);
+  height: var(--inspector-control-height);
+}
+
+pix3-inspector-panel .transform-single-axis-label {
+  height: var(--inspector-control-height);
+}
+
+pix3-inspector-panel .inspector-summary,
+pix3-inspector-panel .inspector-summary-main {
+  gap: 6px;
+}
+
+pix3-inspector-panel .inspector-type-icon {
+  width: 28px;
+  height: 28px;
+}
+
+pix3-inspector-panel .inspector-type-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+pix3-inspector-panel .inspector-summary-text {
+  gap: 2px;
+}
+
+pix3-inspector-panel .inspector-name-input {
+  flex: 0 0 auto;
+}
+
+pix3-inspector-panel .inspector-summary-meta,
+pix3-inspector-panel .inspector-subsection__hint,
+pix3-inspector-panel .inspector-subsection__title {
+  font-size: 11px;
+}

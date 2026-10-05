@@ -333,6 +333,8 @@ The `BehaviorPickerService` provides a modal dialog for selecting components:
 
 ### 6.8 Inspector Integration
 
+The inspector uses the same compact density as the editor header and scene tree: 12px primary text, 24px fields, 4px between property rows and 8px outer padding. Numeric fields use the normal UI font with tabular digits, align text left in both display and edit modes, and omit trailing decimal zeros (`30.00` → `30`, `1.50` → `1.5`), retaining the schema's display precision without changing stored values. Colored axis labels use regular font weight with an 8px gap before the number. Section headings retain their weight and dividers. Density rules are scoped to `pix3-inspector-panel` in `inspector-controls.ts.css`; inherited `--inspector-font-size`, `--inspector-control-height` and `--inspector-number-gap` also size shadow-DOM property editors, whose fallback sizes remain available in other hosts.
+
 The Object Inspector displays a "Components" section for each node:
 
 - Lists all attached components

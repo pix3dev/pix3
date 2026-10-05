@@ -69,10 +69,10 @@ const NUMBER_FIELD_STYLES = css`
   .field {
     display: inline-flex;
     align-items: center;
-    gap: 0.35rem;
+    gap: calc(2 * var(--inspector-number-gap, 0.35rem));
     flex: 1;
     min-width: 0;
-    height: 30px;
+    height: var(--inspector-control-height, 30px);
     padding: 0 0.5rem;
     box-sizing: border-box;
     background: var(--bg-2);
@@ -101,9 +101,9 @@ const NUMBER_FIELD_STYLES = css`
 
   .axis {
     flex-shrink: 0;
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     font-size: 12px;
-    font-weight: 700;
+    font-weight: 400;
     line-height: 1;
     color: var(--fg-2);
   }
@@ -125,14 +125,14 @@ const NUMBER_FIELD_STYLES = css`
   .value {
     flex: 1;
     min-width: 0;
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     font-variant-numeric: tabular-nums;
-    font-size: 13px;
+    font-size: var(--inspector-font-size, 13px);
     color: var(--fg-0);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    text-align: right;
+    text-align: left;
     pointer-events: none;
   }
 
@@ -146,11 +146,11 @@ const NUMBER_FIELD_STYLES = css`
     flex: 1;
     min-width: 0;
     width: 100%;
-    font-family: var(--font-mono);
+    font-family: var(--font-ui);
     font-variant-numeric: tabular-nums;
-    font-size: 13px;
+    font-size: var(--inspector-font-size, 13px);
     color: var(--fg-0);
-    text-align: right;
+    text-align: left;
   }
 `;
 
@@ -243,7 +243,7 @@ export class NumberField extends ComponentBase {
   }
 
   private format(v: number): string {
-    return v.toFixed(this.decimals);
+    return Number.parseFloat(v.toFixed(this.decimals)).toString();
   }
 
   private emit(type: 'preview-change' | 'commit-change', value: number): void {
@@ -343,7 +343,7 @@ export class NumberField extends ComponentBase {
 
   protected render() {
     const chip = this.label || (this.axis ? this.axis.toUpperCase() : '');
-    const editValue = Number.parseFloat(this.value.toFixed(this.decimals)).toString();
+    const editValue = this.format(this.value);
     return html`
       <div
         class="field ${this.editing ? 'editing' : ''} ${this.disabled ? 'disabled' : ''}"
@@ -419,7 +419,7 @@ export class Vector2Editor extends ComponentBase {
 
     .vector-input-group {
       display: flex;
-      gap: 0.35rem;
+      gap: var(--inspector-number-gap, 0.35rem);
       flex: 1;
       min-width: 0;
       align-items: center;
@@ -512,7 +512,7 @@ export class Vector3Editor extends ComponentBase {
 
     .vector-input-group {
       display: flex;
-      gap: 0.35rem;
+      gap: var(--inspector-number-gap, 0.35rem);
       flex: 1;
       min-width: 0;
       align-items: center;
@@ -605,7 +605,7 @@ export class EulerEditor extends ComponentBase {
 
     .euler-input-group {
       display: flex;
-      gap: 0.35rem;
+      gap: var(--inspector-number-gap, 0.35rem);
       flex: 1;
       min-width: 0;
       align-items: center;
@@ -774,8 +774,8 @@ export class TextureResourceEditor extends ComponentBase {
       border: 1px solid var(--line-1);
       border-radius: var(--radius-1);
       padding: 0.25rem 0.5rem;
-      height: 30px;
-      font-size: 13px;
+      height: var(--inspector-control-height, 30px);
+      font-size: var(--inspector-font-size, 13px);
       box-sizing: border-box;
     }
 
@@ -1078,8 +1078,8 @@ export class AudioResourceEditor extends ComponentBase {
       border: 1px solid var(--line-1);
       border-radius: var(--radius-1);
       padding: 0.25rem 0.5rem;
-      height: 30px;
-      font-size: 13px;
+      height: var(--inspector-control-height, 30px);
+      font-size: var(--inspector-font-size, 13px);
       box-sizing: border-box;
     }
 
@@ -1393,7 +1393,7 @@ export class SpinePreviewEditor extends ComponentBase {
       color: var(--fg-1);
       border-radius: var(--radius-2);
       padding: 0.2rem 0.55rem;
-      height: 26px;
+      height: var(--inspector-control-height, 26px);
       font-size: 0.75rem;
       cursor: pointer;
       white-space: nowrap;
@@ -2086,7 +2086,7 @@ export class CollisionPolygonEditor extends ComponentBase {
       color: var(--fg-1);
       border-radius: var(--radius-2);
       padding: 0.2rem 0.55rem;
-      height: 26px;
+      height: var(--inspector-control-height, 26px);
       font-size: 0.75rem;
       cursor: pointer;
       white-space: nowrap;
@@ -2300,12 +2300,12 @@ export class SliderNumberEditor extends ComponentBase {
       border: 1px solid var(--line-1);
       border-radius: var(--radius-1);
       padding: 0.25rem 0.45rem;
-      height: 30px;
-      font-size: 13px;
-      font-family: var(--font-mono);
+      height: var(--inspector-control-height, 30px);
+      font-size: var(--inspector-font-size, 13px);
+      font-family: var(--font-ui);
       font-variant-numeric: tabular-nums;
       box-sizing: border-box;
-      text-align: right;
+      text-align: left;
     }
 
     .number-input:focus-visible {
@@ -2340,7 +2340,7 @@ export class SliderNumberEditor extends ComponentBase {
       <input
         class="number-input"
         type="number"
-        .value=${safeValue.toFixed(this.precision)}
+        .value=${Number.parseFloat(safeValue.toFixed(this.precision)).toString()}
         min=${this.min.toString()}
         max=${this.max.toString()}
         step=${safeStep.toString()}
