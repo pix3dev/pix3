@@ -1341,6 +1341,21 @@ still loads without it — the node keeps its authored properties and warns.
 
 ### 7.2.2 Skinned 2D UI controls
 
+Physical UI gestures have one target: the topmost enabled, visible interactive
+control under the pointer, ordered by overlay band, effective `zIndex`, then tree
+paint order. Display-only labels and bars do not intercept the gesture. Ownership
+lasts until release/cancel, even when a callback hides its target or opens a modal;
+a newly revealed close button cannot reuse the opening press. A fresh press can
+close immediately, with no timer or debounce. Each pointer is independent.
+
+Hover uses this same topmost target. A `ColorRect2D` with
+`blocksPointerInput: true` participates as a non-interactive input barrier within
+its transformed rectangle. Visible modal backdrops therefore suppress hover and
+presses on controls behind them, including HUD buttons outside the panel; modal
+controls painted above the backdrop remain interactive. Hidden backdrops block
+nothing, and opacity does not change input eligibility during fades. The flag
+defaults to false and survives scene save/load and play-mode cloning.
+
 `Button2D`, `Checkbox2D`, `Slider2D` and `Bar2D` are colour-driven by default and
 skinned by pointing their texture slots at `res://` sprites. A slot that is set
 replaces the corresponding flat colour (the material tint goes white); a slot that

@@ -1,4 +1,4 @@
-import { Mesh, MeshBasicMaterial } from 'three';
+import { Mesh, MeshBasicMaterial, Vector3 } from 'three';
 import { Node2D, type Node2DProps } from '../Node2D';
 import type { PropertySchema } from '../../fw/property-schema';
 import { installReactiveSchemaProperties } from '../../fw/reactive-schema-properties';
@@ -10,12 +10,15 @@ export interface ColorRect2DProps extends Omit<Node2DProps, 'type'> {
   height?: number;
   color?: string;
   opacity?: number;
+  blocksPointerInput?: boolean;
 }
 
 export class ColorRect2D extends Node2D {
   width: number;
   height: number;
   color: string;
+  blocksPointerInput: boolean;
+  private readonly pointerLocal = new Vector3();
 
   private mesh: Mesh;
   private material: MeshBasicMaterial;
@@ -25,6 +28,8 @@ export class ColorRect2D extends Node2D {
     this.width = props.width ?? 100;
     this.height = props.height ?? 100;
     this.color = props.color ?? '#ffffff';
+    this.blocksPointerInput =
+      props.blocksPointerInput ?? props.properties?.blocksPointerInput === true;
     this.opacity = props.opacity ?? 1.0;
     this.isContainer = false;
 
@@ -48,6 +53,19 @@ export class ColorRect2D extends Node2D {
     installReactiveSchemaProperties(this, ColorRect2D.getPropertySchema);
   }
 
+  /** A visible modal backdrop consumes pointers inside its transformed rectangle. */
+  blocksPointerAt(screenX: number, screenY: number): boolean {
+    if (!this.blocksPointerInput || !this.isVisibleInTree()) return false;
+    const point = this.screenPointToWorld(screenX, screenY, this.tmpPointerWorld);
+    if (!point) return false;
+    this.updateWorldMatrix(true, false);
+    this.worldToLocal(this.pointerLocal.set(point.x, point.y, 0));
+    return (
+      Math.abs(this.pointerLocal.x) <= this.width / 2 &&
+      Math.abs(this.pointerLocal.y) <= this.height / 2
+    );
+  }
+
   static getPropertySchema(): PropertySchema {
     const baseSchema = Node2D.getPropertySchema();
     return {
@@ -55,6 +73,20 @@ export class ColorRect2D extends Node2D {
       nodeType: 'ColorRect2D',
       properties: [
         ...baseSchema.properties,
+        {
+          name: 'blocksPointerInput',
+          type: 'boolean',
+          defaultValue: false,
+          ui: {
+            label: 'Block Pointer Input',
+            group: 'Input',
+            description: 'Prevent hover and presses on controls behind this visible rectangle',
+          },
+          getValue: node => (node as ColorRect2D).blocksPointerInput,
+          setValue: (node, value) => {
+            (node as ColorRect2D).blocksPointerInput = Boolean(value);
+          },
+        },
         {
           name: 'width',
           type: 'number',
@@ -91,6 +123,7 @@ export class ColorRect2D extends Node2D {
       ],
       groups: {
         ...baseSchema.groups,
+        Input: { label: 'Input', expanded: false },
         Size: { label: 'Size', expanded: true },
         Style: { label: 'Style', expanded: true },
       },

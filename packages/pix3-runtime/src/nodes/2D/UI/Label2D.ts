@@ -61,6 +61,7 @@ interface LabelRenderState {
  *   glows.
  */
 export class Label2D extends UIControl2D {
+  protected override acceptsPointerInput = false;
   width: number;
   height: number;
   labelVAlign: LabelVAlign;

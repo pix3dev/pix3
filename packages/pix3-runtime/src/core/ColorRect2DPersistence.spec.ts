@@ -34,6 +34,13 @@ async function roundTrip(node: ColorRect2D): Promise<ColorRect2D> {
 }
 
 describe('ColorRect2D scene persistence', () => {
+  it('preserves a modal input blocker through save/load and removes it when disabled', async () => {
+    const node = new ColorRect2D({ id: 'backdrop', blocksPointerInput: true });
+    const loaded = await roundTrip(node);
+    expect(loaded.blocksPointerInput).toBe(true);
+    findSetter('blocksPointerInput')(loaded, false);
+    expect((await roundTrip(loaded)).blocksPointerInput).toBe(false);
+  });
   it('serializes width/height/color/opacity authored at construction', async () => {
     const node = new ColorRect2D({
       id: 'panel',

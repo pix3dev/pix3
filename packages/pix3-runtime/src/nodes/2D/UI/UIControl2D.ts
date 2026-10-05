@@ -7,6 +7,7 @@ import {
   Vector2,
   Vector3,
   PlaneGeometry,
+  type Object3D,
 } from 'three';
 import { Node2D, type Node2DProps } from '../../Node2D';
 import { configure2DTexture } from '../../../core/configure-2d-texture';
@@ -16,6 +17,7 @@ import type { PropertySchema } from '../../../fw/property-schema';
 import type { InteractionDescriptor, Interactive } from '../../../fw/interactive';
 import type { InputPointerFrameEvent, InputService } from '../../../core/InputService';
 import { ScrollContainer2D } from './ScrollContainer2D';
+import { ColorRect2D } from '../ColorRect2D';
 
 /**
  * The pseudo-pointer a semantic interaction (agent/script `press`, `hover`, `click`) owns while it
@@ -48,6 +50,8 @@ interface ResolvedPointer {
   down: boolean;
   worldX: number;
   worldY: number;
+  screenX: number;
+  screenY: number;
 }
 
 export interface UIControl2DProps extends Node2DProps {
@@ -94,6 +98,8 @@ export interface UIControl2DProps extends Node2DProps {
  * signal must emit it after every write path, not just the pointer one.
  */
 export abstract class UIControl2D extends Node2D implements Interactive {
+  /** Display-only controls opt out of physical hit arbitration. */
+  protected acceptsPointerInput = true;
   // Control state
   private _enabled: boolean = true;
   // Label state is exposed through accessors that re-render on change. As plain fields these were a
@@ -422,6 +428,8 @@ export abstract class UIControl2D extends Node2D implements Interactive {
    * - **Claim** — free control + a pointer that is *down* + its world point inside
    *   {@link isPointInBounds}. Deliberately the down **state**, not a down **event**: that is what
    *   preserves the slide-in press (a finger that wanders onto a button presses it).
+   *   The input service reserves that gesture for its first accepting control until it ends;
+   *   showing another control under the held finger cannot activate that control too.
    * - **Follow** — the owned pointer is followed wherever it goes; whether leaving the bounds
    *   cancels the press is {@link capturesPointer}'s call, exactly as before.
    * - **Terminal** — `'up'` releases (and clicks, if it ended in bounds); `'cancel'`, or the
@@ -512,18 +520,72 @@ export abstract class UIControl2D extends Node2D implements Interactive {
       down: candidate.down,
       worldX: world.x,
       worldY: world.y,
+      screenX: candidate.x,
+      screenY: candidate.y,
     };
   }
 
   /** The first pointer that satisfies the claim rule: down, and inside this control's bounds. */
   private findClaimingPointer(candidates: readonly CandidatePointer[]): ResolvedPointer | null {
+    if (!this.enabled || !this.isVisibleInTree()) return null;
     for (const candidate of candidates) {
       if (!candidate.down) continue;
       const resolved = this.resolveCandidate(candidate);
       if (!resolved) return null;
-      if (this.isPointInBounds(this.candidateWorld)) return resolved;
+      if (
+        this.isPointInBounds(this.candidateWorld) &&
+        this.isPointerAllowedByAncestorScrollContainers(this.candidateWorld) &&
+        this.input?.claimUIPointer(candidate.pointerId, this, () =>
+          this.findPointerTarget(candidate)
+        )
+      )
+        return resolved;
     }
     return null;
+  }
+
+  /** Hit-test in paint order before a callback can reveal another control under this pointer. */
+  private findPointerTarget(candidate: CandidatePointer): UIControl2D | ColorRect2D | null {
+    let root: Object3D = this;
+    while (root.parent) root = root.parent;
+    const sceneRoots = this.scene?.getRootNodes();
+    const roots = sceneRoots?.length ? sceneRoots : [root];
+    let target: UIControl2D | ColorRect2D | null = null;
+    let bestLayer = -1;
+    let bestZ = -Infinity;
+    for (const sceneRoot of roots) {
+      sceneRoot.traverse(node => {
+        if (node instanceof ColorRect2D) {
+          if (!node.blocksPointerAt(candidate.x, candidate.y)) return;
+        } else if (node instanceof UIControl2D) {
+          if (!node.acceptsPointerInput || !node.enabled || !node.isVisibleInTree()) return;
+          const point = node.screenPointToWorld(candidate.x, candidate.y, node.candidateWorld);
+          if (
+            !point ||
+            !node.isPointInBounds(point) ||
+            !node.isPointerAllowedByAncestorScrollContainers(point)
+          )
+            return;
+        } else return;
+        let ancestor = node as Node2D;
+        let layer = 0;
+        while (ancestor) {
+          if (ancestor.isCanvasLayer) {
+            layer = 1;
+            break;
+          }
+          if (!(ancestor.parent instanceof Node2D)) break;
+          ancestor = ancestor.parent;
+        }
+        const z = node.effectiveZIndex;
+        if (layer > bestLayer || (layer === bestLayer && z >= bestZ)) {
+          target = node;
+          bestLayer = layer;
+          bestZ = z;
+        }
+      });
+    }
+    return target;
   }
 
   /**
@@ -536,6 +598,11 @@ export abstract class UIControl2D extends Node2D implements Interactive {
    * interaction does not silently keep a claim alive.
    */
   private driveWithPointer(pointer: ResolvedPointer): boolean {
+    const target = this.getPhysicalHoverTarget(pointer);
+    if (target !== this && (!this.capturesPointer() || target instanceof ColorRect2D)) {
+      this.cancelPointerInteraction();
+      return true;
+    }
     this.ownedPointerId = pointer.pointerId;
     this.currentPointerId = pointer.pointerId;
     this.updatePointerState(pointer.worldX, pointer.worldY, pointer.down);
@@ -562,6 +629,18 @@ export abstract class UIControl2D extends Node2D implements Interactive {
     if (terminal?.type === 'up') {
       const world = this.screenPointToWorld(terminal.x, terminal.y, this.candidateWorld);
       if (world) {
+        const target = this.getPhysicalHoverTarget({
+          pointerId: ownedPointerId,
+          down: false,
+          worldX: world.x,
+          worldY: world.y,
+          screenX: terminal.x,
+          screenY: terminal.y,
+        });
+        if (target !== this && !this.capturesPointer()) {
+          this.cancelPointerInteraction();
+          return true;
+        }
         this.currentPointerId = ownedPointerId;
         this.updatePointerState(world.x, world.y, false);
         this.currentPointerId = null;
@@ -590,21 +669,43 @@ export abstract class UIControl2D extends Node2D implements Interactive {
    * and otherwise takes the first, so a hover that walked away is cleared.
    */
   private observeWithoutOwnership(candidates: readonly CandidatePointer[]): boolean {
+    if (!this.enabled || !this.isVisibleInTree()) {
+      this.cancelPointerInteraction();
+      return true;
+    }
     let chosen: ResolvedPointer | null = null;
     for (const candidate of candidates) {
       const resolved = this.resolveCandidate(candidate);
       if (!resolved) continue;
-      if (this.isPointInBounds(this.candidateWorld)) {
+      if (
+        this.isPointInBounds(this.candidateWorld) &&
+        this.getPhysicalHoverTarget(resolved) === this
+      ) {
         chosen = resolved;
         break;
       }
-      chosen ??= resolved;
     }
-    if (!chosen) return false;
+    if (!chosen) {
+      this.cancelPointerInteraction();
+      return true;
+    }
     this.currentPointerId = chosen.pointerId;
     this.updatePointerState(chosen.worldX, chosen.worldY, false);
     this.currentPointerId = null;
     return true;
+  }
+
+  private getPhysicalHoverTarget(pointer: ResolvedPointer): object | null {
+    return (
+      this.input?.getUIHoverTarget(pointer.pointerId, pointer.screenX, pointer.screenY, () =>
+        this.findPointerTarget({
+          pointerId: pointer.pointerId,
+          x: pointer.screenX,
+          y: pointer.screenY,
+          down: pointer.down,
+        })
+      ) ?? null
+    );
   }
 
   /**

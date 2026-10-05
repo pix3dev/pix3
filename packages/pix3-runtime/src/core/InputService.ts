@@ -203,6 +203,12 @@ export class InputService {
    * are derived from it.
    */
   private readonly activePointers = new Map<number, TrackedPointer>();
+  /** A physical gesture stays with its first accepting control, even if that control hides. */
+  private readonly uiPointerOwners = new Map<number, object>();
+  private readonly uiHoverTargets = new Map<
+    number,
+    { x: number; y: number; target: object | null }
+  >();
 
   private readonly pendingWheelDelta = new Vector2();
   private readonly pendingWheelZoomDelta = new Vector2();
@@ -239,6 +245,12 @@ export class InputService {
    * Resets frame-based input state. Should be called at the start of each frame.
    */
   beginFrame(): void {
+    this.uiHoverTargets.clear();
+    for (const pointerId of this.uiPointerOwners.keys()) {
+      if (pointerId < 0 ? !this.isPointerDown : !this.activePointers.has(pointerId)) {
+        this.uiPointerOwners.delete(pointerId);
+      }
+    }
     this.hoveredUIElements.clear();
     this.hoveredUIPointers.clear();
     this.wheelDelta.copy(this.pendingWheelDelta);
@@ -251,6 +263,30 @@ export class InputService {
     this.pendingPointerEvents = [];
     this.keyEvents = this.pendingKeyEvents;
     this.pendingKeyEvents = [];
+  }
+
+  /** @internal Reserve a held pointer for one control until the gesture ends. */
+  claimUIPointer(pointerId: number, owner: object, resolveOwner: () => object | null): boolean {
+    const existing = this.uiPointerOwners.get(pointerId);
+    if (existing) return existing === owner;
+    const target = resolveOwner();
+    if (!target) return false;
+    this.uiPointerOwners.set(pointerId, target);
+    return target === owner;
+  }
+
+  /** @internal One hover hit-test per pointer position per frame, shared by all controls. */
+  getUIHoverTarget(
+    pointerId: number,
+    x: number,
+    y: number,
+    resolveTarget: () => object | null
+  ): object | null {
+    const cached = this.uiHoverTargets.get(pointerId);
+    if (cached && cached.x === x && cached.y === y) return cached.target;
+    const target = resolveTarget();
+    this.uiHoverTargets.set(pointerId, { x, y, target });
+    return target;
   }
 
   /**
@@ -357,6 +393,8 @@ export class InputService {
       }
     }
     this.activePointers.clear();
+    this.uiPointerOwners.clear();
+    this.uiHoverTargets.clear();
     this.syncDerivedPointerState();
   }
 
@@ -577,6 +615,8 @@ export class InputService {
     if (this.activePointers.has(event.pointerId)) {
       return;
     }
+
+    this.uiPointerOwners.delete(event.pointerId);
 
     const position = this.computePointerPosition(event);
     const wasIdle = this.activePointers.size === 0;

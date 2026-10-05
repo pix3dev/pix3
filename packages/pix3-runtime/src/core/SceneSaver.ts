@@ -387,6 +387,8 @@ export class SceneSaver {
 
     // Serialize specific node type properties
     if (node instanceof ColorRect2D) {
+      if (node.blocksPointerInput) props.blocksPointerInput = true;
+      else delete props.blocksPointerInput;
       // ColorRect2D exposes width/height/color as instance fields; its property
       // setters (Inspector edits) mutate those fields and the material directly
       // and never touch node.properties, so we must read the live fields here.

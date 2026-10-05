@@ -45,6 +45,7 @@ export interface Bar2DProps extends UIControl2DProps {
  * Visual only - no interaction. Value is typically set by scripts.
  */
 export class Bar2D extends UIControl2D {
+  protected override acceptsPointerInput = false;
   width: number;
   height: number;
   backBackgroundColor: string;

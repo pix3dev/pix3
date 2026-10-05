@@ -401,6 +401,7 @@ describe('ScrollContainer2D', () => {
 
     container.scene = {
       getLogicalCameraSize: () => logicalSize,
+      getRootNodes: () => [container],
       // No UI camera in this fixture → pointer mapping falls back to the
       // logical-size path these tests exercise (matches the pre-Camera2D setup).
       getUICamera: () => null,

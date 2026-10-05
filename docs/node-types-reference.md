@@ -164,12 +164,14 @@ mistake it exists to prevent: build the whole game out of coloured rects, then s
 | `width`  | number | 100     | Width in design pixels          |
 | `height` | number | 100     | Height in design pixels         |
 | `color`  | color  | #ffffff | Fill colour (authored sRGB hex) |
+| `blocksPointerInput` | boolean | false | Block hover and presses on UI controls behind this visible rectangle |
 
 **Usage Notes:**
 
 - Centred on its own origin, like every 2D node — `position` is the rect's centre, not a corner.
 - `opacity` comes from `Node2D` and multiplies the fill; there is no separate alpha property.
 - No texture, no nine-slice: for a panel with a border use `TiledSprite2D` in `nine-slice` mode.
+- Set `blocksPointerInput: true` on a modal's full-screen dim backdrop. Controls painted above it still respond; controls below it cannot hover or activate. A hidden backdrop (including a hidden ancestor) blocks nothing. Opacity does not affect blocking, so opening and closing fades keep the modal isolated.
 
 ---
 
@@ -408,6 +410,11 @@ added to its `package.json` on the same condition.
 ### Button2D
 
 An interactive button control for 2D user interfaces. Responds to pointer clicks and provides visual feedback.
+
+Physical presses target the topmost enabled, visible interactive control in paint
+order. The gesture stays with that target until release/cancel: a button that opens
+a modal cannot also press its newly visible close button. The next press can close
+the modal immediately. Labels and bars are display-only and do not block buttons.
 
 **Type String:** `Button2D`
 

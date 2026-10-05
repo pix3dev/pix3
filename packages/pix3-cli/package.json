@@ -1,6 +1,6 @@
 {
   "name": "@pix3/cli",
-  "version": "1.6.2",
+  "version": "1.6.3",
   "description": "Pix3 command line: create a project from a recipe, and link your own coding agent (Claude Code, Codex, ...) to an open Pix3 editor window over a loopback MCP channel.",
   "type": "module",
   "repository": {

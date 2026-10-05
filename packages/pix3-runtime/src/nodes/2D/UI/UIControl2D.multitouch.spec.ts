@@ -2,6 +2,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Button2D } from './Button2D';
 import { Slider2D } from './Slider2D';
+import { Group2D } from '../Group2D';
+import { Label2D } from './Label2D';
+import { Bar2D } from './Bar2D';
+import { CanvasLayer2D } from '../CanvasLayer2D';
+import { ColorRect2D } from '../ColorRect2D';
 import { InputService } from '../../../core/InputService';
 
 /**
@@ -34,6 +39,9 @@ function recordSignals(node: SignalSource): string[] {
   }
   return seen;
 }
+
+const hovering = (button: Button2D): boolean =>
+  (button as unknown as { isHovering: boolean }).isHovering;
 
 describe('UIControl2D pointer ownership (multi-touch)', () => {
   let input: InputService;
@@ -94,6 +102,220 @@ describe('UIControl2D pointer ownership (multi-touch)', () => {
     button.input = input;
     return { button, signals: recordSignals(button) };
   }
+
+  it('does not pass an opening press to a newly revealed overlapping close button', () => {
+    const { button: opener } = createButton();
+    const closer = new Button2D({ id: 'close', name: 'Close' });
+    closer.input = input;
+    closer.visible = false;
+    const close = vi.fn(() => {
+      closer.visible = false;
+    });
+    closer.onPressed = close;
+    opener.onPressed = () => {
+      closer.visible = true;
+      opener.visible = false;
+    };
+
+    down(1, 100, 100);
+    frame(opener, closer);
+    frame(opener, closer);
+    expect(closer.visible).toBe(true);
+    expect(close).not.toHaveBeenCalled();
+
+    up(1, 100, 100);
+    frame(opener, closer);
+    expect(close).not.toHaveBeenCalled();
+
+    // Mouse ids are reused: a fresh press at the same point must close immediately.
+    down(1, 100, 100);
+    frame(opener, closer);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows a second finger to press an overlay while the opening finger is still held', () => {
+    const { button: opener } = createButton();
+    const closer = new Button2D({ id: 'close', name: 'Close' });
+    closer.input = input;
+    closer.visible = false;
+    const close = vi.fn();
+    closer.onPressed = close;
+    opener.onPressed = () => {
+      closer.visible = true;
+      opener.visible = false;
+    };
+    down(1, 100, 100);
+    frame(opener, closer);
+    expect(close).not.toHaveBeenCalled();
+    down(2, 100, 100);
+    frame(opener, closer);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes the next press to the visible overlay rather than the opener underneath it', () => {
+    const root = new Group2D({ id: 'root' });
+    const { button: opener } = createButton();
+    const closer = new Button2D({ id: 'close', name: 'Close' });
+    closer.input = input;
+    closer.visible = false;
+    root.add(opener, closer);
+    const open = vi.fn(() => {
+      closer.visible = true;
+    });
+    const close = vi.fn(() => {
+      closer.visible = false;
+    });
+    opener.onPressed = open;
+    closer.onPressed = close;
+    down(1, 100, 100);
+    frame(root);
+    frame(root);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+    up(1, 100, 100);
+    frame(root);
+    down(1, 100, 100);
+    frame(root);
+    expect(open).toHaveBeenCalledTimes(1);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a decorative label or bar inside a button intercept its press', () => {
+    const { button } = createButton();
+    button.add(new Label2D({ id: 'caption', label: '', width: 100, height: 40 }));
+    button.add(new Bar2D({ id: 'bar', width: 100, height: 40 }));
+    const press = vi.fn();
+    button.onPressed = press;
+    down(1, 100, 100);
+    frame(button);
+    expect(press).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears background hover and blocks presses while a modal backdrop is visible', () => {
+    const root = new Group2D({ id: 'root' });
+    const { button } = createButton();
+    const backdrop = new ColorRect2D({
+      id: 'backdrop',
+      width: 200,
+      height: 200,
+      blocksPointerInput: true,
+    });
+    backdrop.input = input;
+    backdrop.visible = false;
+    root.add(button, backdrop);
+    const press = vi.fn();
+    const exit = vi.fn();
+    button.onPressed = press;
+    button.onHoverExit = exit;
+    move(1, 100, 100);
+    frame(root);
+    expect(hovering(button)).toBe(true);
+    backdrop.visible = true;
+    frame(root);
+    expect(hovering(button)).toBe(false);
+    expect(exit).toHaveBeenCalledTimes(1);
+    down(1, 100, 100);
+    frame(root);
+    up(1, 100, 100);
+    frame(root);
+    expect(press).not.toHaveBeenCalled();
+    backdrop.visible = false;
+    frame(root);
+    expect(hovering(button)).toBe(true);
+  });
+
+  it('lets modal controls above the blocker hover and press while keeping underlying buttons inert', () => {
+    const root = new Group2D({ id: 'root' });
+    const { button: background } = createButton();
+    const backdrop = new ColorRect2D({
+      id: 'backdrop',
+      width: 200,
+      height: 200,
+      blocksPointerInput: true,
+    });
+    backdrop.input = input;
+    const close = new Button2D({ id: 'close' });
+    close.input = input;
+    root.add(background, backdrop, close);
+    const press = vi.fn();
+    close.onPressed = press;
+    move(1, 100, 100);
+    frame(root);
+    expect(hovering(background)).toBe(false);
+    expect(hovering(close)).toBe(true);
+    down(1, 100, 100);
+    frame(root);
+    expect(press).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores a blocker whose ancestor is hidden', () => {
+    const root = new Group2D({ id: 'root' });
+    const { button } = createButton();
+    const modal = new Group2D({ id: 'modal' });
+    const backdrop = new ColorRect2D({
+      id: 'backdrop',
+      width: 200,
+      height: 200,
+      blocksPointerInput: true,
+    });
+    backdrop.input = input;
+    modal.add(backdrop);
+    root.add(button, modal);
+    modal.visible = false;
+    move(1, 100, 100);
+    frame(root);
+    expect(hovering(button)).toBe(true);
+    modal.visible = true;
+    frame(root);
+    expect(hovering(button)).toBe(false);
+  });
+
+  it.each(['cancel', 'blur'] as const)('releases the gesture reservation on %s', terminal => {
+    const root = new Group2D({ id: 'root' });
+    const { button: opener } = createButton();
+    const closer = new Button2D({ id: 'close' });
+    closer.input = input;
+    closer.visible = false;
+    root.add(opener, closer);
+    opener.onPressed = () => {
+      closer.visible = true;
+    };
+    const close = vi.fn();
+    closer.onPressed = close;
+    down(1, 100, 100);
+    frame(root);
+    if (terminal === 'cancel') cancel(1, 100, 100);
+    else window.dispatchEvent(new Event('blur'));
+    frame(root);
+    expect(close).not.toHaveBeenCalled();
+    down(1, 100, 100);
+    frame(root);
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['z', 'overlay'] as const)('honours the %s paint band over later tree order', band => {
+    const root = new Group2D({ id: 'root' });
+    const higher = new Button2D({ id: 'higher' });
+    const lower = new Button2D({ id: 'lower' });
+    higher.input = input;
+    lower.input = input;
+    if (band === 'z') {
+      higher.zIndex = 1;
+      root.add(higher, lower);
+    } else {
+      const overlay = new CanvasLayer2D({ id: 'overlay' });
+      overlay.add(higher);
+      root.add(overlay, lower);
+    }
+    const higherPress = vi.fn();
+    const lowerPress = vi.fn();
+    higher.onPressed = higherPress;
+    lower.onPressed = lowerPress;
+    down(1, 100, 100);
+    frame(root);
+    expect(higherPress).toHaveBeenCalledTimes(1);
+    expect(lowerPress).not.toHaveBeenCalled();
+  });
 
   it('ignores a second finger inside a button it already holds, and claims it after the first lifts', () => {
     const { button, signals } = createButton();

@@ -754,8 +754,22 @@ every entry of `pointerEvents` (`'down' | 'move' | 'up' | 'cancel'` — a `'canc
 is a press _taken away_, e.g. a finger dragged off the screen edge, and must never
 count as a completed tap). Anything that follows one contact — a stick, a drag, a
 tap resolver — names its finger and reads only that one; UI controls do this for
-you (each control owns at most one pointer). The shared values are summaries:
-`isPointerDown` means "**any** finger is down", `pointerPosition` and
+you (each control owns at most one pointer).
+
+Each physical gesture also belongs to only one control: the uppermost enabled,
+visible control under the pointer wins (overlay band, effective `zIndex`, then
+tree paint order). Labels and bars do not intercept input. That target keeps the
+gesture until release/cancel, even if it hides or opens another panel. A modal's
+close button therefore needs a fresh press; no debounce or opening delay is needed.
+An unclaimed pointer can still slide onto a control; another finger is independent.
+
+Hover follows the same topmost hit-test, rather than lighting every overlapping
+control. For a modal, set `blocksPointerInput: true` on its full-screen
+`ColorRect2D` backdrop: it blocks hover/presses on controls painted below it while
+the modal's controls above it remain interactive. Hiding it releases the block;
+opacity alone does not, so fades remain isolated. No per-button disable loop is needed.
+
+The shared values are summaries: `isPointerDown` means "**any** finger is down", `pointerPosition` and
 `activePointerId` (`@deprecated`) describe the **primary** finger only, and
 `isHoveringUI` is the aggregate over all of them — gating a gesture on it is what
 makes "hold a button with one thumb, drag the stick with the other" impossible, so
