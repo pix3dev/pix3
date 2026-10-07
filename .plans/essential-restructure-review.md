@@ -1,0 +1,251 @@
+# Ревью плана essential-restructure (изолированный Opus-рецензент, 2026-10-07)
+
+Первичное ревью черновика плана до переработки. Что из него принято и что отклонено — в разделе «Журнал ревью» самого плана [essential-restructure.md](essential-restructure.md).
+
+
+Дата: 2026-10-07. Ревьюер независимый, утверждения проверены по коду. Репозиторий не менялся.
+
+## 1. Вердикт
+
+**Выполнять с обязательными изменениями.** Сама архитектура годится. CLI раздаёт редактор с того же
+origin, процесс MCP хостит workspace-сервер, `ChannelToolRegistry` заменяет `AgentToolRegistry`,
+game-test остаётся в ядре. Оценка объёма тоже честная: я насчитал 85,4k непроверочных строк в
+наборе на удаление, плюс TRIM около 90k. Слабых мест три. Первое: порядок фаз противоречит цели
+«сначала проверить подход». Carve-out (P2) стоит на критическом пути MVP, хотя для теста он не
+нужен, и делается на `main` без браузерного гейта. Второе: жизненный цикл хоста описан
+оптимистично. Когда процесс MCP умирает, редактор теряет и сохранение, и перезагрузку страницы.
+Третье: список швов неполон, а несколько фактических утверждений неверны (layout, yalc, публикация
+prerelease, `workflow_dispatch` в `full`). Всё это исправимо правкой плана, переписывать стратегию
+не нужно.
+
+## 2. Обязательные изменения
+
+**R1. Убрать P2 с критического пути MVP; carve-out делать в ветке.**
+Основание: brief («essential, чтобы проверить подход, потом решить с остальным»); план D
+(«P2 … частично параллельно P1», P3 после P2). Тест MY.GAMES измеряет поток agent-first. Удалённые
+области пользователь не увидит и так: hosted-режим уже убирает agentChat, home и profiler из
+layout, а приветствие заменяется hosted-загрузкой. Если carve-out на 90k строк вносит регрессию
+посреди теста, тест сорван.
+Исправление: P0 → P1 → P3 на `2.0.0-alpha.1` плюс фиксы. P2 идёт в worktree на ветке
+`essential` и вливается в `main` только после гейтов (см. R4) и не раньше, чем пройдёт
+dogfood-концепт №1. Hosted-загрузку в P1 сделать отдельным маленьким компонентом в обход
+`pix3-welcome`, чтобы P2 не переписывал её второй раз.
+
+**R2. Жизненный цикл хоста: редактор живёт не дольше процесса MCP.**
+Основание: при backend `workspace` весь ввод-вывод идёт через сервер
+(`src/services/project/ProjectStorageService.ts`, ветки `backend === 'workspace'`). Статику
+редактора по C.3 отдаёт тот же процесс. Баннер из C.2 «Сессия агента закрыта. Работа сохранена»
+верен только на момент закрытия. Следующая правка в инспекторе уже не сохранится, F5 даст пустую
+страницу, а «повышение клиента» случится, только когда другой процесс сам вызовет инструмент.
+Исправление:
+- (а) явный режим «offline»: правки идут в журнал восстановления, баннер говорит
+  «попросите агента `editor_link`»;
+- (б) в S1 замерить, как Codex и Claude Code завершают MCP-процесс: SIGTERM, закрытие stdin или
+  SIGKILL; на тред или на приложение;
+- (в) решить, допустим ли grace-период: хост живёт N минут после конца stdin, пока держится
+  lease вкладки. Это не демон в смысле F.2, но такое решение надо записать явно.
+
+**R3. Дополнить B.2 пропущенными швами и пересчитать P2.**
+Скрипт по импортам нашёл 28 сохраняемых файлов, которые импортируют удаляемое. Ещё около 12 файлов
+читают удаляемые срезы состояния. План говорит примерно о 20 швах. Пропущены:
+- `services/atlas/TextureAtlasService.ts:7`: `sha256Hex` из `core/remote-preview/protocol`
+  (PLATFORM). Это ядро play mode;
+- `services/editor/EditorTabService.ts:20,52`: `@inject(PreviewHostService)`;
+- TRIM `image-gen` сам по себе шов:
+  - `AssetGenService.ts:11,238,483-515` зависит от `BackgroundRemovalService`, ISNet-вырезка в
+    пресете `sprite`;
+  - `ImageGenProviderRegistry.ts:4-8,37-39` тянет Strophe, SvgLlm, Codex и
+    `BridgeConnectionService`;
+  - `AiImageSettingsService.ts` тянет `bg-removal/types` и `SvgLlmImageProvider`;
+- `ui/shared/pix3-lightbox.ts` → `pix3-image-annotator` (DELETE), не только `markdown-lite`;
+- `services/project/ProjectService.ts` → `CollaborationService`, `LocalSyncService`, не только
+  idea-timeline;
+- `ui/shared/pix3-status-bar.ts` → `core/dev-backend`, `UpdateCheckService`;
+- `features/editor/OpenUiKitForgeCommand.ts` → `core/tool-routes`;
+- `game-tab.ts` → карточки online и preview;
+- срезы `collaboration`/`auth`/`workspaceMode`/`flowAutopilot` читают
+  `features/scripts/play-workspace.ts`, `services/play/ProfilerSessionService.ts`,
+  `ui/shared/pix3-create-project-dialog.ts` и ещё около десяти файлов;
+- `ProjectLifecycleService.ts:24-26,86,307-351` (`AgentKitService`, `withAgentKit`) и
+  `pix3-create-project-dialog`. Через них к agent-kit привязан и `cli-manifest.spec.ts`.
+
+Отдельный риск качества: замена bg-removal на `chromaKeyImage` для спрайтов Gemini — это
+регрессия качества вырезки, а не механическая замена. Её надо проверить на 10 реальных спрайтах.
+
+**R4. Гейт P2 не ловит главный класс поломок.**
+Основание: `type-check + vitest + pix3 smoke + size-spec`. `pix3 smoke` гоняет runtime в Node, без
+редактора. Удалённый side-effect-импорт Lit-компонента, на который ссылается шаблон по тегу,
+типы не ломает: элемент просто не появится. Удаление 123 спек-файлов (39k строк) снижает покрытие
+шелла.
+Исправление: в гейт каждого шага добавить скриптованный браузерный прогон hosted-сборки (Playwright
+или chrome-devtools MCP): `#pair`, открыть сцену, правка в инспекторе, сохранение, play,
+`game_run` через MCP, `export_playable`.
+
+**R5. Публикация и CI: три фактические ошибки.**
+- `publish-packages.yml` вызывает `npm publish --access public` без `--tag`. Prerelease
+  `2.0.0-alpha.N` либо отклонят (новые npm требуют `--tag` для prerelease), либо он уйдёт в
+  `latest`. Обещание A.2 «`latest` остаётся 1.6.3» без правки workflow не выполняется. Нужен
+  `--tag next`, когда версия содержит `-`.
+- A.2: «`deploy-collab-server.yml` в `full` получает `workflow_dispatch`». GitHub запускает
+  `workflow_dispatch` только для workflow, который лежит в ветке по умолчанию. После удаления файла
+  с `main` кнопки не будет. Нужен либо stub на `main` с `ref: full`, либо `on: push: branches: [full]`.
+- A.2 («хотфикс collab из `full`») противоречит F.13 («не чинить в `full`»). Надо выбрать одно.
+
+**R6. Kit теряет знание, которое сейчас живёт только во встроенном агенте.**
+Основание: `src/services/agent/agent-skills/verify-and-fix.md` (368 строк: каналы ввода, время и
+кадры, `GameDebugProvider`, bot policies, частые runtime-ошибки) и `game-prototype.md` (276 строк:
+инкременты, ловушки API, плейсхолдеры, физика) уходят во FREEZE. В `packages/pix3-cli/kit-src/`
+слово `GameDebugProvider` не встречается ни разу. При этом лучшие предикаты `game_run`
+(`gameStateChanged`) без него не работают.
+Исправление: до заморозки перенести существенное в `kit-src/skills/pix3-verify` и `pix3-scripts`
+(через `{{include}}`, как engine-api-map) и покрыть kit drift spec.
+
+**R7. `setup --write`: что сделать надёжнее и что обязательно проверить на живых приложениях.**
+- `~/.claude.json` — большой файл состояния, который Claude Code сам постоянно перезаписывает.
+  `setup` запускается изнутри работающего Claude Code, поэтому read-modify-write может быть
+  затёрт. Запасной путь «атомарный RMW» убрать. Оставить `claude mcp add --scope user`, а при его
+  отсутствии печатать инструкцию или plugin-маршрут (S2).
+- Codex TOML: на Windows путь `process.execPath` в basic string требует экранирования (нужны
+  literal-строки `'…'`). Таблица `[mcp_servers.pix3]` может иметь подтаблицы
+  (`[mcp_servers.pix3.env]`) или dotted keys. Нужны бэкап с меткой времени и проверка разбора
+  после записи.
+- PATH внутри MCP-процесса: `pix3 check` лениво ставит TypeScript через `npm install --prefix
+  ~/.pix3/typescript` (`packages/pix3-cli/src/check/typescript.ts:18`). GUI-процесс npm не найдёт.
+  `setup` должен сразу поставить TypeScript (и `esbuild`), а `env.PATH` в записи MCP — начинаться
+  с `dirname(execPath)`.
+- Весь stdout хоста — это канал JSON-RPC. Логи `WorkspaceServer` пускать только в stderr, на это
+  нужен тест.
+- Проверить на живых приложениях: читает ли Codex desktop `~/.codex/config.toml` (или
+  `CODEX_HOME`) так же, как CLI; поддерживает ли он `~/.codex/skills`; показывает ли модели MCP
+  `instructions`; приоритет записи проекта над пользовательской с тем же именем `pix3` (в DeepCore
+  проектный `.mcp.json` закреплён на 1.6.2).
+- В P0 добавить Windows-спайк: экранирование путей, `isProcessAlive`, отсутствие SIGTERM,
+  закрытие stdin.
+
+**R8. Пара и origin: оставить ключ по `workspaceId`, same-origin считать от `Host`.**
+- C.4.4 «токен ищется по origin» — это регресс. Сейчас `WorkspaceCredentialStore` хранит токены
+  по `workspaceId`, и это правильно: порт 8490 в разные дни занимают разные проекты. Hosted-загрузка
+  должна читать `workspaceId` из `/ws/status` и брать токен по нему.
+- C.3 «`isAllowedOrigin` → same-origin». Сравнивать надо `Origin` с `http://` + заголовок `Host`
+  (loopback), а не с портом прослушивания. Иначе ломается проброс VS Code на другой локальный порт.
+  Это решение §11.1 («Host-check принимает любой порт»), и C.6 на него опирается.
+- `tokens[]` ограничить: максимум N и TTL неиспользуемых.
+
+**R9. Skills и документация репозитория в шаге P2(6).**
+- `.claude/skills/debug-running-game/SKILL.md:89-91` вызывает
+  `agentTools.execute('scene_tree' | 'create_node')`. Этих инструментов в `ChannelToolRegistry`
+  нет, значит, урезанный `debug-bridge` skill не спасает: его надо переписать.
+- `generate-sprites-in-editor` целиком водит Sprite Editor (LABS) — удалить.
+- `pix3-game-dev:34` ссылается на Sprite Editor.
+- Явно записать, что план **заменяет** решения `external-agent-authoring` §1.2 (PWA-окно), §9
+  («замена встроенного агента» в анти-скоупе) и §11.1 (FSA-путь как основной). Иначе агенты будут
+  читать два противоречащих плана.
+
+**R10. P4: судьба `editor.pix3.dev` и данных пользователей.**
+Основание: OPFS-проекты (`BrowserProjectStorageService`, `.plans/done/browser-storage-projects.md`)
+и recents привязаны к origin `editor.pix3.dev`. Если заменить сайт страницей с одной строкой, эти
+данные станут недоступны: они останутся в браузере, но открыть их будет нечем.
+Исправление: оставить последнюю сборку по подпути того же origin (например `/classic/`, OPFS тот же)
+или выпустить экспорт перед заменой.
+
+**R11. Лицензии пакета CLI.**
+С `editor/` в `files` CLI начинает распространять весь бандл редактора, включая ленивый чанк
+`@esotericsoftware/spine-threejs`. CLAUDE.md прямо называет Spine Runtimes License «плохо
+подходящей для всегда устанавливаемой зависимости». Плюс monaco, rapier и прочее.
+Исправление: в P1 прогнать `npm run licenses:report` на hosted-сборке, добавить
+THIRD_PARTY_NOTICES и решить по Spine: исключить из hosted-сборки или принять.
+
+**R12. Неверное утверждение про layout.**
+B.2 предлагает «поднять версию ключа сохранённого layout, иначе golden-layout упадёт». Layout не
+сохраняется: `LayoutManager.ts:1044` всегда грузит `DEFAULT_LAYOUT_CONFIG`. Сохраняется сессия
+вкладок `pix3.projectTabs:<projectId>` (`EditorTabService.ts:149,439`), и там лежат типы
+`animation`, `sprite-editor`, `model-lab`, `uikit-forge` (`state/AppState.ts:12-22`).
+Исправление: при восстановлении отфильтровывать неизвестные типы. Отдельно: панель `background`
+(home) — базовый стек layout по умолчанию, ей нужна замена в виде пустого состояния.
+
+**R13. Пересчитать сроки.**
+- P1 7–8 дней не включает итерации с перезапуском настоящих приложений, Windows, R2 и R7. Реально
+  10–12 дней.
+- P2 при 28+12 швах, трёх переписываниях (shell, settings, welcome), новом реестре и браузерном
+  гейте — 8–10 дней.
+- С R1 MVP-результат получается через 4–5 недель, carve-out идёт параллельно и не блокирует.
+
+## 3. Рекомендуемые изменения
+
+1. **Решение по репозиторию.** Вывод A я поддерживаю, но цена B в плане завышена:
+   - DeepCore берёт runtime из npm (`"@pix3/runtime": "^1.6.2"`), а не через yalc, поэтому строка
+     про yalc неактуальна для обоих вариантов. Caret на 1.x не подтянет 2.0-alpha;
+   - Trusted Publisher настраивается за минуты, а не за день;
+   - «filter-repo рвёт историю» верно только для `--path`. Клон с последующим удалением даёт
+     историю, идентичную A.
+
+   Реальные плюсы A — один источник runtime и непрерывность npm-провенанса. Реальный плюс B —
+   нетронутый рабочий 1.x. Оба плюса получаются, если вести carve-out в ветке `essential`, а при
+   успехе переименовать: `main → full`, `essential → main` (R1).
+2. **`channel-tool-hints.ts`.** Не тащить regex-переписывание поверх дословно скопированных
+   описаний. При копировании один раз применить hints, «запечь» итоговый текст в
+   `ChannelToolRegistry` и удалить слой. Агент видит тот же текст, так что F.5 не нарушается.
+   Рассмотреть `game_controls` и `game_time` (только `paused:false`) как read-only инструменты
+   канала: hints существуют именно потому, что их нет.
+3. **`services/uikit`.** Не переносить в CLI в P2: `skin_ui` условный (P3b, S11), а writer
+   (`uikit-editor/UiKitProjectWriter.ts:254`) завязан на canvas. Пусть будет LABS, вернуть по
+   триггеру.
+4. **`/openai-proxy`.** Раз прокси всё равно на сервере CLI, ключ можно подставлять на стороне
+   сервера (env записи MCP или `~/.pix3/keys.json`). Это снимает «ключ по origin», и ключ не
+   попадает в браузер. Отдельно проверить встроенную генерацию картинок в Codex desktop плюс
+   постобработку на CLI: тогда корпоративный ключ дизайнеру может не понадобиться.
+5. **P1 hosted-сборка: убрать bg-removal и ONNX уже в P1.** Иначе S9 меряет пакет с
+   `ort-wasm*`. В плане разные пути: `dist-hosted` в одном месте, `packages/pix3-cli/editor` в
+   другом — свести к одному.
+6. **Node.** Не ставить у дизайнера Node — самый вероятный провал stranger-теста. План Б для S3:
+   агент скачивает портативный Node в `~/.pix3/node` без прав администратора. `engines <25` даёт
+   предупреждение на Node 26.
+7. **Протокол MY.GAMES.**
+   - Базис Unity — по фактическим часам, а не по оценке. Оценка занижает Unity и делает тест
+     строже, но несравнимой.
+   - Считать состав ролей: дизайнер один против дизайнера с программистом. Скорее всего, именно
+     это и есть питч.
+   - C1 и C2 в руках автора инструмента — верхняя граница, а не типичный результат. Если есть
+     возможность, провести второго «незнакомца».
+   - В §11.14 Claude Code получил организационный 403. Codex — основной путь, S2 по приоритету
+     ниже.
+8. **Чистое дерево для агентов.** `.plans/` с планами удалённого (flow-autopilot,
+   prompt-to-playable, vibe-wow, agent-eval) оставить только в `full`. Убрать скрипты
+   `dev:prod`/`dev:collab`, `.env.development`/`.env.prod-backend`, `src/sw.ts` и записи в
+   `knip.json` (`player-main`, `bg-removal.worker`).
+
+## 4. Проверено и верно
+
+- Подсистема game-test: 18 файлов, 15,2k строк. Импорты только из `agent-introspection`,
+  `play/GamePlaySessionService`, `scripting/ScriptCompilerService`, `ProjectStorageService`,
+  `background-ticker`, runtime и three. llm и flow нет.
+- У `image-ops.ts` и `contour-trace.ts` нет ни одного импорта. Потребители — экспорт
+  (`compressImageBlob`) и инспектор (`readAlphaMask`, `traceCollisionPolygon`).
+- `services/uikit` действительно host-agnostic: только относительные импорты, страж
+  `host-agnostic.spec.ts`.
+- Локализация связана с `GamePlaySessionService` и `ProjectBuildService`, KEEP оправдан.
+- `agent-introspection.ts` зависит только от runtime. Импортеры — `ProjectScriptLoaderService`,
+  game-test и удаляемые файлы.
+- Проверка emoji-as-art лежит в runtime и в `pix3-cli/src/validate/level1.ts:597-609`.
+- `WorkspaceAgentToolBridge.ts:281`: `@injectLazy(AgentToolRegistry)`, 14 инструментов. Оценка
+  `ChannelToolRegistry` в 1,5–2k правдоподобна: около 535 строк — описания, остальное — обработчики
+  и хелперы. Обработчик `generate_asset` завязан на flow (idea-stage, references), его надо резать,
+  а не копировать.
+- Захват lock у мёртвого pid уже есть (`acquireServeLock` → `isProcessAlive`). В `WorkspaceServer`
+  уже есть внутрипроцессный relay (`enqueueCall`, «for a later pix3 mcp --workspace»).
+- `kit.spec.ts` читает `AgentToolRegistry.ts` (около стр. 245) и фиксирует 14 инструментов.
+  Пять `{{include}}` engine-api-map. Удаление редакторного agent-kit не ломает `pix3 kit`: kit
+  принадлежит CLI, а `ensure-agent-kit` кормит только бандл редактора.
+- Счёт 14 → 22 инструментов сходится. Вынос сети из runtime действительно не нужен для теста.
+
+## 5. Решают только владелец и ко
+
+1. Ветка `essential` с последующим переименованием (рекомендую) или прямой carve-out на `main`.
+2. Grace-период хоста после смерти MCP-процесса (R2) против строгого F.2.
+3. FSA и OPFS в essential или только backend `workspace`.
+4. Monaco (самая тяжёлая часть пакета) в ядре или LABS. Кто редактирует `.pix3anim` после
+   удаления Sprite Editor.
+5. Судьба `editor.pix3.dev` и его пользователей (R10). Spine в пакете CLI (R11).
+6. Ключи картинок: в браузере или на сервере CLI. Ждать ли корпоративный ключ.
+7. Метрика питча: «в 2 раза быстрее» или «дизайнер без программиста». От этого зависит порог
+   kill-критерия.
