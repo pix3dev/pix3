@@ -1,6 +1,6 @@
 # pix3-core: редакция Pix3 как Vite-плагин + runtime + kit
 
-Дата: 2026-10-08, ревизия 5.1 (после ревью 1–4 и решения владельца о модели правки, журнал — §J). Статус: план, P0 можно начинать.
+Дата: 2026-10-08, ревизия 5.2 (после ревью 1–5 и решения владельца о модели правки, журнал — §J). Статус: план, P0 можно начинать.
 
 **Основа:** brief «pix3-core» (решения 1–6 не пересматриваются); coupling map; `.plans/essential-restructure.md` rev 4 (B.1/B.2 — «что портировать», D.5 — протокол MVP; серверная, hosted-, pair-, offline- и channel-часть отменена); ревью `.plans/pix3-core-review.md`.
 
@@ -24,16 +24,17 @@
    - Несохранённое — это **дельта состояния** `diff(baseline, граф)`, а не список операций. Внешняя запись в грязную сцену сливается по ключам.
    - Агент работает так: успешный sync → чтение → правка → sync. Сборка через `npm run build` сама делает flush открытого редактора.
    - Многофайловый flush идёт одним changeset'ом: staging, intent-журнал, восстановление.
-6. **Агент: Chrome DevTools MCP 1.10.1** с `--categoryExperimentalThirdParty`. Страница регистрирует 8 типизированных 3p-инструментов. Fallback — inline-`function` для `evaluate_script`. Своего MCP нет; он появится только по порогу S4. Токен/pipe-прокси для CDP обязателен до stranger-теста и для SSH.
-7. **Сборка** — `vite build` с плагином: single-file HTML или zip, strip по `mentionedNames` со сканом **всех** исходников проекта. Проверка в `vite preview`, через `file://` и в `<iframe sandbox>`.
+6. **Агент: Chrome DevTools MCP 1.10.1.** Страница регистрирует 8 типизированных 3p-инструментов, fallback — inline `evaluate_script` (основной путь, если S4 покажет >5 % ошибок экранирования). Своего MCP нет. Токен-прокси CDP обязателен до stranger-теста и для SSH.
+7. **Сборка** — `vite build` с плагином: single-file HTML или zip, strip по `mentionedNames`; проверка в preview, `file://` и `<iframe sandbox>`.
 8. **Vite 7 и 8**, шаблон на 8.3.
 9. **Сроки** (арифметика в G.6):
 
    | Путь | Рабочих дней | Недель |
    |---|---|---|
-   | полный | 83–94 (16,6–18,8 нед.); 80–91 с наложением C2 на P2 (16–18,2 нед.) | 16–18,8 |
-   | без документов сцен при сборке (B.6.4 после P4) | 80–91; 77–88 | 15,4–18,2 |
-   | кратчайший до dogfood `alpha.1` (C1 Igor'я) | 41–45,5 | 8,2–9,1 |
+   | полный | 84–95 (16,8–19 нед.); 81–92 с наложением C2 на P2 (16,2–18,4 нед.) | 16,2–19 |
+   | без документов сцен при сборке (B.6.4 после P4) | 81–92; 78–89 | 15,6–18,4 |
+   | кратчайший до dogfood `alpha.1` (C1 Igor'я) | 42–46,5 | 8,4–9,3 |
+   | питч на dogfood-альфе (G.6, решение владельца) | 42–46,5 до питча | 8,4–9,3 |
 
 10. **Главные риски:**
     - порт editor-core (оценка 11–14 дней — самая ненадёжная);
@@ -47,7 +48,7 @@
 | Пакет | Ответственность | Контракт |
 |---|---|---|
 | `packages/runtime` → `@pix3/runtime` | движок (62,6k) | API без изменений. Удаляются player-шаблоны `src/main.ts`, `register-project-scripts.ts`, `virtual-modules.d.ts` (исключены в `tsconfig.json`, это не API) — они переезжают в плагин. `engines` → `>=20.19`. Сеть остаётся. `three` закрепляется `~0.183` (API `TransformControls` менялся) |
-| `packages/cli` → `@pix3/cli` | `validate`, `check`, `smoke`, `tree`, `sfx`, `kit` (+ `--migrate`), `character-compile`, `editor`, `agent-setup` | Удаляются `serve/` (4,8k; маршруты переезжают в плагин), `workspace-agent/`, `mcp*.ts`, `link-server.ts`, `ack`, `new`. **Гейт версий:** `smoke`/`check` сверяют свой забандленный runtime (`scripts/build-smoke.mjs`) с `node_modules/@pix3/runtime` проекта, иначе `E_RUNTIME_VERSION` |
+| `packages/cli` → `@pix3/cli` | `validate`, `check`, `smoke`, `tree`, `sfx`, `kit` (+ `--migrate`), `character-compile`, `editor`, `agent-setup` | Удаляются `serve/` (маршруты → плагин), `workspace-agent/`, `mcp*.ts`, `link-server.ts`, `ack`, `new`. **Гейт версий:** `smoke`/`check` сверяют свой забандленный runtime (`scripts/build-smoke.mjs`) с `node_modules/@pix3/runtime` проекта, иначе `E_RUNTIME_VERSION` |
 | `packages/vite-plugin` → `@pix3/vite-plugin` | dev-middleware, редактор, sync, virtual-модули, build; подпуть `./player` | `pix3({ resRoot='.', editor=true, build='html'\|'zip'\|false, compress=false, allowRemote=false })`. Virtual-модули `virtual:runtime-{embedded-assets,spine,postprocessing,network}` (имена сохранены, при `build:false` **не объявляются** — DeepCore объявляет свои), `virtual:pix3/{scene-manifest,project-scripts,editor-host,editor-scripts,spine-loader}`. HTTP `/__pix3/api/*`. События `pix3:*` |
 | `packages/editor-core` → `@pix3/editor-core` | Lit-редактор, prebuilt ESM `dist/` | `mountEditor(el, host: EditorHost)`, `EditorHost = {files, events, sync, scripts, build?, openInEditor?, info}`. В `dist/`: `optimize-deps.json` (все bare-подпути externals), ассеты редактора, `THIRD_PARTY_NOTICES` |
 | `packages/create-pix3` → `create-pix3` | `npm create pix3@latest <dir> -- --template <id> --yes` | шаблоны (с историей) и kit, код бандлится внутрь |
@@ -160,7 +161,7 @@ Environment API (RC) не используется. Под Vite 8 опции и�
   - `.pix3/dev.json` `{url, editorUrl, port, pid, versions}` пишется на `listening` и удаляется на `close`;
   - строка `Pix3 editor: …/__pix3/` в stdout;
   - `/__open-in-editor` (встроен в Vite) заменяет Monaco.
-- **Ключи генерации картинок** хранятся в `~/.pix3/keys.json` (0600) и подставляются прокси плагина `/__pix3/api/proxy/{gemini,openai}`. В localStorage их нет: origin = порт, а порт в разные дни достаётся разным проектам, и код игры на том же origin прочитал бы ключ. Ключи состояния UI префиксуются `projectId`. Если песочница не даёт писать в `~` (S3), ключи лежат в `.pix3/local/keys.json` (gitignore).
+- **Ключи генерации картинок** — в `~/.pix3/keys.json` (0600), подставляются прокси плагина `/__pix3/api/proxy/{gemini,openai}`; в localStorage их нет (origin = порт, его делят проекты и код игры). Ключи UI-состояния префиксуются `projectId`. Если песочница не даёт писать в `~` (S3) — `.pix3/local/keys.json` (gitignore).
 
 ### B.2 Один экземпляр runtime, скрипты, `full-reload`
 
@@ -187,7 +188,7 @@ Environment API (RC) не используется. Под Vite 8 опции и�
   - **Контракт Б.** Vite инжектирует импорт `/@vite/client` в любой модуль с `import.meta.hot` (включая `import.meta.hot?.accept`) или CSS-импортом. Модули, достижимые из корней редактора, не должны их содержать: плагин не дописывает `accept` в цепочку редактора, `check` предупреждает о `import.meta.hot`/CSS в скриптах, страница редактора проверяет отсутствие клиента при загрузке.
   - Свежесть вложенных импортов обеспечивает только барьер B.3; одна серверная инвалидация не помогает.
 
-**Выбор:** (Б), если S1 подтверждает свежесть вложенных модулей через барьер B.3, включая контрпример с задержанным watcher'ом. Иначе (А) + восстановление UI и черновика (C.1).
+**Выбор: (А) по умолчанию.** `transformIndexHtml` сам инжектирует `/@vite/client` (B.1), поэтому Б требует обходить его и хрупок. Б — опция, только если S1 покажет, что она дешева и барьер B.3 держит контрпример с задержанным watcher'ом. При А — восстановление UI и черновика (C.1) после reload страницы.
 
 **Удаляется:**
 - `ScriptCompilerService` (712), `ProjectDiagnosticsService` (337), `MonacoIntelliSenseService`, `CodeDocumentService`, `ui/code-editor`; `ProjectScriptLoaderService` 944 → ~200;
@@ -247,22 +248,12 @@ Environment API (RC) не используется. Под Vite 8 опции и�
 
    Оценка — 1 день, P2. В P1 минимальный build стрипает, только если ни одна зависимость не объявляет `@pix3/runtime`. `strip: false` — для чужих entry.
 3. Virtual spine/postprocessing/network импортируются **статически**.
-4. **Сцены как документы при сборке — P2 (2,5–3 дня + спек), можно отложить за P4.**
+4. **Сцены как документы при сборке — P2 (3 дня), можно отложить за P4.** Сейчас player читает сцену текстом (`SceneRunner.ts:444-448` → `parseScene`), префабы тоже, а `SceneLoader.ts:1,302` статически импортирует `yaml`, поэтому `load`-хук на файлы сцен ничего не даёт (`.pix3anim` уже `JSON.parse`, `AssetLoader.ts:380`). Путь:
+   - `SceneLoader` → `parseSceneText(text) → SavedSceneDocument` (отдельный модуль с `yaml`) + `buildGraph(document)`; `parseScene` остаётся обёрткой (аддитивно);
+   - `virtual:pix3/scene-documents` — JSON-документы для entry, целей `changeScene` и вложенных префабов; `SceneManager` берёт документ из map;
+   - `parseSceneText` стабится, когда сборка поставляет документы.
 
-   Сегодня player читает сцену **текстом**: `SceneRunner.loadAndStartScene` → `readText` → `parseScene(text)` (`SceneRunner.ts:444-448`), так же идут префабы. `SceneLoader.ts:1` статически импортирует `yaml` и вызывает `parse` (`:302`). Поэтому `load`-хук на файлы сцен сам по себе ничего не даёт. `.pix3anim` уже читается через `JSON.parse` (`AssetLoader.ts:380`), `pix3project.yaml` плагин читает при сборке.
-
-   Настоящий путь:
-   - (а) `SceneLoader` разделяется на `parseSceneText(text) → SavedSceneDocument` (отдельный модуль с импортом `yaml`) и `buildGraph(document)`. `parseScene(text)` остаётся обёрткой — это аддитивное изменение, публичный API сохраняется;
-   - (б) `virtual:pix3/scene-documents` — map `path → SavedSceneDocument` в JSON для entry, целей `changeScene` и всех вложенных префабов, построенная при `vite build`;
-   - (в) `ResourceManager`/`SceneManager` берут документ из map, если он там есть;
-   - (г) модуль `parseSceneText` добавляется в таблицу strip и стабится, когда сборка поставляет документы. В итоге `yaml` остаётся импортом только редактора и `validate`.
-
-   **Гейт:**
-   - в составе bundle (`generateBundle`, список модулей) нет `yaml`;
-   - загружаются entry, сцена через `changeScene` и вложенный префаб;
-   - в отчёте строка «yaml: −N KiB».
-
-   Если выигрыш <15 KiB gzip — перенос за P4.
+   Гейт: в bundle нет `yaml`; грузятся entry, `changeScene` и вложенный префаб; в отчёте «yaml: −N KiB». Выигрыш <15 KiB gzip → за P4.
 5. Single-file:
    - P1 — `vite-plugin-singlefile` (2.3.3, peer `vite ^5…^8`) + порт DeepCore `classicScriptCompatibilityPlugin`;
    - P2 — `compress` (порт `renderCompressedHtmlDocument`, `PlayableHtmlBuildService.ts:1054`) и `dist/<name>.report.json`.
@@ -272,7 +263,7 @@ Environment API (RC) не используется. Под Vite 8 опции и�
 - **Экспорт «npm-проект» не делается:** проект и так npm-проект. Подтверждение владельца — в H.
 - WebP-перекодирование (сейчас canvas, `:825`) — только optional `sharp`, P2+.
 
-**Из UI:** `POST /__pix3/api/build` → flush редактора → `process.execPath node_modules/vite/bin/vite.js build` (не `vite.cmd`: на Windows это EINVAL) → прогресс `pix3:build`. **`npm run build` из терминала:** `buildStart` плагина читает `.pix3/dev.json`. Если там живой dev-сервер с подключённым редактором, сначала `POST /__pix3/api/flush` (ожидание до 15 с, при жесте — повтор, затем ошибка `E_EDITOR_UNSYNCED`, `--no-sync` пропускает). В CI без редактора — обычная сборка с диска. То же делают `pix3 check` и `pix3 smoke`.
+**Из UI:** `POST /__pix3/api/build` → flush редактора → `process.execPath node_modules/vite/bin/vite.js build` (не `vite.cmd`: на Windows это EINVAL) → прогресс `pix3:build`. **`npm run build`, `pix3 check`, `pix3 smoke`:** если `.pix3/dev.json` указывает на живой dev-сервер с редактором, сначала `POST /__pix3/api/flush` (до 15 с, иначе `E_EDITOR_UNSYNCED`; `--no-sync` пропускает). В CI без редактора — сборка с диска.
 
 **Проверка артефакта** в трёх контекстах:
 1. `vite preview` во вкладке CDP: `__PIX3_PLAYER__.frames>0`, ошибок нет;
@@ -294,7 +285,7 @@ Environment API (RC) не используется. Под Vite 8 опции и�
 
 **TSX/JSX отклонён.** Сцена стала бы кодом: правку инспектора для не-литерала некуда записать, и теряется «данность» (валидация без исполнения, стабильные id, `tree`, хеши для sync, диффы).
 
-**Правило пересмотра.** Контракт формата — документ `SavedSceneDocument` (`SceneSaver.ts:45`; `serializeSceneDocument`, `:68`), а не живой `SceneGraph`, который возвращает `parseScene` (`SceneLoader.ts:338-344`). Тип `SceneDocument` загрузчика сводится к нему при разделении B.6.4. Вариант `.pix3scene.json` = `JSON.stringify(SavedSceneDocument)` появляется, только если `.pix3/gaps.jsonl` покажет боль с YAML на примерах. Тогда дешёвый путь — JSONC через `jsonc-parser.modify`.
+**Правило пересмотра.** Контракт формата — `SavedSceneDocument` (`SceneSaver.ts:45,68`), а не живой `SceneGraph` из `parseScene`; `SceneDocument` загрузчика сводится к нему в B.6.4. `.pix3scene.json` появляется, только если `.pix3/gaps.jsonl` покажет боль с YAML на примерах; дешёвый путь — JSONC через `jsonc-parser.modify`. `modify` тоже адресует массивы по индексу, поэтому слой «id узла → узел документа» из `ScenePatchWriter` нужен в любом формате: JSONC меняет только нижний слой записи.
 
 ### C.1 Модель правки
 
@@ -366,7 +357,7 @@ Fallback — полная сериализация с предупреждени
 
 **Затирание по устаревшему чтению.** Если E возвращает ключи последнего flush к значениям до него, — тост «Агент перезаписал вашу правку X [Вернуть]». Правило kit: начинать с успешного `pix3_sync`. Это регрессия относительно protected set: ловится только последний flush.
 
-**Две вкладки** — два писателя под `If-Match` плюс предупреждение через `BroadcastChannel`.
+**Две вкладки — Web Locks** (~50 строк). `navigator.locks.request('pix3:write:<projectId>')`: первая вкладка — писатель, остальные read-only с баннером и кнопкой «Перехватить управление». Перехват — `steal`; прежняя вкладка становится read-only и больше ничего не пишет. Это исключает пинг-понг 412 → слияние → очистка истории между двумя вкладками. `If-Match` остаётся страховкой для другого браузера или профиля.
 
 **Смерть dev-сервера:** баннер, правки продолжаются в памяти и в IndexedDB-черновике. После `npm run editor` — flush (или предложение черновика, если страница перезагрузилась).
 
@@ -414,7 +405,8 @@ Fallback — полная сериализация с предупреждени
 - с `--categoryExperimentalThirdParty=true` доступны `list_3p_developer_tools` / `execute_3p_developer_tool {toolName, params: JSON-строка}`;
 - страница отвечает на событие `devtoolstooldiscovery` через `event.respondWith({name, description, tools:[{name, description, inputSchema, execute}]})` (`McpPage.js:219-305`);
 - параметры проверяются ajv по `inputSchema`;
-- список обновляется при `list_3p_developer_tools`/`select_page`. После перезагрузки страницы `window.__dtmcp` пропадает, поэтому kit требует повторный `list_3p_developer_tools`.
+- это два обычных статических MCP-инструмента. Инструменты страницы в MCP `tools/list` не попадают: их список агент получает вызовом `list_3p_developer_tools`. После перезагрузки страницы `window.__dtmcp` пропадает, поэтому kit требует `list_3p_developer_tools` **после каждого `select_page` и после любой перезагрузки страницы**;
+- `params` — JSON-**строка**, которую `execute_3p_developer_tool` разбирает `JSON.parse` (`thirdPartyDeveloper.js:50`): модель экранирует JSON внутри строки. Доля ошибок экранирования измеряется в S4.
 
 **Решение.** `__PIX3_DEBUG__` v1 регистрирует группу `pix3`:
 
@@ -466,6 +458,8 @@ Fallback — полная сериализация с предупреждени
    - macOS: `open -na "Google Chrome" --args …` — LaunchServices выводит Chrome из-под seatbelt.
    - Профиль: `~/.pix3/chrome`, если Chrome запущен вне песочницы; иначе `$TMPDIR/pix3-chrome` (S3).
    - Chrome ≥136 требует отдельный профиль.
+   - **Проверка 9333.** Перед запуском `GET /json/version`, затем проверка, что это наш профиль: в `/json/list` есть страница-маркер `/__pix3/` или `--user-data-dir` процесса совпадает. Чужой или мёртвый процесс на 9333 → пробуются 9334–9339, `agent-setup --repair` переписывает `--browserUrl` в MCP-конфиге, печатается диагностика «9333 занят процессом X; используем 9335; перезапустите тред агента».
+   - **Несколько проектов — не коллизия.** Все они делят один профиль и один порт: второй проект открывается новым app-окном (повторный `--app`) в том же Chrome, а D.3 различает проекты по порту Vite в URL.
 3. При `SSH_CONNECTION` Chrome не запускается (E.3).
 
 **Keepalive остаётся.** `isDocumentActive = visible && hasFocus` (`page-activity.ts:16-20`), то есть редактор ставит паузу, как только дизайнер переключился в Codex. Флаги Chrome этого не меняют, а свёрнутое окно не даёт rAF. Сохраняются:
@@ -475,19 +469,9 @@ Fallback — полная сериализация с предупреждени
 
 ### D.5 Безопасность — прокси обязателен
 
-**Без прокси.** 9333 слушает только loopback. Web-страницы не подключатся (проверка Host, WS без `--remote-allow-origins`). Любой локальный процесс пользователя — подключится. Профиль пустой, ключей в нём нет (B.1).
+**Без прокси** 9333 слушает только loopback; web-страницы не подключатся (проверка Host, WS без `--remote-allow-origins`), любой локальный процесс пользователя — подключится. Профиль пустой, ключей в нём нет (B.1).
 
-**Прокси (P2, 1,5 дня, безусловно):**
-- `pix3 editor` владеет Chrome через `--remote-debugging-pipe` и выставляет `ws://127.0.0.1:9333/pix3` с `Authorization: Bearer <token>`;
-- MCP-запись: `--wsEndpoint` + `--wsHeaders`;
-- CDP id ремапятся между клиентами;
-- токен хранится в `~/.pix3/cdp-token` (0600) и пишется в MCP-конфиг через `agent-setup`.
-
-**Обязателен:**
-- (1) до любого stranger-теста на корпоративном ноутбуке;
-- (2) для Remote SSH: `RemoteForward` слушает loopback **удалённого** хоста, доступный всем его пользователям. Без прокси это полный CDP к локальному Chrome, включая `file://`.
-
-Igor'ев dogfood до P2 — только локально. Вопрос «приемлем ли неаутентифицированный 9333 на пилоте» задаётся ИБ MY.GAMES в S6.
+**Прокси (P2, 1,5 дня, безусловно):** `pix3 editor` владеет Chrome через `--remote-debugging-pipe` и выставляет `ws://127.0.0.1:9333/pix3` с `Authorization: Bearer`; MCP — `--wsEndpoint` + `--wsHeaders`; CDP id ремапятся; токен в `~/.pix3/cdp-token` (0600), в конфиг его пишет `agent-setup`. **Обязателен** до любого stranger-теста на корпоративном ноутбуке и для Remote SSH (`RemoteForward` слушает loopback удалённого хоста, доступный всем его пользователям: это полный CDP к локальному Chrome, включая `file://`). Dogfood Igor'я до P2 — только локально; позиция ИБ MY.GAMES — в S6.
 
 ### D.6 Разовая настройка
 
@@ -542,7 +526,7 @@ Vite и Claude Code — на удалённой машине, VS Code пробр
 | `services/project` (7,7k) | `ProjectService` → ~1 100 (бут из `host.info`); `ProjectStorageService` → ~250. DROP `FileSystemAPI`, `BrowserProjectStorage`, `LocalSync`, `ProjectLifecycle`, `ProjectHome`, `ProjectTemplate`, `FileWatch`; `ProjectSync` → sync |
 | `project/{workspace,coauthoring,external-merge,autosave}` | C.5 |
 | `services/image-gen` (5,9k) | Gemini/OpenAI через прокси; `image-ops.ts` → `core/` |
-| `features/*` (~19,9k) | KEEP `scene`, `properties`, `scripts`, `viewport`, `alignment`, `selection`, `localization`, `animation-timeline`, `peek`, `effects`, `window`. `editor` — без `Open{AgentChat,ModelLab,SpriteEditor,UiKitForge,ProjectHome}`, `SwitchWorkspaceMode`. `project` — без Connect, InstallAgentKit, OpenProjectSync, StartRemotePreview, MoveProjectToFolder, NewProject, BuildProject. DROP `flow`, `uikit`, `library`, `render` |
+| `features/*` (~19,9k) | KEEP `scene`, `properties`, `scripts`, `viewport`, `alignment`, `selection`, `localization`, `animation-timeline`, `peek`, `effects`, `window`. `editor` и `project` — без команд вырезанных областей (Open*, SwitchWorkspaceMode, Connect, InstallAgentKit, ProjectSync, RemotePreview, MoveProjectToFolder, NewProject, BuildProject). DROP `flow`, `uikit`, `library`, `render` |
 | `core`, `fw`, `state` | минус `agent-eval`, `dev-backend`, `tool-routes`, `remote-preview/`, `net-kind-paths`, `runtime-import-map`, `lazy-rapier`; срезы state collaboration/auth/workspaceMode/flowAutopilot |
 | `LayoutManager` (1 368) | 10 панелей + History |
 | `pix3-editor-shell.ts` (2 158) | REWRITE ~800 |
@@ -600,9 +584,9 @@ B.2 rev 4 построчно, плюс:
 | # | Что | Pass | Fail → |
 |---|---|---|---|
 | **W** | **Walking skeleton** (2,5 дня; маршруты остаются в P1). Плагин монтирует портированные маршруты `serve/` и отдаёт на `/__pix3/` сборку `pix3-full` (`--base /__pix3/`, мост включён в prod флагом) с бэкендом `workspace` | правка в скелете = байты на диске, Codex её видит | — |
-| S1 | **Один экземпляр, reload, барьер** (2,5 дня). Заглушка-библиотека (~150 строк: externals runtime/three, `instanceof`, перезагрузка скрипта) и runtime ставятся **из `npm pack`** (workspaces-ссылки Vite не пред-бандлит). Два проекта: шаблонный и **DeepCore-образный** (свой entry, alias three). Vite 7 и 8. Варианты X/Y × А/Б. **Контрпример:** `entry → middle → leaf`, watcher задержан на 2 с, `leaf` изменён, сразу `sync` | `instanceof` в обе стороны; нет «new dependencies optimized»; без reload редактора при открытой `/`; **в контрпримере исполненное значение `leaf` новое к моменту ответа `waitForSync`**; в Б на странице нет `/@vite/client`; TTI B.2 | план C (3–4 дня); барьер не достигнут → только вариант А с подтверждением accept-callback |
+| S1 | **Один экземпляр, reload, барьер** (2,5 дня). Заглушка-библиотека (~150 строк) и runtime ставятся **из `npm pack`** (workspaces-ссылки Vite не пред-бандлит). Два проекта: шаблонный и **DeepCore-образный** (свой entry, alias three). Vite 7 и 8. Варианты X/Y × А/Б. **Контрпример:** `entry → middle → leaf`, watcher задержан на 2 с, `leaf` изменён, сразу `sync` | `instanceof` в обе стороны; нет «new dependencies optimized»; без reload редактора при открытой `/`; **в контрпримере исполненное значение `leaf` новое к моменту ответа `waitForSync`**; в Б на странице нет `/@vite/client`; TTI B.2 | план C (3–4 дня); барьер не достигнут → А с подтверждением accept-callback |
 | S3 | **Песочница Codex** (1,5 дня, macOS + Windows): listen порта Vite, spawn Chrome (`open -na` на macOS), запись профиля вне workspace, выживание Vite и Chrome после закрытия треда и рестарта приложения, сеть `npm create`/`install`, чтение AGENTS.md подкаталога | всё живёт, одобрений ≤3 | процессы умирают с тредом → `npm run editor` в начале каждого треда (kit); нет listen → редактор только у инженеров, пересмотр E.1 до P1 |
-| S4 | **CDP-транспорт** (1,5 дня) на **существующем** мосте через скелет. 3p-группа поверх текущих методов против inline-JS. Сценарии S1–S3 из `.plans/done/agent-eval-scenarios.md`; lane — по историческим замерам этого файла | ≥90 % с первой попытки, время и токены ±20 % | D.2 |
+| S4 | **CDP-транспорт** (1,5 дня) на **существующем** мосте через скелет. 3p-группа против inline-JS на сценариях S1–S3 `.plans/done/agent-eval-scenarios.md` (lane — исторические замеры). Отдельно считается **доля ошибок экранирования `params`** (JSON в строке) | ≥90 % с первой попытки, время и токены ±20 %, ошибок экранирования ≤5 % вызовов | ошибок экранирования >5 % → **inline `evaluate_script` — основной путь**, 3p — опция; общий порог провален → D.2 |
 | S12 | **Патч и нормализация** (1 день): прототип `ScenePatchWriter` + `norm` на одном шаблоне и одном экземпляре префаба | flush одной правки → ≤3 строк, комментарии целы; опущенный дефолт (`Group2D.width`) не даёт ложного внешнего изменения | полная сериализация + идемпотентный saver, потеря комментариев шаблонов принимается письменно |
 | S6 | не код: Node/Chrome на ноутбуках, npm-прокси, ключ картинок, позиция ИБ по CDP | ответы записаны | — |
 
@@ -613,7 +597,7 @@ B.2 rev 4 построчно, плюс:
 - S10 — SSH (после прокси);
 - S11 — `smoke`/`check` с typescript проекта.
 
-### G.2 P1 → `2.0.0-alpha.1` (45–49,5 дня)
+### G.2 P1 → `2.0.0-alpha.1` (46–50,5 дня)
 
 | Работа | Дни |
 |---|---|
@@ -621,14 +605,14 @@ B.2 rev 4 построчно, плюс:
 | Плагин dev (без маршрутов из W): sync-барьер с HMR-распространением и подтверждением (B.3), `/api/flush` + flush в `buildStart`/`check`/`smoke`, транзитивный набор, WS/события, `dev.json`, гейт, virtual, ассеты, `optimize-deps`, spine-loader | 4,5 |
 | Порт editor-core с отложенными тримами (F.3); история и `OperationService` переносятся как есть | 10,5–13,5 |
 | Скрипты и bot-политики через Vite | 2 |
-| Файлы как истина: `FlushService` — простой, верхняя граница, Ctrl+S, play/build, sync (1,5); черновик IndexedDB (0,5); `ScenePatchWriter` + `norm` + снимок в полёте + идемпотентность (3,5); слияние дельты и затирание (2); changeset-tx + восстановление (1,5); журнал для History (1) | 9,5–11 |
+| Файлы как истина: `FlushService` — простой, верхняя граница, Ctrl+S, play/build, sync (1,5); черновик IndexedDB (0,5); `ScenePatchWriter` + `norm` + снимок в полёте + идемпотентность (3,5); слияние дельты и затирание (2); Web Locks (0,5); changeset-tx + восстановление (1,5); журнал для History (1) | 10–11,5 |
 | **Гейт записи/undo/sync** (ниже), интеграционные тесты плагина и редактора | 2,5 |
 | `create-pix3` + 4 рецепта (`tapper-2d`, `bouncer-2d`, `blank-2d`, `grid-3d`; `arena-2d` после MVP) | 2,5 |
-| Мост v1, 3p, inline-fallback, `pix3 editor`, `agent-setup`, keepalive | 4 |
+| Мост v1, 3p, inline-fallback, `pix3 editor` с проверкой 9333, `agent-setup --repair`, keepalive | 4,5 |
 | Kit: `.pix3anim`, `character-compile`, `kit --migrate`, гейт версий CLI | 2,5 |
 | Минимальный build: singlefile, скан всех исходников, strip с защитой importer'ов | 2 |
 | Итерации с Codex | 2 |
-| **Сумма** | **45–49,5** |
+| **Сумма** | **46–50,5** |
 
 **Гейт P1 — до dogfood.** Доказательства независимы от моста:
 
@@ -649,6 +633,7 @@ B.2 rev 4 построчно, плюс:
 | N6: ошибка второго rename / kill между rename | оба файла в old **или** оба в new, одно групповое событие |
 | N4: контрпример S1 на реальном проекте | исполненное значение вложенного модуля новое к ответу sync; не-ok при play |
 | Правка скрипта при открытой `/` | поле в инспекторе, редактор не перезагружен |
+| Две вкладки, правка во второй | вторая read-only с баннером; ни одного 412; история первой цела; «Перехватить» передаёт запись |
 | N9: закрыть окно с несохранённым после подтверждённого checkpoint'а → `npm run editor` | предложен черновик этого checkpoint'а и записан; при изменённом диске — `rejected-draft` |
 | Play агента → правка файла → sync | `stale, playing:'agent'` → `pix3_play restart` → sync ok, новое значение в живой сцене |
 | Play дизайнера → sync | `stale, playing:'designer'`; play не остановлен; `stop` с `force` отклонён |
@@ -691,7 +676,7 @@ B.2 rev 4 построчно, плюс:
 - исходы (а)/(б)/(в) и kill-условия.
 
 **Отличия:**
-1. Журнал пробелов — `.pix3/gaps.jsonl` плюс запросы агента к отсутствующему.
+1. Пробелы — `.pix3/gaps.jsonl` и запросы агента к отсутствующему.
 2. **До старта** в протокол как онбординг записываются одобрения песочницы, `agent-setup` и «новый тред». Число одобрений считается отдельно.
 3. В (в) отдельно учитываются `npm install` и первый запуск.
 
@@ -710,17 +695,17 @@ B.2 rev 4 построчно, плюс:
 | | min | max |
 |---|---|---|
 | P0 | 8,5 | 9,5 |
-| P1 | 45 | 49,5 |
+| P1 | 46 | 50,5 |
 | P2 | 18,5 | 23 |
 | P3 | 10 | 10 |
 | P4 | 1 | 2 |
-| **Итого** | **83** | **94** |
+| **Итого** | **84** | **95** |
 
-- 83–94 / 5 = **16,6–18,8 недели**.
-- C2 в конце P2 (−3): 80–91 = **16–18,2 недели**.
-- Плюс B.6.4 за P4 (ещё −3): 77–88 = 15,4–17,6 недели.
+- 84–95 / 5 = **16,8–19 недель**.
+- C2 в конце P2 (−3): 81–92 = **16,2–18,4 недели**.
+- Плюс B.6.4 за P4 (ещё −3): 78–89 = 15,6–17,8 недели.
 
-**Изменение к rev 4: +2,5 дня** — черновик IndexedDB и верхняя граница flush +0,5, flush перед CLI/build +0,5, гейт N8–N10 +0,5, N11 +1. Слияние дельты не дороже повтора операций.
+Rev 5.2 добавила 1 день: Web Locks и проверка 9333.
 
 **Кратчайший путь до dogfood `alpha.1` (C1 Igor'я)** — выбор владельца:
 
@@ -739,12 +724,20 @@ B.2 rev 4 построчно, плюс:
 
 Гейт P1, flush по sync/build, черновик и changeset-tx **не режутся**.
 
-**Расчёт:** P1-кратчайший = 45–49,5 − 9,5 + 1 (маршруты W) = 36,5–41. **Итого 4,5 + 36,5–41 = 41–45,5 дня (8,2–9,1 недели) до C1.** Срезанное возвращается в P2 (+~9,5 дня).
+**Расчёт:** P1-кратчайший = 46–50,5 − 9,5 + 1 (маршруты W) = 37,5–42. **Итого 4,5 + 37,5–42 = 42–46,5 дня (8,4–9,3 недели) до C1.** Срезанное возвращается в P2 (+~9,5 дня).
+
+**Третий вариант — «питч на dogfood» (решение владельца, план не выбирает).** Питч MY.GAMES на dogfood-альфе по кратчайшему пути (8,4–9,3 недели): C1 Igor'я, записанное демо, измеренные цифры (время до играбельного, токены, размер playable, число вмешательств). Stranger-тест и P2 становятся следующей, уже профинансированной фазой.
+- **Сохраняет:** доказательство формы продукта и адекватности прототипа на одном концепте; реальный playable; честные замеры инструмента.
+- **Теряет:** исход (а) — свидетельства самостоятельности дизайнера нет вовсе; время есть только для Igor'я, верхней границы результата, а не для целевого пользователя; (б) измерен на одном концепте вместо трёх; прокси CDP, полный экспорт и Windows ещё не сделаны, поэтому демо — только на машине Igor'я.
 
 ## H. Риски и открытые вопросы
 
 | Риск | Снятие |
 |---|---|
+| 9333 занят чужим или мёртвым процессом | проверка `/json/version` и профиля, 9334–9339, `agent-setup --repair`, диагностика (D.4); несколько проектов делят один профиль — не коллизия |
+| Ошибки экранирования `params` в 3p | замер в S4; >5 % → inline `evaluate_script` основной путь |
+| Две вкладки одного проекта | Web Locks, read-only + «Перехватить»; `If-Match` — страховка |
+| Сроки длиннее окна внимания стейкхолдеров (6–8 недель) | вариант «питч на dogfood» (G.6) — решение владельца |
 | Порт > 14 дней; Codex-процессы, пауза без фокуса (S3, D.4) | бут + viewport + inspector + commit первыми; тримы F.3 отложены; knip-отчёт до копирования |
 | 3p-флаг удалён или переименован | версия закреплена; inline-fallback; WebMCP как преемник; S4 на каждом обновлении |
 | Гонка `sync`, устаревшие вложенные модули, два экземпляра runtime | барьер B.3 (`reloadModule` проверен ревью 3 на Vite 7.3.2); S1 на `npm pack` с контрпримером; план C |
@@ -782,51 +775,26 @@ B.2 rev 4 построчно, плюс:
 
 ## J. Журнал ревью
 
-**Ревью 1** (изолированный рецензент + координатор; ключевое проверено по коду и tarball)
+Полные тексты — `.plans/pix3-core-review.md`.
+
+| Ревью | Главное | Итог | Где |
+|---|---|---|---|
+| 1 (рецензент + координатор) | R1 нет `sourcePath`; R2 гонка sync; R3 P0 зависит от P1; R4 `full-reload`, three, Spine, ассеты; R5–R7 saver, затирание, повтор; R8–R14 песочница, keepalive, швы, сборка, SSH, сроки, docs | приняты; **частично отклонено**: lane в S4 — по историческим замерам; **до решения владельца**: экспорт «npm-проект» | A–G |
+| 2 (Codex, rev 2.1) | N1 drag, N2 представления, N3 undo, N4 барьер, N5 структура, N6 атомарность, N7 `yaml` в player | приняты; N1/N3 закрыты write-behind | B.2–B.6, C |
+| Владелец | смена формата сцен (JSON/TSX) — **отклонено**; write-behind вместо коммита на жест — **принято** | | C.0, C |
+| 3 (Codex, rev 4) | N8 дельта состояния, N9 черновик IndexedDB, N10 sync до чтения и сборки, N11 barrel-импорты | приняты | B.3, B.6, C, E.1 |
+| 4 (Codex, rev 5) | цикл sync при play; гарантия черновика | приняты: владелец play в `stale`; последний подтверждённый checkpoint | B.3, C.1 |
+
+**Ревью 5** (Gemini, по rev 5.1; пометки координатора сверены с tarball)
 
 | Замечание | Решение | Где |
 |---|---|---|
-| R1 нет `sourcePath` | 3p-инструменты, inline-fallback, таймаут 300 с | D.1, D.6 |
-| R2 гонка `waitForSync`, play | барьер B.3 (уточнён ревью 2–4) | B.3 |
-| R3 P0 зависит от P1 | `npm pack`-заглушка, walking skeleton, S4 на текущем мосте | G.1 |
-| R4а–г `full-reload`, подпути three, Spine, `/cam.png` | варианты А/Б, `optimize-deps.json`, `spine-loader`, `/__pix3/assets/` | B.1, B.2 |
-| R5 saver переписывает YAML; R6 затирание; R7 повтор жеста | `ScenePatchWriter` от baseline; затирание — регрессия; слияние дельты; changeset-tx | C |
-| R8–R14, рек. 1–9, дополнения координатора | приняты (песочница, keepalive, швы, сборка, прокси, docs, сроки, кратчайший путь, гейты версий, тримы, порог загрузки) | A–G |
-| S4 «сравнить с lane» | **частично отклонено**: lane по историческим замерам, без повторного прогона (экономия ~1 дня) | G.1 |
-| §5.4 экспорт «npm-проект» | **отклонено до решения владельца**: проект уже npm-проект | B.6, H |
-| §5.7 `pix3-full` навсегда на 1.6.3 | принято: при провале (б) возможен переход на 2.x (~1 день) | A.2 |
-| Владелец: смена формата сцен (JSON/TSX) | отклонено; документы при сборке — B.6.4 | B.6, C.0, I |
-
-**Ревью 2** (Codex, по rev 2.1; находки сверены с кодом)
-
-| Замечание | Решение | Где |
-|---|---|---|
-| N1 drag не доходит до диска; N3 undo без идентичности графа | закрыты по построению write-behind (rev 4–5) | C.1–C.3 |
-| N2 разные представления, `serializeToObject` нет | `norm` = `SavedSceneDocument` с дефолтами, патч на AST | C.0, C.2 |
-| N4 инвалидация ≠ барьер | `reloadModule` + подтверждение исполненного; контракт Б; контрпример S1 | B.2, B.3 |
-| N5 структурный конфликт; N6 атомарность changeset | структурная дельта отбрасывается; staging, intent, восстановление | C.3, C.4 |
-| N7 JSON при сборке не убирает `yaml` | разделение `SceneLoader`, `scene-documents`, P2 | B.6 |
-| Прочее: strip, спеки F.1, glob, недели, гейты в P1 | приняты | B, F.1, G |
-
-**Решение владельца после rev 3**
-
-| Решение | Итог | Где |
-|---|---|---|
-| Write-behind вместо коммита на жест | принято; N1/N3 закрыты по построению; история в памяти сохранена | C, B.3, D.1, G.2, G.6 |
-
-**Ревью 3** (Codex, по rev 4). N4 перепроверен рецензентом: `server.reloadModule` на Vite 7.3.2 проставляет `?t=` по всей цепочке. Четыре пробела проверены координатором и мной (`HistoryManager.ts:96-119`, `SaveSceneOperation.ts:103-105,175-178`).
-
-| Замечание | Решение | Где |
-|---|---|---|
-| N8 несохранённое как список операций не определено (undo/redo/coalesce) | принято: `pending` = дельта состояния; слияние по ключам; полная очистка истории после reload, без синтетической записи; снимок flush в полёте и защита dirty-флага; `replay`/`touches` удалены | C.1–C.3, G.2 |
-| N9 `sessionStorage` не переживает закрытие; debounce без границы | принято: черновик в IndexedDB, checkpoint 2 с, верхняя граница flush 10 с; противоречие G.3 исправлено | C.1, C.3, G.3 |
-| N10 flush после чтения; CLI build без flush | принято: цикл «sync → чтение → правка → sync»; не-ok = повтор; flush в `buildStart`/`check`/`smoke`; гарантия на момент успешного sync | B.3, B.6, D.1, E.1, F.5 |
-| N11 strip не видит barrel-импорт | принято: разбор именованных импортов зависимостей в `mentionedNames`, namespace/динамика → strip выключен, страховка в `transform`; 1 день, P2 | B.6, G.3 |
-
-**Ревью 4** (Codex, по rev 5): основное закрыто, P0 можно начинать.
-
-| Замечание | Решение | Где |
-|---|---|---|
-| Цикл sync зацикливается во время play | принято: `stale` с владельцем play; агент перезапускает только свою сессию, play дизайнера не трогает; `force` только для своей; два сценария гейта | B.3, D.1, E.1, F.5, G.2 |
-| «0 потерь при штатном закрытии» не гарантировано (IndexedDB при завершении браузера) | принято: гарантия — последний подтверждённый (`oncomplete`) checkpoint; граница 2 с + текущий жест | C.1, H, G.2 |
+| 9333: зомби, чужой процесс, мультипроектность | **частично**: проверка профиля, 9334–9339, `--repair` возвращены (были потеряны при сжатии rev 2→5); мультипроектность коллизией не является | D.4, H |
+| 3p: рассинхрон через `tools/list` | **отклонено** по механизму: 3p-инструменты не идут через `tools/list`. Принято: `list_3p_developer_tools` после каждого `select_page` и перезагрузки | D.1 |
+| 3p: `params` как JSON-строка | принято: замер ошибок экранирования в S4, порог 5 %, провал → inline основной путь | D.1, G.1 |
+| Вариант Б — иллюзия | **частично**: А по умолчанию, Б — опция по итогу S1 | B.2 |
+| Две вкладки → пинг-понг очистки undo | принято: Web Locks + read-only + перехват; гейт | C.3, G.2 |
+| JSONC решает адресацию «из коробки» | **отклонено**: `modify` тоже адресует по индексу; слой id нужен в любом формате (уточнено C.0) | C.0 |
+| Арт и greenlight | **отклонено** как дубль: плейсхолдеры, форма продюсера, S6 | G.4 |
+| Сроки как организационная угроза | **частично**: добавлен вариант «питч на dogfood» с явными потерями; срезы с потерей комментариев — только для C1; выбор за владельцем | G.6, H |
 | «Принято» в §J ≠ подтверждено экспериментом | принято как оговорка: пункты R1–R14 — решения и спайки, подтверждение — в гейтах | J |
