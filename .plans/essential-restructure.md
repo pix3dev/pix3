@@ -1,45 +1,41 @@
 # Essential: Pix3 как агентный стек (runtime + CLI + kit + редактор как точный инструмент)
 
-Дата: 2026-10-07. Ревизия 3: после ревью 1 и ревью 2 (журнал в §G). Статус: план, P0 можно
-начинать. Позиционирование задано brief и не пересматривается. Утверждения о коде проверены по
-исходникам, путь указан рядом.
+Дата: 2026-10-07, ревизия 4 после ревью 1–3 (журнал в §G). Статус: план, P0 можно начинать.
+Позиционирование задано brief и не пересматривается. Утверждения о коде проверены по исходникам,
+рядом с каждым указан путь.
 
-**Что этот план заменяет в `.plans/external-agent-authoring.md`:**
+**Что заменяется в `.plans/external-agent-authoring.md`:**
 - §1.2 — окно редактора как PWA с `editor.pix3.dev`;
-- §9 — пункт «не заменяем встроенного агента»;
+- §9 — «не заменяем встроенного агента»;
 - §11.1 — FSA-папка и ручной `pix3 serve` как основной путь.
 
-Остальное остаётся в силе: co-authoring, барьер §5 D, `expect`, подтверждение `generate_*`.
+Остальное (co-authoring, `expect`, подтверждение `generate_*`) остаётся в силе.
 
 ## 0. Коротко
 
 1. **Сначала проверяем подход, потом режем.**
-   - Последовательность: P0 спайки → P1a минимальный поток (`2.0.0-alpha.1`, dogfood C1) → P1b
-     надёжность (`alpha.2`) → P3 MVP-тест.
-   - Hosted-сборка уже в P1 ограничена рамками essential: исключённое видно, но недоступно, и каждое
-     обращение пишется как пробел продукта.
-   - Физический carve-out (P2) идёт параллельно в ветке `essential`.
+   - Последовательность: P0 → P1a (`2.0.0-alpha.1`, dogfood C1) → P1b (`alpha.2`) → P3 MVP → P4 решение.
+   - Физический carve-out (P2) делается **после** успешного P4 и даёт `2.0.0`.
+   - До решения на `main` разрешены только бесконфликтные удаления (A.2).
+   - Hosted-сборка уже в P1 ограничена рамками essential. Каждое обращение к исключённому
+     записывается как пробел продукта.
 2. **Поток.**
    - `pix3 setup --write` создаёт глобальную запись MCP.
-   - Процесс `pix3 mcp` хостит workspace-сервер и раздаёт редактор с того же origin.
-   - Ссылка содержит одноразовый `#pair=`.
-   - Если хост умер, редактор переходит в **offline-черновик**. Это новая работа с явным контрактом
-     (C.2b), а не «существующий путь».
-3. **Carve-out.**
-   - Удаляется ~85–90k из ~235k строк `src/`, плюс collab-server и agent-bridge. Около 35
-     файлов-швов.
-   - Подсистема проверки игры (~15k) остаётся и переезжает в `services/game-test/`.
-   - `AgentToolRegistry` заменяется `ChannelToolRegistry`.
-4. **`export_playable`** — барьерный инструмент. Он фиксирует ревизию входов и сам проверяет
-   получившийся HTML, запуская его отдельно от редактора.
-5. **Успех MVP** определяется двумя обязательными исходами: самостоятельность дизайнера и качество
-   прототипа. Время — необязательное бизнес-требование, его владелец задаёт до теста.
-6. **Сроки.**
-   - P0 — 4 дня.
-   - P1a — 8–10 дней.
-   - P1b — 8–12 дней, точнее после спайков S1, S12 и S14.
-   - P3 — ~10 дней.
-   - Итого до решения 6–7 недель. P2 (8–10 дней) укладывается внутрь.
+   - Процесс `pix3 mcp` запускает **отсоединённый workspace-сервер с idle-таймаутом** и работает его
+     клиентом.
+   - Сервер раздаёт редактор с того же origin. Ссылка содержит одноразовый `#pair=`.
+   - Рестарт приложения, закрытие треда и SIGKILL процесса MCP сервер больше не убивают. Для редкой
+     смерти самого сервера есть аварийный путь (C.2b, ~1 день), а не синхронизация черновиков.
+3. **Спайк S15 (CDP-транспорт)** проверяет, может ли Chrome DevTools MCP с
+   `window.__PIX3_DEBUG__` заменить наш agent lane. Если может, lane удаляется до P1a, а
+   `ChannelToolRegistry` не пишется.
+4. **`export_playable`** требует синхронизированных файлов, а не остановленной игры. HTML
+   проверяется в отдельном браузерном контексте.
+5. **Успех MVP** требует двух исходов: самостоятельность дизайнера и адекватность прототипа (арт не
+   оценивается). Время становится обязательным только если владелец заранее запишет такое
+   требование.
+6. **Сроки:** P0 3–4 дня (уровень 1), P1a 9–12, P1b 7–10, P3 ~10, P4 1–2. Это **6–8 недель до
+   решения**, затем P2 8–10 дней до `2.0.0`.
 
 ## A. Стратегия репозитория
 
@@ -47,509 +43,505 @@
 
 | Критерий | A: на месте | B: новый репо |
 |---|---|---|
-| Хирургия ~35 швов (B.2) | нужна | **та же**: копия переносит ту же связность (`AgentToolRegistry.ts:1-158`, eager-агент через `game-tab.ts:10`, `logs-panel.ts:4`, `pix3-status-bar.ts:20-22`, `pix3-welcome.ts:19-25`, `main.ts`) |
-| История | целиком | клон с последующим удалением даёт ту же. `filter-repo --path` её рвёт |
+| Хирургия ~35 швов (B.2; `AgentToolRegistry.ts:1-158`, eager-агент через `game-tab.ts:10`, `logs-panel.ts:4`, `pix3-status-bar.ts:20-22`, `pix3-welcome.ts:19-25`, `main.ts`) | нужна | **та же** |
+| История | целиком | клон с последующим удалением даёт ту же |
 | npm OIDC и provenance | без изменений | перенастройка (минуты) |
-| Один источник runtime и CLI на npm | да | две копии lockstep-линии |
-| DeepCore | берёт `@pix3/runtime` из npm `^1.6.2` (`../DeepCore/package.json:22`). Caret не подтянет 2.0-alpha | то же |
-| Нетронутый 1.x на время теста | через ветку | да |
+| Один источник runtime/CLI на npm | да | две копии lockstep-линии |
+| DeepCore | `@pix3/runtime` из npm `^1.6.2` (`../DeepCore/package.json:22`), 2.0-alpha не подтянет | то же |
 
-### A.2 Решение: один репо, carve-out в ветке `essential`
+### A.2 Решение: один репо, carve-out после решения
 
-- **`main`.** Полный редактор плюс поток P1, hosted-сборка с ограничением (C.3). Отсюда выходят
-  `2.0.0-alpha.N` в dist-tag `next`, а `latest` остаётся 1.6.3.
-- **`essential`** (worktree). Это P2: один коммит на область, `main` регулярно вливается в эту
-  ветку.
-- **Если P4 успешен:**
-  - ставится тег `pix3-full-<версия>`;
-  - `main` переименовывается в `full`, а `essential` — в `main`;
-  - выходит `2.0.0` в `latest`.
-- **Если провал:** `essential` не вливается.
+- **`main`.** Полный редактор и поток P1. Отсюда идут `2.0.0-alpha.N` в `next`; `latest` остаётся 1.6.3.
+- **До P4 на `main` разрешены только бесконфликтные удаления.** Они не трогают швы shell, settings и
+  welcome:
+  - dead `link-server.ts` (512) и `mcp.ts` (129);
+  - `bg-removal` вместе с `@huggingface/transformers` и `onnxruntime-web` — одновременно с переходом
+    на chroma-key в P1b;
+  - `sfx-gen` вместе с `@txt2sfx/*` (×5), потому что `generate_sfx` уходит из канала, а секция SFX
+    исчезает из панели Generate;
+  - `qrcode` (в скрытых карточках online/preview остаётся текстовый URL);
+  - job bridge в `publish-packages.yml`;
+  - `packages/pix3-collab-server` выводится из `workspaces` (скрипт запуска через `--prefix`).
+- **Успех P4.**
+  - Тег `pix3-full-<версия>`, ветка `full` от `main`.
+  - Carve-out P2 (B) делается на `main`, один коммит на область, с гейтом D.4.
+  - Затем `2.0.0` в `latest`.
+- **Провал.** Carve-out не делается вовсе, 8–10 дней не выброшены.
 - **`pix3dev/pix3-platform`** выделяется из `full` только по решению о платформе:
   `git filter-repo --path packages/pix3-collab-server/ --path src/services/{cloud,collab,library}/ --path src/ui/{collab,asset-library}/ --path src/player/ --path player.html`.
 
 ### A.3 CI, публикация, документация
 
-- **`publish-packages.yml`** (стр. 60/108/136, сейчас `npm publish --access public`):
-  - добавить `--tag next`, если в версии есть `-`;
-  - в job cli перед публикацией запускать `npm run build:hosted`, затем проверку архива (C.3);
-  - job bridge в `essential` удаляется.
-- **CI.** Вместо `ci.yml.disabled` — `ci.yml` на `main` и `essential`: lint, type-check, vitest,
-  `build:hosted`, `npm pack` с проверкой содержимого, браузерный гейт (D.4).
-- **Collab-сервер.** После переименования `deploy-collab-server.yml` в `full` запускается по
-  `on: push: branches: [full]`, потому что `workflow_dispatch` работает только из ветки по
-  умолчанию. В `full` разрешены только security-фиксы collab-сервера (F.13).
-- **Kit drift spec** (`packages/pix3-cli/src/kit.spec.ts`):
-  - тест, читающий `AgentToolRegistry.ts` (~стр. 245), удаляется в `essential`;
-  - проверка «ровно 14 инструментов» меняется на новый список;
-  - `engine-api-map.md` переезжает в `packages/pix3-cli/kit-src/`;
-  - `src/core/agent-reference-docs.spec.ts` остаётся, путь в нём правится.
-- **Документация (в `essential`).** Правятся README, AGENTS.md, CLAUDE.md (в том числе неверная
-  строка про yalc у consumer) и спецификация. Удалённые разделы сворачиваются в одну строку
-  «удалено в 2.0, см. `full`». Новых `.md` не появляется.
-- **Чистка дерева.** Только в `full` остаются:
-  - планы `flow-autopilot`, `prompt-to-playable-flow`, `vibe-wow-first-prompt`, agent-eval*;
-  - `.env.development` и `.env.prod-backend`;
-  - скрипты `dev:prod`/`dev:collab*`;
-  - `src/sw.ts`;
-  - записи `knip.json` для удалённых entry.
-- **Skills репозитория.**
-  - `debug-running-game` вызывает `scene_tree`/`create_node` (`SKILL.md:84-91`); переписывается на
-    сокращённый `debug-bridge`.
-  - `generate-sprites-in-editor` удаляется.
-  - Ссылка на Sprite Editor в `pix3-game-dev` правится.
+- **`publish-packages.yml`** (сейчас `npm publish --access public`, стр. 60/108/136): `--tag next`,
+  если в версии есть `-`. Job cli собирает `build:hosted` и проверяет tarball (C.3).
+- **`ci.yml`** вместо `.disabled`: lint, type-check, vitest, `build:hosted`, `npm pack` с проверкой
+  содержимого, браузерный гейт D.4.
+- **Collab-сервер после P2.** В `full` `deploy-collab-server.yml` запускается по
+  `on: push: branches: [full]`, потому что `workflow_dispatch` работает только из ветки по умолчанию.
+  В `full` разрешены только security-фиксы collab (F.13).
+- **Kit drift spec** (`packages/pix3-cli/src/kit.spec.ts`) правится в P2: тест, читающий
+  `AgentToolRegistry.ts` (~стр. 245), удаляется, «14 инструментов» заменяется новым списком,
+  `engine-api-map.md` переносится в `kit-src/`. `src/core/agent-reference-docs.spec.ts` остаётся.
+- **Документация в P2.** README, AGENTS.md, CLAUDE.md (включая неверную строку про yalc у consumer)
+  и спецификация. Удалённые разделы сворачиваются до «удалено в 2.0, см. `full`». Новых `.md` нет.
+- **Чистка дерева в P2.** Планы flow/vibe/agent-eval, `.env.development`, `.env.prod-backend`,
+  `dev:prod`/`dev:collab*`, `src/sw.ts`, лишние записи `knip.json`.
+- **Skills в P2.** `debug-running-game` (`SKILL.md:84-91` вызывает `scene_tree`/`create_node`)
+  переписывается. `generate-sprites-in-editor` удаляется. В `pix3-game-dev` правится ссылка на
+  Sprite Editor.
 
-## B. Essential scope (P2, ветка `essential`)
+## B. Essential scope (P2, после P4)
 
-Статусы: **KEEP** / **TRIM** / **MOVE** — в ядре. **LABS** — удаляется, возвращается только как
-инструмент MCP или глагол CLI. **PLATFORM** — уходит в `pix3-platform`. **FREEZE** — остаётся только
-в `full`. **DELETE** — не возвращается.
+Статусы:
+
+| Статус | Значение |
+|---|---|
+| KEEP / TRIM / MOVE | в ядре |
+| LABS | возвращается только как инструмент MCP или глагол CLI |
+| PLATFORM | уходит в `pix3-platform` |
+| FREEZE | остаётся только в `full` |
+| DELETE | удаляется насовсем |
 
 ### B.1 Каталоги
 
 | Каталог | Строк | Статус |
 |---|---|---|
 | `packages/pix3-runtime` | 62,6k | KEEP, сеть не трогаем (B.5) |
-| `packages/pix3-cli` | 16k | KEEP, растёт. `link-server.ts` (512) и `mcp.ts` (129) — DELETE (у редактора нет клиента) |
-| `packages/pix3-collab-server`, алиасы `@pix3/collab-*` (`vite.config.ts`, `tsconfig.json`, `vitest.config.ts`) | 7,8k | PLATFORM |
+| `packages/pix3-cli` | 16k | KEEP и растёт (C) |
+| `packages/pix3-collab-server`, алиасы `@pix3/collab-*` (vite, tsconfig, vitest) | 7,8k | PLATFORM |
 | `tools/pix3-agent-bridge` | 7,6k | FREEZE |
-| `services/agent` | 26,6k | **MOVE → `services/game-test/`** (~15k, 18 файлов, импорты без llm/flow): `GameTestService`, `GameInputService`, `GameBotHost`, `game-*.ts`, `NodeWatchRecorder`, `ProjectTraceStore`, `reachability-journal`, `nondeterminism-probe`, `key-for-code`, `renderability-note`, `pix3-test-bot-dts`. Остальное — FREEZE. `agent-skills/` до этого переносится в kit (C.5) |
+| `services/agent` | 26,6k | **MOVE → `services/game-test/`** (~15k, без llm/flow): `GameTestService`, `GameInputService`, `GameBotHost`, `game-*.ts`, `NodeWatchRecorder`, `ProjectTraceStore`, `reachability-journal`, `nondeterminism-probe`, `key-for-code`, `renderability-note`, `pix3-test-bot-dts`. Остальное FREEZE (`agent-skills/` переносится в kit в P1, C.5) |
 | `services/{flow,llm}`, `ui/{agent-chat,flow}`, `features/flow`, `src/templates/agent` | ~22k | FREEZE |
-| `services/{cloud,collab,library}`, `ui/{collab,asset-library,auth}`, `features/library`, `LocalSyncService` | ~19k | PLATFORM/FREEZE |
-| online/remote-preview: `services/play/{OnlineSession,PreviewHost,RemotePreviewTelemetry}Service`, `core/remote-preview/`, `src/player/`, `player.html`, карточки во viewport, две команды | ~5k | PLATFORM |
-| `services/model-gen`, `ui/model-lab`, `ui/sprite-editor` (с вкладкой `animation`, `LayoutManager.ts:44-48`), `services/{uikit,uikit-editor}`, `ui/{uikit-forge,tools}`, `src/tools/uikit-forge`, `features/uikit`, `ui/generate`, `services/ao-bake`, `features/render`, `ui/profiler` + `ProfilerSessionService`, `ui/home` + `ProjectHomeService` | ~43k | LABS. `.pix3anim` редактируется как YAML в Monaco |
-| `services/{sfx-gen,bg-removal,strophe}` | ~2,8k | DELETE |
-| `services/image-gen` | 5,9k | TRIM: `AssetGenService`, `Gemini`/`OpenAIImageProvider`, `ImageGenProviderRegistry`, `AiImageSettingsService`, `GenerationHistoryService`, `ImageGenTypes`. `image-ops.ts` **MOVE → `src/core/`** (экспорт, инспектор) |
-| `services/atlas`, локализация (2,6k, связана с play и экспортом) | | KEEP |
-| `services/project/agent-kit`, `InstallAgentKitCommand`, `pix3-agent-handoff-dialog`, `scripts/ensure-agent-kit.mjs` | ~1,3k | DELETE (kit ставит `project_new`) |
-| `services/editor/{WorkspaceMode,StudioViewportMount,UpdateCheck}Service`, `SwitchWorkspaceModeCommand`, `pix3-mode-switch` | | DELETE |
-| `ui/shared` | 12,8k | DELETE: `composer-attachments`, `pix3-image-annotator`, `pix3-project-sync-dialog`, `pix3-save-asset-dialog`, `pix3-animation-auto-slice-dialog`. Остальное KEEP/TRIM |
-| `src/core` | 6,8k | DELETE: `agent-eval`, `dev-backend`, `tool-routes`. `debug-bridge.ts` (1 286) → ~300 строк |
-| ядро редактора: viewport, scene-tree, inspector, assets, code-editor, runtime, logs, timeline; services viewport/play/scene/scripting/assets/editor/core/animation/export; project/{workspace,coauthoring,autosave,external-merge}; `src/templates/projects` | ~80k | KEEP/TRIM. FSA и OPFS остаются без вложений |
-
-Удаляемые зависимости: `@hocuspocus/provider`, `yjs`, `@huggingface/transformers`, `onnxruntime-web`,
-`@txt2sfx/*` ×5, `qrcode`, `vite-plugin-pwa`, `concurrently`.
+| `services/{cloud,collab}`, `services/library` **кроме `character-compiler.ts`**, `ui/{collab,asset-library,auth}`, `features/library`, `LocalSyncService` | ~19k | PLATFORM/FREEZE |
+| `services/library/character-compiler.ts` (342, чистый: зависит только от runtime, `yaml` и `features/scene/animation-asset-utils`, тоже только runtime) | | **MOVE → `packages/pix3-cli/src/character/`** уже в P1 (C.5) |
+| online/remote-preview (`services/play/{OnlineSession,PreviewHost,RemotePreviewTelemetry}Service`, `core/remote-preview/`, `src/player/`, `player.html`, карточки, две команды) | ~5k | PLATFORM |
+| `model-gen`, `ui/model-lab`, `ui/sprite-editor` (с вкладкой `animation`, `LayoutManager.ts:44-48`), `uikit`, `uikit-editor`, `ui/{uikit-forge,tools}`, `src/tools/uikit-forge`, `features/uikit`, `ui/generate`, `ao-bake`, `features/render`, `ui/profiler` + `ProfilerSessionService`, `ui/home` + `ProjectHomeService` | ~43k | LABS |
+| `services/strophe` | 1,2k | DELETE (`bg-removal` и `sfx-gen` удаляются раньше, A.2) |
+| `services/image-gen` | 5,9k | TRIM: `AssetGen`, Gemini/OpenAI, реестр, настройки, история, типы. `image-ops.ts` **MOVE → `src/core/`** |
+| `services/atlas`, локализация | | KEEP (play и экспорт) |
+| `project/agent-kit`, `InstallAgentKitCommand`, `pix3-agent-handoff-dialog`, `ensure-agent-kit.mjs` | ~1,3k | DELETE |
+| `editor/{WorkspaceMode,StudioViewportMount,UpdateCheck}Service`, `SwitchWorkspaceModeCommand`, `pix3-mode-switch` | | DELETE |
+| `ui/shared`: `composer-attachments`, `pix3-image-annotator`, `pix3-project-sync-dialog`, `pix3-save-asset-dialog`, `pix3-animation-auto-slice-dialog` | | DELETE |
+| `src/core`: `agent-eval`, `dev-backend`, `tool-routes` | | DELETE. `debug-bridge.ts` — по итогам S15 (C.5) |
+| ядро редактора (viewport, scene-tree, inspector, assets, code-editor, runtime, logs, timeline; services viewport/play/scene/scripting/assets/editor/core/animation/export; project/{workspace,coauthoring,autosave,external-merge}; `src/templates/projects`) | ~80k | KEEP/TRIM. FSA/OPFS остаются без вложений |
 
 ### B.2 Швы (~35 сохраняемых файлов)
 
-| Файл | Что тянет | Замена |
+| Файл | Тянет | Замена |
 |---|---|---|
-| `atlas/TextureAtlasService.ts:7` | `sha256Hex` из `core/remote-preview/protocol` | `src/core/hash.ts`. `guessMimeType` → `src/core/mime.ts` |
-| `editor/EditorTabService.ts:20,52,439` | `PreviewHostService`. В `pix3.projectTabs:<id>` лежат типы `animation`/`sprite-editor`/`model-lab`/`uikit-forge` | убрать inject. Фильтр неизвестных типов уже есть с P1 (C.3). Сам layout не сохраняется (`LayoutManager.ts:1044`) |
-| `core/LayoutManager.ts:14-34` | 19 панелей, базовый стек — `background` (home) | 10 панелей и `pix3-empty-stage` (сделаны в P1) |
-| `image-gen/AssetGenService.ts:11,238,483-515` | `BackgroundRemovalService` | OpenAI `transparent`. Для Gemini — плоский фон и `chromaKeyImage` (`image-ops.ts:642`). Это регрессия качества, проверяется на 10 спрайтах в P1b |
-| `ImageGenProviderRegistry.ts:4-8,37-39`, `AiImageSettingsService.ts` | Strophe, SvgLlm, Codex, Bridge, `bg-removal/types` | оставить только Gemini и OpenAI |
-| `generate_asset` в `AgentToolRegistry.ts` (~2132) | idea-stage, `references/`, роли (flow) | вырезать при переносе |
-| `ui/viewport/game-tab.ts:10,283`, `logs-view/logs-panel.ts:4,110` | `composeFix`, карточки online/preview | «Copy for agent» (`buildPlayModeErrorPrompt` → clipboard) |
-| `object-inspector/inspector-panel.ts:43-44,61` | `contour-trace` (sprite-editor), `library-inspector` | `contour-trace.ts` **MOVE → `src/core/`**, library убрать |
-| inspector renderers ×2, `scene-tree-panel`, `assets/{asset-tree,assets-content,assets-panel}`, `viewport/editor-tab` | collab presence, `LibraryInsertService`, `GeneratedAssetDropService`, `openInSpriteEditor` (`assets-content.ts:576`) | убрать |
-| `pix3-editor-settings-dialog.ts` (2 455) | llm, agent, model-gen, strophe, bg-removal | остаётся Editor/Viewport. Ключи хранятся в CLI |
-| `pix3-status-bar.ts:10,20-22,32,44` | Bridge, LLM, `dev-backend`, `UpdateCheckService`, `collab-status-bar` | статус workspace, пилюля канала, состояние offline |
-| `pix3-lightbox.ts:9,11` | `markdown-lite`, `pix3-image-annotator` | `markdown-lite` → `ui/shared`, аннотации убрать |
-| `pix3-create-project-dialog.ts`, `ProjectLifecycleService.ts:16-26,86,92-229,307-351` | Auth, CloudProject, `AgentKitService`/`withAgentKit` | убрать. `cli-manifest.spec.ts` теряет часть про agent-kit |
-| `pix3-welcome.ts` (1 197) | cloud, llm, agent, flow | ~250 строк для dev-режима. Hosted-загрузка — из P1 |
-| `pix3-editor-shell.ts` (2 158) | ~17 команд, сервисы Auth/Cloud/LocalSync/AgentKit/WorkspaceMode, flow-shell, collab, uikit-forge, auth | вырезать, в том числе cloud-ветку (~1463-1471) |
-| `main.ts`, `register-runtime-services.ts:3-5` | инициализация LibrarySync и Bridge; collab-регистрации | убрать |
-| `OperationService.ts:24,292-335`, `CommandDispatcher.ts`, `RouterService.ts` | `Y.UndoManager`, collab read-only, `CollabJoinService`, `#uikit` | убрать |
-| `ProjectService.ts:43-44,~406-412,~1236` | Collaboration, `ideaTimeline`, `LocalSyncService` | убрать |
-| `ProjectStorageService.ts:15`, `ProjectScriptLoaderService.ts`, `ViewportRenderService.ts` | `'cloud'`, `ApiClientError`, collab overlay, `workspaceMode` | `'local' \| 'workspace'` |
-| `features/scripts/play-workspace.ts`, `state/{AppState,index}.ts` | срезы `collaboration`/`auth`/`workspaceMode`/`flowAutopilot` | удалить |
-| `WorkspaceAgentToolBridge.ts:281` | `@injectLazy(AgentToolRegistry)` | `ChannelToolRegistry` |
-| `vite.config.ts` | PWA, `player`/`uikitForge`, прокси облака и AI, `__PIX3_DEV_BACKENDS__`, ensure-agent-kit | остаются `/openai-proxy` для dev, rapier, manualChunks, `export-vendor` |
+| `atlas/TextureAtlasService.ts:7` | `sha256Hex` из `core/remote-preview/protocol` | `src/core/hash.ts`; `guessMimeType` → `src/core/mime.ts` |
+| `editor/EditorTabService.ts:20,52,439` | `PreviewHostService`; `pix3.projectTabs` с удаляемыми типами | убрать inject. Фильтр типов есть с P1. Layout не сохраняется (`LayoutManager.ts:1044`) |
+| `core/LayoutManager.ts:14-34` | 19 панелей, базовый стек `background` | 10 панелей и `pix3-empty-stage` (из P1) |
+| `image-gen/AssetGenService.ts:11,238,483-515` | `BackgroundRemovalService` | chroma-key / OpenAI `transparent` (уже в P1b) |
+| `ImageGenProviderRegistry.ts:4-8,37-39`, `AiImageSettingsService.ts` | Strophe, SvgLlm, Codex, Bridge | только Gemini и OpenAI |
+| `game-tab.ts:10,283`, `logs-panel.ts:4,110` | `composeFix`, карточки | «Copy for agent» (clipboard) |
+| `inspector-panel.ts:43-44,61` | `contour-trace`, `library-inspector` | `contour-trace.ts` **MOVE → `src/core/`** |
+| inspector renderers ×2, `scene-tree-panel`, `assets/{asset-tree,assets-content,assets-panel}`, `editor-tab` | collab presence, `LibraryInsertService`, `GeneratedAssetDropService`, `openInSpriteEditor` (`assets-content.ts:576`) | убрать |
+| `pix3-editor-settings-dialog.ts` (2 455) | llm, agent, model-gen, strophe | остаются Editor/Viewport (ключи хранятся в CLI) |
+| `pix3-status-bar.ts:10,20-22,32,44` | Bridge, LLM, `dev-backend`, `UpdateCheck`, collab | workspace, пилюля канала |
+| `pix3-lightbox.ts:9,11` | `markdown-lite`, annotator | `markdown-lite` → `ui/shared` |
+| `pix3-create-project-dialog.ts`, `ProjectLifecycleService.ts:16-26,86,92-229,307-351` | Auth, CloudProject, `withAgentKit` | убрать (`cli-manifest.spec.ts` правится) |
+| `pix3-welcome.ts` (1 197) | cloud, llm, agent, flow | ~250 строк dev-режима |
+| `pix3-editor-shell.ts` (2 158) | ~17 команд, сервисы, flow-shell, collab, forge, auth | вырезать (в том числе cloud-ветку ~1463-1471) |
+| `main.ts`, `register-runtime-services.ts:3-5` | LibrarySync, Bridge, collab-регистрации | убрать |
+| `OperationService.ts:24,292-335`, `CommandDispatcher`, `RouterService` | `Y.UndoManager`, collab, `#uikit` | убрать |
+| `ProjectService.ts:43-44,~406-412,~1236` | Collaboration, `ideaTimeline`, LocalSync | убрать |
+| `ProjectStorageService.ts:15`, `ProjectScriptLoaderService`, `ViewportRenderService` | `'cloud'`, `ApiClientError`, collab overlay, `workspaceMode` | `'local' \| 'workspace'` |
+| `play-workspace.ts`, `state/{AppState,index}.ts` | срезы collaboration/auth/workspaceMode/flowAutopilot | удалить |
+| `WorkspaceAgentToolBridge.ts:281` | `@injectLazy(AgentToolRegistry)` | по S15: удаляется вместе с lane или переходит на `ChannelToolRegistry` |
+| `vite.config.ts` | PWA, `player`/`uikitForge`, облачные и AI-прокси, `__PIX3_DEV_BACKENDS__` | `/openai-proxy` (dev), rapier, manualChunks, `export-vendor` |
 
-Последним идёт отдельный коммит knip: палитровый код `image-ops.ts` (~900 строк) и прочее.
+Последним идёт коммит knip (палитровый код `image-ops.ts` ~900 строк и прочее).
 
-### B.3 `ChannelToolRegistry`
+### B.3 Реестр инструментов канала (только если S15 не дал паритета)
 
-`src/services/agent-channel/ChannelToolRegistry.ts` сохраняет контракт `AgentToolSpec`/`execute`.
-
-- **Что переносится из `AgentToolRegistry.ts`:** play_* (~1470-1512), `game_input` (~1513),
-  `game_observe` (~1633), `game_run` (~1721), `read_logs`/`read_errors` (~2031-2041),
-  `viewport_screenshot` (~2057), `get_selection` (~968), урезанный `generate_asset`, а также
-  `export_playable` из P1.
-- **Как:** скопировать файл и удалить недостижимое, ориентируясь на `noUnusedLocals`. Подсказки
-  `channel-tool-hints.ts` применить к описаниям один раз, а сам слой удалить.
-- **Объём:** ~1,5–2k строк.
+`ChannelToolRegistry` (`src/services/agent-channel/`, ~1,5–2k строк). Переносятся обработчики
+play_*, `game_input`, `game_observe`, `game_run`, `read_*`, `viewport_screenshot`, `get_selection`,
+урезанный `generate_asset` (без idea-stage) и `export_playable`. Подсказки `channel-tool-hints.ts`
+применяются к описаниям один раз, затем слой удаляется. **Если S15 дал паритет**, реестр не нужен:
+lane удаляется (C.5).
 
 ### B.4 Генеративные инструменты
 
-| Инструмент | Где | Почему |
-|---|---|---|
-| `sfx` | процесс CLI (`pix3-cli/src/sfx/`) | без ключей. Редакторному `generate_sfx` нужна LLM-полоса, она уходит |
-| `generate_asset` | редактор, через канал, с подтверждением | постобработке нужен canvas. Ключи на сервере CLI (C.3). `svg-llm` не нужен: SVG пишет агент, `E_SVG_*` проверяет `check` |
-| `skin_ui` | LABS. Триггер: UI-тяжёлый концепт и пройденный S11 | писатель `UiKitProjectWriter.ts:254` привязан к canvas. Ядро `uikit` host-agnostic, его перенос в CLI занимает 3 дня |
+| Инструмент | Где |
+|---|---|
+| `sfx` | процесс CLI (`pix3-cli/src/sfx/`, без ключей) |
+| `generate_asset` | редактор. Ключи, лимит 20 и подтверждение переезжают в прокси ключей CLI (C.3). Запрос подтверждается во вкладке-держателе lease, а не в той, что запросила |
+| `character_compile` | CLI: кадры на диске → `.pix3anim` + префаб (C.5) |
+| `skin_ui` | LABS. Триггер: UI-тяжёлый концепт и пройденный S11 (3 дня) |
 
-### B.5 Сеть runtime: не трогать
+### B.5 Сеть runtime
 
-`src/net/` (~7k) встроен в пакет (`core/SceneService.ts:8-9`, `register-behaviors.ts`) и уже
-вырезается из playable (`strippable-runtime-modules.ts`). DeepCore сеть не использует. Вынос стоит
-2–3 дня и не даёт пользователю ничего. Удаляются только редакторные потребители.
+Не трогаем. `src/net/` (~7k, `core/SceneService.ts:8-9`) уже вырезается из playable
+(`strippable-runtime-modules.ts`), DeepCore её не использует. Удаляются только редакторные
+потребители.
 
 ## C. Поток agent-first (P1, `main`)
 
 ### C.1 `pix3 setup [codex|claude] --write`
 
-Сейчас `mcp-config.ts:setupInstructions` только печатает инструкцию. Новое поведение:
+Сейчас `mcp-config.ts:setupInstructions` только печатает. Новое поведение:
 
-1. **Цель:** аргумент или автоопределение (`CLAUDECODE=1`, переменная Codex — из S1). Основной путь —
-   Codex: у Claude в MY.GAMES был организационный 403 (§11.14 внешнего плана).
-2. **Установка:** `npm install --prefix ~/.pix3/cli/<ver> @pix3/cli@<ver>`, плюс TypeScript в
-   `~/.pix3/typescript/<PINNED>` и `esbuild`. Без этого ленивая установка в `check/typescript.ts`
-   не найдёт npm из GUI-процесса.
-3. **Запись MCP:** `command` = `process.execPath`; `args` = `[…/dist/index.js, "mcp"]`; `env.PATH`
+1. **Цель.** Аргумент или автоопределение. Основной путь — Codex (у Claude в MY.GAMES был 403,
+   §11.14).
+2. **Установка.** `npm install --prefix ~/.pix3/cli/<ver>`, плюс TypeScript в
+   `~/.pix3/typescript/<PINNED>` и `esbuild`: ленивая установка в `check/typescript.ts` не найдёт
+   npm из GUI-процесса.
+3. **Запись MCP.** `command = process.execPath`, `args = [dist/index.js, "mcp"]`, `env.PATH`
    начинается с `dirname(execPath)`.
-4. **Codex** (`~/.codex/config.toml`):
-   - таблицы `[mcp_servers.pix3]` и `[mcp_servers.pix3.*]` заменяются целиком;
-   - пути пишутся литеральными строками `'…'` (Windows);
-   - бэкап с меткой времени;
-   - перечитать файл после записи, плюс `codex mcp list`, если `codex` установлен;
-   - `startup_timeout_sec = 30`, `tool_timeout_sec = 180`.
-5. **Claude:** только `claude mcp add --scope user`, иначе печать инструкции или plugin-маршрута.
-   `~/.claude.json` не трогаем: Claude Code сам его переписывает, пока работает.
-6. **Глобальный skill** пишется только для хоста, который не показывает `instructions` (S6).
-   `--remove` откатывает всё.
-7. **Вход для человека:** одна строка в README для вставки в чат. Если Node нет, план Б — портативный
-   Node в `~/.pix3/node` (S3).
+4. **Codex.** Таблицы `[mcp_servers.pix3*]` заменяются целиком, пути — literal-строки `'…'`, бэкап с
+   меткой времени, повторное чтение и `codex mcp list`. `startup_timeout_sec = 30`,
+   `tool_timeout_sec = 180`. Если S15 прошёл — вторая запись `chrome-devtools`.
+5. **Claude.** Только `claude mcp add --scope user`, иначе печать инструкции. `~/.claude.json`
+   руками не трогаем.
+6. **Skill.** Глобальный skill — только для хоста без поддержки `instructions` (S6). `--remove`
+   откатывает изменения. Без Node — портативный Node в `~/.pix3/node` (S3).
 
-### C.2 Процесс MCP хостит сервер
+### C.2 Отсоединённый workspace-сервер (W-SRV, 2–2,5 дня)
 
-- **Старт.** stdio поднимается сразу, порт не занимается.
-- **Привязка к проекту.** Срабатывает на `project_new`/`project_open {dir}` или на первом
-  инструменте в найденном проекте: `ensureHost(root)` → `openWorkspace` с портами
+F.2 ослабляется: сервер — отдельный долгоживущий процесс с idle-таймаутом, но не глобальный демон.
+
+- **Запуск.** `pix3 mcp` при `project_new`/`project_open` или при первом инструменте в проекте
+  проверяет lock и запись (`serve/open-workspace.ts`). Если живого сервера нет, он запускает
+  `node <cli> serve --detached --project <root>`:
+  - `spawn(..., {detached: true, stdio: ['ignore', log, log], windowsHide: true}).unref()`;
+  - лог пишется в `.pix3/serve.log`;
+  - запуск ждёт появления записи `server` (≤5 с).
+
+  Дальше `pix3 mcp` — клиент lane, **как сегодня** `mcp --workspace` (`lane-client.ts`). Тот же
+  механизм использует `pix3 serve --detached`. Обычный `pix3 serve` по-прежнему работает на переднем
+  плане.
+- **Idle-таймаут N = 30 минут.** Отсчёт начинается, только когда **нет ни lease вкладки, ни
+  присутствия MCP** (`agent-presence.ts`, heartbeat уже есть). Открытая вкладка или живой агент
+  держат сервер сколь угодно долго. 30 минут покрывают закрытие и повторное открытие приложения и
+  при этом не плодят сирот на дни.
+- **Порт.** `lastPort` — новое поле `.pix3/workspace.json`. Сегодня `clearServer`
+  (`state-file.ts:204`) при выходе обнуляет запись `server` вместе с портом. Сервер пробует порты
   `[lastPort, 8490..8499]`.
-  - `started` — процесс становится хостом;
-  - `running` — процесс становится клиентом lane;
-  - `unresponsive` с мёртвым pid — lock забирается (`acquireServeLock` → `isProcessAlive`).
-- **`lastPort` — новое поле `.pix3/workspace.json`.** Сегодня `clearServer`
-  (`serve/state-file.ts:204`) при штатном выходе обнуляет запись `server` вместе с портом, и
-  «липкому» порту не на что опереться. `lastPort` переживает выход.
-- **Несколько проектов.** В процессе `Map<root, …>`, у инструментов есть параметр `dir`.
-- **stdout — это JSON-RPC.** Логи сервера идут только в stderr; на это есть тест.
-- **Grace.** После конца stdin или SIGTERM хост живёт, пока вкладка держит lease, но не дольше
-  10 минут без MCP. При SIGKILL grace нет. Это ограниченное исключение из F.2.
-- **Повышение клиента.** Если lane отвечает ECONNREFUSED, клиент вызывает `ensureHost`. Любой новый
-  процесс MCP (`editor_link`, рестарт приложения) поднимает хост.
-- **`pix3 serve`** остаётся для терминала и dev; `mcp --workspace` — алиас.
+- **Кто останавливает.**
+  - idle-таймаут;
+  - `pix3 serve --stop [--project]` (`POST /ws/agent/shutdown` по control secret);
+  - `doctor`.
 
-### C.2b Offline-черновик — новая работа (W-OFF, 3–4 дня)
+  Каждый сервер пишет `~/.pix3/servers/<pid>.json` (root, порт, версия, время старта, idle),
+  `doctor` перечисляет и чистит мёртвые записи.
+- **Версии.** Если `cliVersion` сервера не совпадает с `pix3 mcp` и lease свободен, сервер
+  перезапускается своей версией. Если lease занят, используется старый сервер (при совместимом
+  `protocol`), `doctor` предупреждает.
+- **stdout.** У сервера stdout не связан с JSON-RPC (лог в файл). У `pix3 mcp` stdout — только
+  JSON-RPC, логи идут в stderr, это проверяется тестом.
+- **Спайк S16.** На macOS, Linux и Windows сервер должен пережить выход приложения. Windows Job
+  Objects с `KILL_ON_JOB_CLOSE` могут убить потомка, если нет breakaway.
 
-Сегодня такого пути нет. Reconnect только делает rescan (`WorkspaceSessionService.ts:409`),
-восстановление версии — отдельная команда (`ExternalMergeService.ts:382`). Fallback журнала молча
-уходит в память (`recovery-fallback-store.ts:47`), а смена порта меняет origin, и IndexedDB
-становится недоступен. Контракт:
+### C.2b Аварийный путь: сервер мёртв (W-OFF, ~1 день)
 
-1. **Что и когда.** Пишутся только текстовые записи редактора в backend `workspace` (сцены, префабы,
-   скрипты, `.pix3anim`, yaml/json), и только когда запись на сервер не прошла (сеть, `reconnecting`).
-   Слой — workspace-ветка `ProjectStorageService`. Бинарные операции и move/delete в offline
-   отказываются с причиной.
-2. **Хранилище.** Новый `OfflineDraftStore`: IndexedDB `pix3-offline-drafts`, ключ
-   `workspaceId|path`. Запись: `{baseHash, content, createdAt, seq}`, где `baseHash` — sha256
-   версии на диске, которую редактор видел последней (манифест или ETag). Ring журнала с его
-   прунингом сюда не подходит.
-3. **Подтверждение долговременности.**
-   - «Сохранено в браузере» показывается только после `transaction.oncomplete`.
-   - При первом offline вызывается `navigator.storage.persist()`.
-   - Если IndexedDB недоступен или `put` упал: красный баннер «НЕ сохранено — не закрывайте вкладку»,
-     правки блокируются. Тихого ухода в память нет. Тот же фикс вносится в
-     `recovery-fallback-store.ts`: сделать переход в память видимым.
-4. **Баннер offline:** «Связь с сессией агента потеряна. N правок сохранено в этом браузере. Не
-   перезагружайте вкладку. Попросите агента открыть редактор (`editor_link`)». Сервер мёртв, а
-   статику раздаёт он же, поэтому F5 даст пустую страницу. Баннер прямо об этом предупреждает.
-5. **Восстановление при reconnect.** Для каждого черновика сравнивается хэш на диске:
-   - если он равен `baseHash` — PUT с `If-Match`, после успеха черновик удаляется;
-   - если отличается (агент правил файл, пока вкладка была offline) — **не перезаписывать**.
-     Черновик пишется версией в `.pix3/recovery/` (`RecoveryJournalService.recordVersion`), диск
-     загружается, баннер называет файл и предлагает «Восстановить мою версию» — это существующий
-     `ExternalMergeService.restoreVersion`, он undoable.
-6. **Смена порта или origin.**
-   - (а) Вкладка ещё открыта. Она ищет свой `workspaceId` на портах `[lastPort, 8490..8499]`: GET `/`
-     и `<meta name="pix3-workspace-id">`. Потом переподключается к новому порту по своему токену.
-     Это кросс-портовый loopback-запрос, его разрешает текущий allowlist (C.3), так что черновики
-     сливаются. `WorkspaceClient` уже принимает endpoint параметром.
-   - (б) Вкладка закрыта. `lastPort` возвращает хост на тот же origin, новая вкладка видит черновики
-     по `workspaceId`. Если `lastPort` занят другим проектом, черновики остаются в старом origin.
-     `editor_link` и `doctor` об этом сообщают («черновики на :8490 — откройте его, когда порт
-     освободится»). Это остаточное ограничение, и оно задокументировано.
-7. **Тесты** (они же входят в гейт D.4):
-   - kill -9 хоста во время правки в инспекторе → черновик в IndexedDB → новый хост → **байты на
-     диске равны черновику**;
-   - агент пишет тот же файл, пока вкладка offline → после reconnect на диске байты агента,
-     черновик лежит версией в `.pix3/recovery/`, баннер есть;
-   - вкладку закрыли в offline и открыли позже по ссылке → черновик слит;
-   - смена порта при открытой вкладке → слит на новый порт;
-   - IndexedDB отключён → красный баннер, слова «сохранено» нет.
+Сервер почти всегда переживает сессию агента, поэтому синхронизации черновиков нет. Миграции
+IndexedDB между портами и сканирования портов из вкладки тоже нет.
 
-### C.3 CLI раздаёт сборку редактора (hosted)
+- **Что видит вкладка.** Если события упали и запись не проходит (`reconnecting`), вкладка
+  переходит в режим «только чтение»:
+  - правки блокируются, грязное состояние в памяти сохраняется;
+  - баннер: «Сервер pix3 остановлен. Правки заблокированы, несохранённые изменения пока в этой
+    вкладке — не закрывайте её. Попросите агента открыть редактор (`editor_link`)»;
+  - кнопки [Скачать YAML сцены] и [Скопировать] для каждой грязной сцены;
+  - существующее меню recovery остаётся доступным.
+- **Возвращение сервера.** Если он поднялся на `lastPort`, работает существующий reconnect и rescan
+  (`WorkspaceSessionService.ts:409`), autosave пишет грязное состояние. Если диск изменился,
+  срабатывает существующий путь внешних изменений и merge-баннер. Если порт другой, баннер говорит:
+  «Новая сессия на другом адресе — скачайте изменения и откройте ссылку».
+- **Без молчаливого fallback в память.** `recovery-fallback-store.ts:47` при недоступном IndexedDB
+  должен показывать это, а не уходить в память тихо.
+- **Тесты.**
+  - kill -9 сервера во время правки → блокировка, скачанный YAML совпадает с состоянием;
+  - новый сервер на `lastPort` → байты на диске;
+  - kill -9 процесса MCP → сервер жив, вкладка не заметила.
 
-- **Сборка.** `npm run build:hosted` (`vite build --mode hosted`) кладёт результат в
-  `packages/pix3-cli/editor/` — это единственный путь, он в gitignore. Порядок: runtime (через
-  алиас) → редактор → CLI (`build`, `build-runtime-types`, `build-kit`, `copy-editor`). В `files`
-  добавляется `editor`, плюс `licenses:report` и THIRD_PARTY_NOTICES.
-- **Исключения на этапе сборки.** Нет PWA, inputs `player`/`uikitForge`, ONNX/bg-removal и
-  **Spine — по обоим путям**:
-  - алиас `@esotericsoftware/spine-threejs` → stub-модуль, а `registerSpineModuleLoader` не
-    вызывается;
-  - `load`-плагин режима hosted подменяет `spine-threejs.mjs?raw` из `import.meta.glob` экспортёра
-    (`PlayableHtmlBuildService.ts:202-208`) на stub-строку;
-  - CI и `prepack` сканируют распакованный tarball на `esotericsoftware` и «Spine Runtimes License».
-    Найдено — сборка падает.
-- **Проект со Spine в hosted.**
-  - runtime и так кидает «Spine is not installed» без loader (`core/spine/spine-module.ts:225-231`);
-  - редактор показывает это у узла и в логах с текстом «Spine не входит в hosted-редактор pix3;
-    используйте dev-путь»;
-  - `export_playable` и команда экспорта отказывают с `spine_unavailable`, если
-    `ProjectBuildService.usesSpine`;
-  - `pix3 check` выдаёт предупреждение `W_SPINE_HOSTED`.
-- **Рамки essential уже в P1 (гейт `VITE_PIX3_HOSTED`).** Один список `src/core/hosted-scope.ts`:
-  - **команды меню.** Sprite Editor, Model Lab, UI Kit Forge, Generate, Agent Chat, Home, Vibe,
+### C.3 Hosted-сборка, раздаваемая CLI
+
+- **Сборка.** `npm run build:hosted` складывает результат в `packages/pix3-cli/editor/` (gitignore).
+  Порядок: runtime → редактор → CLI (`build`, `build-runtime-types`, `build-kit`, `copy-editor`). В
+  пакет входят `licenses:report` и THIRD_PARTY_NOTICES.
+- **Исключено на этапе сборки:** PWA, `player`/`uikitForge`, ONNX и **Spine по обоим путям**:
+  - алиас `@esotericsoftware/spine-threejs` → stub, `registerSpineModuleLoader` не вызывается;
+  - `load`-плагин подменяет `spine-threejs.mjs?raw` из `import.meta.glob` экспортёра
+    (`PlayableHtmlBuildService.ts:202-208`);
+  - CI и `prepack` сканируют tarball на `esotericsoftware` и «Spine Runtimes License».
+
+  Проект со Spine: runtime и так сообщает «Spine is not installed» (`spine-module.ts:225-231`).
+  Редактор показывает это у узла с пояснением, экспорт отвечает `spine_unavailable`, `check` выдаёт
+  `W_SPINE_HOSTED`.
+- **Рамки essential (`src/core/hosted-scope.ts`, гейт `VITE_PIX3_HOSTED`).** Один список
+  ограничивает:
+  - команды меню: Sprite Editor, Model Lab, UI Kit Forge, Generate, Agent Chat, Home, Vibe,
     Library/Store, Online/Remote Preview, AO, Install Agent Kit;
-  - **контекстные действия ассетов** (`openInSpriteEditor`, `assets-content.ts:576` и подобные);
-  - **типы вкладок** из `pix3.projectTabs`;
-  - **панели `LayoutManager`**.
+  - контекстные действия ассетов (`openInSpriteEditor`, `assets-content.ts:576`);
+  - типы вкладок из `pix3.projectTabs`;
+  - панели `LayoutManager`.
 
-  Исключённые пункты меню и контекстные действия **видны, но неактивны**, с подсказкой «Нет в
-  Essential». Нажатие записывает строку в `.pix3/hosted-gaps.jsonl` (время, id, откуда). Вкладки
-  исключённых типов при восстановлении отбрасываются, и это тоже пишется в журнал. Вместо home —
-  `pix3-empty-stage`, вместо welcome — `pix3-hosted-boot`. Физически всё удаляется в P2.
+  Исключённое видно, но неактивно («Нет в Essential»). Нажатие и отброшенная вкладка пишутся в
+  `.pix3/hosted-gaps.jsonl`. Home заменяется на `pix3-empty-stage`, welcome — на `pix3-hosted-boot`.
 - **Сервер.**
-  - Статика без авторизации: `index.html` с `no-cache` и `<meta name="pix3-workspace-id">`,
-    ассеты — `immutable`.
+  - Статика без авторизации, `index.html` — `no-cache`.
+  - `GET /ws/hello` — JSON `{workspaceId, protocol, cliVersion}` без авторизации, с CORS для
+    loopback-origin. Это единственный маршрут обнаружения, статика для discovery не используется.
   - Host-check остаётся.
-  - `/openai-proxy/v1/*` и `/gemini-proxy/*` подставляют ключ **на сервере** из `~/.pix3/keys.json`
-    (0600). Ключи в браузер не попадают и одинаковы для всех портов. Маршруты только same-origin и
-    с токеном.
+  - `/openai-proxy/v1/*` и `/gemini-proxy/*` подставляют ключ из `~/.pix3/keys.json` (0600) на
+    сервере, ведут лимит генераций и запрашивают подтверждение (B.4).
 - **Авторизация.**
-  - `isAllowedOrigin` принимает loopback-origin с любым портом (решение §11.1). Это нужно и для
-    проброса VS Code, и для слива черновиков на новый порт (C.2b.6).
-  - Убираются `https://editor.pix3.dev` и эхо `Access-Control-Allow-Private-Network`
-    (`workspace-server.ts:699`).
-  - Токен обязателен. Lane агента не меняется. `cli-version-gate` в hosted не нужен.
+  - `isAllowedOrigin` принимает loopback-origin с любым портом (решение §11.1; проброс VS Code на
+    другой локальный порт).
+  - `https://editor.pix3.dev` убирается. Эхо `Access-Control-Allow-Private-Network`
+    (`workspace-server.ts:699`) убирается как ненужное: от него ничего не зависит, loopback →
+    loopback PNA/LNA не гейтит.
+  - Токен обязателен, `cli-version-gate` в hosted не нужен.
 
-### C.4 Пара по одноразовому коду, ключ — `workspaceId`
+### C.4 Пара
 
-1. `editor_link` (и `project_new`/`project_open`) выдаёт код: 128 бит, TTL 10 минут, однократный.
-   Процесс-клиент получает его через `POST /ws/agent/pair-code`. Ссылка:
-   `http://127.0.0.1:<port>/#pair=<code>`. Долгоживущий токен в истории чата оставлять нельзя.
-2. Редактор действует по образцу `BridgeConnectionService.consumePairingLink` (`:294`): сначала
-   `replaceState`, затем `POST /ws/pair`. В ответ приходит `{workspaceId, token}`, токен уходит в
-   `WorkspaceCredentialStore` по `workspaceId`.
-3. Без кода редактор берёт `workspaceId` из meta, а токен — по нему. Если нет ни того, ни другого —
-   карточка «Откройте ссылку из чата ещё раз».
-4. На сервере `tokens[]`: до 8 токенов, неиспользуемые дольше 30 дней удаляются. Удалить файл —
-   значит отозвать все.
-5. Браузер открывается автоматически на первом `project_new`, если нет `SSH_CONNECTION` и не задано
-   `PIX3_OPEN_BROWSER=0`.
+- `editor_link`, `project_new` и `project_open` выдают одноразовый код: 128 бит, TTL 10 минут.
+  Клиент получает его через `POST /ws/agent/pair-code`. Ссылка: `http://127.0.0.1:<port>/#pair=<code>`.
+- Редактор поступает **по образцу `BridgeConnectionService.consumePairingLink`** (`:294`):
+  `replaceState`, затем `POST /ws/pair` → `{workspaceId, token}`. Токен хранится в
+  `WorkspaceCredentialStore` по `workspaceId`.
+- Без кода `workspaceId` берётся из `/ws/hello`. Если нет токена — карточка «откройте ссылку из
+  чата».
+- На сервере `tokens[]`: максимум 8, неиспользуемые дольше 30 дней удаляются. Браузер открывается
+  сам на первом `project_new`, если нет `SSH_CONNECTION`.
 
 ### C.5 Инструменты MCP и kit
 
-| В процессе CLI | Через редактор |
-|---|---|
-| `doctor`, `project_new`, `project_open`, `editor_link`, `check`, `smoke`, `tree`, `sfx` | `project_status`, `play_start/stop/restart/status`, `game_run`, `game_input`, `game_observe`, `read_errors`, `read_logs`, `viewport_screenshot`, `get_selection`, `generate_asset`, `export_playable`. `generate_sfx` убран |
+**Всегда в процессе `pix3 mcp`:** `doctor`, `project_new`, `project_open`, `editor_link`, `check`,
+`smoke`, `tree`, `sfx`, `character_compile`. CLI-глаголы стали инструментами, потому что в песочнице
+Codex сеть выключена, а `npx` ненадёжен.
 
-- **CLI-глаголы стали инструментами:** в песочнице Codex сеть выключена, а `npx` ненадёжен.
-- **`project_new {dir, template?, name?}`:**
-  - `createProject` + `agentKitStep` **без** `.mcp.json`;
-  - «не пусто» допускает `.git`, `.codex`, `.claude`, `.vscode`, `.idea`, `.DS_Store`
-    (`new-project.ts:72`);
-  - шаблоны берутся из `listTemplates()`;
-  - ответ: ссылка + «прочитай AGENTS.md сейчас».
-- **`instructions`** (~1 000 знаков): нет `pix3project.yaml` → `project_new {dir}` → AGENTS.md →
-  кликабельная ссылка → правка файлов, `check`, `game_run` → при сбое `doctor`.
-- **`doctor`** возвращает `{check, ok, fix}` по пунктам: Node, CLI, TS, версия kit, lock/порт/
-  `lastPort`, держатель lease, `editor/`, `keys.json`, `SSH_CONNECTION`, черновики в другом origin.
-- **Знание встроенного агента переносится в kit до заморозки.** Из `agent-skills/verify-and-fix.md`
-  (368 строк; `GameDebugProvider`, без которого не работают предикаты `gameStateChanged`) и
-  `game-prototype.md` (276) — в `kit-src/skills/pix3-verify` и `pix3-scripts` через `{{include}}`.
-  Сейчас слова `GameDebugProvider` в `kit-src` нет. `kit.spec.ts` проверяет 22 инструмента.
+**Взаимодействие с редактором — два варианта по S15:**
+
+- **(A) S15 дал паритет: CDP вместо lane.**
+  - Агент работает через Chrome DevTools MCP в **своей** Chrome-вкладке (собственный профиль: Chrome
+    ≥136 не даёт отлаживать профиль по умолчанию). Вкладка спаривается через `editor_link` и
+    подключается вторым клиентом workspace **без lease** (play разрешён, запись нет).
+  - `debug-bridge.ts` (сейчас только DEV, `src/main.ts:79`) входит в hosted как стабильный
+    `window.__PIX3_DEBUG__` и получает `waitForRevision(expect)` вместо серверного барьера.
+  - Kit отдаёт snippets (`game_run`, `game_observe`, `export_playable`).
+  - Удаляются: CLI `workspace-agent/*` (~1,2k), lane в `mcp-workspace.ts`, `/ws/agent/*` кроме
+    `pair-code`/`shutdown`/`presence`, `WorkspaceAgentToolBridge` (872), лишняя часть
+    `AgentKeepaliveService` (211), B.3.
+  - Подтверждение `generate_*` и лимит живут в прокси ключей.
+- **(Б) Паритета нет: гибрид.**
+  - Lane остаётся. Если S15 частично лучше, `pix3 mcp` получает 5 типизированных инструментов,
+    вызывающих страницу через CDP.
+  - Иначе остаются текущие 14 минус `generate_sfx` плюс `export_playable` через `ChannelToolRegistry`
+    (B.3).
+
+**Прочее:**
+- **`project_new {dir, template?, name?}`.** `createProject` + `agentKitStep` без `.mcp.json`.
+  Проверка «не пусто» допускает `.git`, `.codex`, `.claude`, `.vscode`, `.idea`, `.DS_Store`
+  (`new-project.ts:72`). Ответ: ссылка и «прочитай AGENTS.md сейчас».
+- **`instructions`** (~1 000 знаков) и **`doctor`**: Node, CLI, TS, версия kit, сервер (pid, порт,
+  idle, версия), lease, `keys.json`, `SSH_CONNECTION`.
+- **Перенос знаний в kit (P1).**
+  - `agent-skills/verify-and-fix.md` (368 строк, включая `GameDebugProvider`, без которого не
+    работают предикаты `gameStateChanged`) и `game-prototype.md` (276) — через `{{include}}`;
+  - **справочник формата `.pix3anim`**: клипы, кадры, fps, anchor, sizeMode, points, events.
+    Источник — `runtime/core/AnimationResource.ts` (интерфейсы `AnimationClip`, `AnimationFrame`,
+    `AnimationFramePoint`), `AssetLoader.ts:192`, `nodes/2D/AnimatedSprite2D.ts` и
+    `### AnimatedSprite2D` в `docs/node-types-reference.md`. Страж в `kit.spec.ts` сверяет имена
+    полей с интерфейсами runtime;
+  - `kit.spec.ts` синхронизирует список инструментов.
+- **`character_compile {frames, name}`.** `character-compiler.ts` переезжает в CLI. Размеры кадров
+  берутся из заголовка IHDR PNG, без зависимостей. На выходе `.pix3anim` и префаб с
+  `core:CharacterVisual2D`.
 
 ### C.5b Контракт `export_playable` (W-EXP, 2 дня)
 
-Барьер §5 D сегодня включён только для `play_start`, `play_restart` и `game_run`
-(`workspace-agent/tools.ts:21`). Экспортёр читает файлы с диска, а точку входа берёт из активной
-вкладки редактора (`ProjectBuildService.resolveEntryScenePath` → `getActiveScenePath`). Контракт:
+Экспорт — не `BARRIER_TOOL` (`workspace-agent/tools.ts:21`) и игру дизайнера не останавливает.
+Новое предусловие **«файлы синхронизированы»** отделено от барьера play:
 
-1. **`export_playable` входит в `BARRIER_TOOLS`.** Порядок такой:
-   - сначала сохраняются все грязные сцены через обычный путь сохранения;
-   - затем `sync_barrier` (держит autosave, ждёт стабилизации и сборки скриптов);
-   - затем сверка `expect`.
-2. **Отказ с причиной:**
-   - `save_failed` — ручная правка не сохранилась;
-   - `pending_merge` — висит merge- или recovery-баннер;
-   - `expectation_stale` — ревизия агента не совпала;
-   - `offline_drafts` — есть неслитые черновики;
-   - `spine_unavailable`.
-3. **Детерминизм:** `entryScene` — явный аргумент, по умолчанию сцена экспорта по умолчанию из
-   проекта. Активная вкладка не используется никогда.
-4. **Ревизия входов.** Набор `{path: sha256}` по всему, что прочитала сборка, плюс workspace
-   `revision` до и после. Если ревизия за время сборки изменилась — `inputs_changed`, файл не
-   пишется. Набор попадает в `exports/<name>.report.json`.
-5. **Независимая проверка.** Записанные байты перечитываются с диска и сверяются по sha. Потом HTML
-   запускается в sandbox-iframe из этих байтов. Это отдельный документ с отдельным экземпляром
-   runtime, редактор в нём не участвует. Player-entry runtime получает opt-in сигнал: при
-   `#pix3-verify` он шлёт родителю `postMessage` `pix3:ready`/`pix3:error`. Результат инструмента:
-   `{path, bytes, sha256, bootMs, framesRendered, errors[], inputsHash}`. Нет `ready` за 15 секунд
-   или есть ошибки — `ok:false`.
+1. **Предусловие.** Грязные сцены сохраняются обычным путём. Ожидается окно стабилизации и сборка
+   скриптов (часть `ProjectSyncService.barrierRevision` без остановки play и без удержания
+   autosave). Сверяется `expect`.
+2. **Отказы с причиной:** `save_failed`, `pending_merge`, `expectation_stale`, `server_offline`,
+   `spine_unavailable`.
+3. **`entryScene`** задаётся явно (по умолчанию — сцена экспорта из проекта). Активная вкладка
+   (`ProjectBuildService.getActiveScenePath`) не используется.
+4. **Входы.** Набор `{path: sha256}` и workspace `revision` до и после сборки. Если ревизия
+   изменилась — `inputs_changed`, файл не пишется. Отчёт пишется в `exports/<name>.report.json`.
+5. **Проверка — в отдельном браузерном контексте**, не во фрейме редактора. У player-entry runtime
+   есть opt-in `#pix3-verify`: он пишет `pix3:ready`/`pix3:error` и число кадров в `POST /ws/verify/<id>`.
+   Сервер отдаёт файл по одноразовому `/verify/<id>`.
+   - Агент с CDP (S15) открывает URL в своей вкладке.
+   - Без CDP дизайнер нажимает «Проверить» в тосте экспорта (жест пользователя, новая вкладка).
+   - Результат появляется в `project_status.lastExport.verification`.
+6. **Ограничение MVP.** Экспорт выполняется во вкладке редактора. Без открытой вкладки ответ —
+   `no_editor`. В потоке дизайнера вкладка всегда есть. Автономный путь (без человека) работает
+   только через CDP-вкладку агента (S15).
 
 ### C.6 Вторая машина
 
-Процесс MCP запускается там же, где агент (Remote-SSH или удалённый режим приложения, S8), и слушает
-`127.0.0.1:8490` на сервере. VS Code пробрасывает этот номер сам. Если локальный порт другой, ссылку
-берём из `PIX3_PUBLIC_ORIGIN`. Loopback-origin с любым портом разрешён. При SSH браузер
-автоматически не открывается, токен обязателен.
+MCP и сервер работают там же, где агент (Remote-SSH, S8). VS Code пробрасывает порт. Если локальный
+порт другой, используется `PIX3_PUBLIC_ORIGIN`. Loopback с любым портом разрешён, токен обязателен,
+браузер при SSH сам не открывается.
 
 ## D. Фазы
 
-### D.1 P0 — спайки (4 дня)
+### D.1 P0 — спайки
+
+**Уровень 1, блокирующий (дни 1–3, максимум 4).**
 
 | # | Вопрос | Pass / fail → |
 |---|---|---|
-| S1 | Codex desktop: подхватывает ли глобальный `[mcp_servers]`/`CODEX_HOME`, cwd, процесс на тред или на приложение, держит ли порт 30+ мин, **чем завершает (stdin, SIGTERM, SIGKILL), есть ли idle-reaping**, есть ли `~/.codex/skills` | заглушка видна, порт доступен, способ завершения записан. Если SIGKILL — grace бесполезен, вся надежда на W-OFF |
-| S2 | Claude Code desktop: то же; приоритет проектного `pix3` (DeepCore на 1.6.2) | иначе plugin-маршрут. Приоритет ниже Codex |
-| S3 | Ноутбук дизайнера: Node; `dist` на Node 22 и 26 | иначе портативный Node |
-| S4 | Ссылка `#pair=` кликается, фрагмент сохраняется | иначе `?pair=` + `replaceState` |
-| S5 | Chrome, Safari, Firefox на hosted | иначе «нужен Chrome» |
-| S6 | Видит ли модель MCP `instructions` | нет — пишем skill |
-| S7 | Setup в песочнице Codex | ≤1 одобрение |
-| S8 | Удалённый сценарий Igor | иначе `PIX3_PUBLIC_ORIGIN` |
-| S9 | `npm pack` hosted: размер, холодная установка, нет Spine и ONNX | <30 МБ, <60 с; иначе `@pix3/editor-dist` |
-| S10 | Прототип: `WorkspaceServer` отдаёт hosted + `#pair`; **базовый замер: kill -9 `pix3 serve` во время правки на текущем коде — что теряется** | замер записан |
-| S11 | 9-slice с SVG | иначе `skin_ui` остаётся в LABS |
-| S12 | Windows: TOML, `isProcessAlive`, нет SIGTERM, закрытие stdin | исправления в P1b, или Windows вне MVP |
-| S13 | Встроенная генерация картинок в Codex desktop | есть — ключ дизайнеру не нужен |
-| S14 | Долговременность IndexedDB на hosted-origin: `storage.persist()`, Safari ITP (вытеснение через 7 дней), инкогнито | Chrome надёжно; Safari — по замеру |
-| S15 | Кросс-портовый loopback-fetch из вкладки (поиск `workspaceId` на другом порту) в Chrome и Safari без LNA-запроса | иначе C.2b.6(а) отпадает, остаётся только `lastPort` |
+| S1 | Codex desktop: глобальный `[mcp_servers]`/`CODEX_HOME`, cwd, процесс на тред или на приложение, чем завершает процесс MCP, есть ли `~/.codex/skills` | записано. Явный `dir` в любом случае |
+| S4 | `#pair=` кликается, фрагмент сохраняется | иначе `?pair=` + `replaceState` |
+| S6 | Видит ли модель MCP `instructions` | нет → skill |
+| S10 | Прототип: сервер отдаёт hosted + `#pair`; kill -9 `pix3 serve` во время правки на текущем коде — что теряется | замер записан |
+| S12 | Windows: TOML, `isProcessAlive`, нет SIGTERM, закрытие stdin | исправить в P1, или Windows вне MVP |
+| S15 | **CDP-транспорт.** Codex с chrome-devtools MCP проходит сценарии S1–S3 из `.plans/done/agent-eval-scenarios.md` на hosted-редакторе через `window.__PIX3_DEBUG__` (debug-bridge включён в hosted). Сравнение с lane по времени, ошибкам и токенам. Проверить: вкладка агента без lease грузит и играет; спаривание её через `editor_link`; надёжность «пиши JS» против типизированных инструментов | **Паритет** (ошибок не больше, время и токены ±20 %) → lane удаляется до P1a (C.5 A). **Хуже, но работает** → гибрид из 5 типизированных инструментов через CDP. **Не работает** → lane (C.5 Б) |
+| S16 | Отсоединённый сервер переживает выход Codex на macOS, Linux и Windows (Job Objects). `doctor` его видит | иначе сервер на время работы приложения + W-OFF |
 
-Параллельно P0: политика MY.GAMES (данные, лицензии Codex, прокси npm) и корпоративный ключ картинок.
+**Уровень 2 — параллельно P1a:**
+- S2 — Claude Code desktop, приоритет проектного `pix3`;
+- S3 — Node на ноутбуке дизайнера, работа на 22/26;
+- S5 — Chrome, Safari, Firefox;
+- S7 — setup в песочнице;
+- S8 — удалённый сценарий;
+- S9 — `npm pack` <30 МБ, нет Spine и ONNX;
+- S11 — 9-slice с SVG;
+- S13 — встроенная генерация картинок в Codex.
 
-### D.2 P1a — минимальный поток (8–10 дней) → `2.0.0-alpha.1`
+Не код: политика MY.GAMES и корпоративный ключ картинок.
 
-Состав: setup (1,5); хост, `lastPort`, grace, повышение клиента (2); hosted-сборка с исключениями
-Spine/ONNX/PWA и проверкой архива (1,5); hosted-scope и журнал пробелов (1); пара (1); инструменты
-CLI, `doctor`, `instructions`, kit (2); итерации с живым Codex (1–2).
+### D.2 P1a — минимальный поток (9–12 дней) → `2.0.0-alpha.1`
 
-**Артефакт:** Igor в Codex desktop, Chrome, без терминала, собирает dogfood C1. Offline-черновика
-пока нет, Igor об этом знает.
+| Работа | Дни |
+|---|---|
+| Setup | 1,5 |
+| W-SRV | 2–2,5 |
+| Hosted-сборка, исключения, проверка архива | 1,5 |
+| hosted-scope, журнал пробелов | 1 |
+| Пара, `/ws/hello` | 1 |
+| CLI-инструменты, `doctor`, `instructions`, kit (с `.pix3anim`), `character_compile` | 2,5 |
+| Итерации с живым Codex | 1–2 |
+| **При S15-паритете:** удаление lane + стабильный `__PIX3_DEBUG__` + snippets | +0–1 (нетто: удаление почти бесплатно, стабилизация API — работа) |
 
-### D.3 P1b — надёжность (8–12 дней) → `2.0.0-alpha.2`, условие для stranger
+**Артефакт:** Igor в Codex, Chrome, без терминала собирает dogfood C1.
 
-Состав: W-OFF (3–4); W-EXP (2); chroma-key на 10 спрайтах (0,5); браузерный гейт D.4 как приёмка
-(2); Windows и Safari по итогам S12/S14 (0–3); фиксы по C1 (1).
+### D.3 P1b — надёжность (7–10 дней) → `2.0.0-alpha.2`, условие для stranger
 
-**Что сдвигает срок.**
-- S1: если завершение — только SIGKILL и процесс живёт на тред, W-OFF становится главным путём и
-  требует больше тестов (+1–2).
-- S14/S15: если Safari ненадёжен, остаётся «только Chrome» (−2), иначе работа над хранилищем (+1).
-- S12: Windows либо вне MVP (−2), либо полная поддержка (+2–3).
+| Работа | Дни |
+|---|---|
+| W-OFF | 1 |
+| W-EXP | 2 |
+| Chroma-key на 10 спрайтах и удаление bg-removal | 0,5 |
+| Гейт D.4 как приёмка | 2 |
+| Windows/Safari по S12/S5 | 0–3 |
+| Фиксы по C1 | 1 |
+| Бесконфликтные удаления (A.2) | 0,5 |
 
-### D.4 Браузерный гейт (приёмка P1b, гейт каждого шага P2)
+**Что сдвигает срок:** S16 (сервер не переживает приложение → W-OFF снова нужен полностью, +2–3);
+S12 (Windows вне MVP −2 или полностью +2–3); S5 (Safari).
 
-Скриптованный прогон hosted-сборки через chrome-devtools MCP или Playwright, плюс второй процесс MCP.
-Каждая проверка смотрит **независимые доказательства**, а не успешный ответ MCP.
+### D.4 Браузерный гейт (приёмка P1b; гейт шагов P2)
+
+Скриптованно через chrome-devtools MCP. Каждый сценарий проверяется **независимым** доказательством,
+а не ответом MCP.
 
 | Сценарий | Доказательство |
 |---|---|
-| `#pair` → сцена → правка в инспекторе → сохранение | байты `.pix3scene` на диске содержат значение |
-| play → `game_run` | `play_status` + свойство узла в запущенной сцене через introspection |
-| `export_playable` | HTML на диске, sha совпадает, iframe дал `pix3:ready`, `framesRendered > 0` |
-| перезапуск хоста посреди сессии (kill -9, новый процесс) | черновик в `pix3-offline-drafts`, после reconnect байты на диске |
-| одновременная ручная и агентная правка одного файла | байты агента на диске, версия в `.pix3/recovery/`, баннер в DOM |
-| два окна приложения, передача lease | lease у второго, запись первого отклонена, данные не потеряны |
-| открытие существующего проекта после обновления CLI | `doctor` показывает дрейф kit, сцены грузятся, `check` зелёный |
-| нажатие исключённой команды | строка в `.pix3/hosted-gaps.jsonl` |
+| `#pair` → правка в инспекторе → сохранение | байты `.pix3scene` на диске |
+| play → `game_run` | свойство узла в запущенной сцене (introspection) |
+| `export_playable` во время play дизайнера | play не остановлен; HTML на диске, sha совпадает, `/verify` прислал `ready` и `frames > 0` |
+| kill -9 процесса MCP | сервер жив, правка вкладки дошла до диска |
+| kill -9 сервера | вкладка заблокирована, скачанный YAML равен состоянию; после `editor_link` на `lastPort` — байты на диске |
+| одновременная ручная и агентная правка | байты агента на диске, merge-баннер в DOM, версия в `.pix3/recovery/` |
+| два окна приложения, передача lease | lease у второго, данные не потеряны |
+| существующий проект после обновления CLI | `doctor` показывает дрейф kit, сцены грузятся, `check` зелёный |
+| нажатие исключённой команды | строка в `hosted-gaps.jsonl` |
 
-### D.5 P2 — carve-out в ветке `essential` (8–10 дней, параллельно)
+### D.5 P3 — MVP MY.GAMES (~10 рабочих дней, на `alpha.2`)
 
-1. `ChannelToolRegistry` и MOVE game-test (2).
-2. Агент, flow и llm со швами (2).
-3. Cloud, collab, library, platform (2).
-4. LABS, `LayoutManager`, shell, vite, `package.json`, CI (1,5).
-5. Docs, skills, knip, чистка (1).
-6. Гейт D.4 (1).
+Протокол и решение владельца о требовании по времени фиксируются письменно до старта.
 
-Дополнительно на каждом шаге: `type-check`, тесты, `pix3 smoke` по шаблонам, size-spec playable.
-Слияние — после гейта и C1.
+- **Концепты.** Три из бэклога: 2D hyper-casual, UI/мета, 3D-lite. C1 и C2 делает Igor — это
+  верхняя граница результата. C3 — stranger (дизайнер с Codex desktop, чистый ноутбук, наблюдатель
+  молчит), по возможности два прогона.
+- **Арт.** У рецептов есть плейсхолдеры `ph-*.png` (`recipe-*/files/sprites/`), агент пишет SVG,
+  `check` проверяет `E_SVG_*`. В форме продюсера прямо сказано: **качество арта не оценивается** при
+  оценке адекватности прототипа. Новых asset-паков нет. Корпоративный ключ — вопрос P0.
+- **Три исхода.**
+  - **(а) Самостоятельность** — только прогоны stranger. Считаются терминальные вмешательства,
+    вмешательства программиста, подсказки, время до первой запущенной игры.
+  - **(б) Качество** — все три концепта. Форма разделяет два вопроса: «идея стоит продолжения?»
+    (да/нет/не уверен) и «**прототип** адекватно представляет идею для решения?» (нет / greenlight /
+    CPI-тест). Против инструмента считается только второй.
+  - **(в) Время** — человеко-часы всех ролей против **фактического** Unity-базиса (оценка — только
+    при отсутствии фактов, с пометкой), состав ролей, итерации, токены, размер playable, запуск в
+    канале.
+- **Пробелы.** `hosted-gaps.jsonl`, наблюдения (включая «нужен UI анимации/кадров») и вызовы
+  отсутствующих инструментов сводятся в таблицу с подсчётом. Это вход для решения о LABS.
+- **Успех = (а) и (б).**
+  - (а): stranger запустил игру за ≤2 часа, за день получил прототип, ни разу не открыл терминал,
+    обошёлся без программиста и не больше чем с двумя подсказками.
+  - (б): ≥2 из 3 прототипов признаны адекватными на уровне ≥ greenlight.
+  - (в) обязательно только при заранее записанном требовании.
+- **Kill:** провал (б); или (а) после одной итерации исправлений онбординга; или (в) при записанном
+  требовании.
 
-### D.6 P3 — MVP MY.GAMES (~10 рабочих дней, на `alpha.2`)
+### D.6 P4 — решение (1–2 дня) и P2 (8–10 дней)
 
-Протокол фиксируется письменно до старта, включая решение владельца о требовании по времени.
+- **Успех.** P2 по §B на `main`, с гейтом D.4 на каждом шаге:
+  1. реестр/lane по S15 и MOVE game-test — 2 дня;
+  2. агент, flow, llm — 2;
+  3. cloud, collab, library, platform — 2;
+  4. LABS, shell, vite, CI — 1,5;
+  5. docs, skills, knip — 1;
+  6. гейт — 1.
 
-- **Концепты.** Три из бэклога: 2D hyper-casual, UI- или мета-тяжёлый, 3D-lite. C1 и C2 делает
-  Igor — это верхняя граница по качеству и времени. C3 — stranger (дизайнер с Codex desktop, чистый
-  ноутбук, наблюдатель молчит), по возможности второй stranger.
-- **Три исхода измеряются раздельно.**
-  - **(а) Самостоятельность дизайнера** — только stranger-прогоны. Считаются терминальные
-    вмешательства, вмешательства программиста, подсказки, время до первой запущенной игры.
-  - **(б) Качество** — все три концепта. Форма продюсера разделяет два вопроса: «идея стоит
-    продолжения?» (да / нет / не уверен) и «**прототип** адекватно представляет идею для решения?»
-    (нет / внутренний greenlight / CPI-тест). Против инструмента считается только второй вопрос:
-    слабая идея — не провал инструмента.
-  - **(в) Время** — человеко-часы всех ролей против **фактического** Unity-базиса (оценка только при
-    отсутствии фактов, с пометкой), состав ролей, итерации, токены, размер playable и запуск в канале.
-- **Пробелы продукта.** Строки `.pix3/hosted-gaps.jsonl`, наблюдения («искал редактор анимаций») и
-  попытки агента вызвать отсутствующий инструмент сводятся в таблицу с подсчётом. Это вход в
-  решение о LABS.
-- **Успех = (а) и (б):**
-  - stranger запустил игру ≤2 ч и дошёл до прототипа за день, без терминальных вмешательств и без
-    программиста, с ≤2 подсказками;
-  - ≥2 из 3 прототипов получили «адекватно ≥ greenlight».
-- **(в)** обязательна только если владелец до теста записал бизнес-требование (например, «≤50 %
-  Unity»). Иначе это показатель для питча, а не kill.
-- **Kill:** провал (б); или провал (а) после одной итерации исправлений онбординга; или провал (в)
-  при записанном требовании.
+  Затем `2.0.0`. `editor.pix3.dev` остаётся последней полной сборкой: там OPFS и recents. Миграция —
+  «Move Project to Folder» (`MoveProjectToFolderCommand.ts`), затем `project_open`. LABS возвращаются
+  по таблице пробелов, только как MCP/CLI.
+- **Провал (а).** Онбординг, один повтор.
+- **Провал (б).** P2 не делается. Runtime, CLI и kit остаются внутренним инструментом, своего
+  harness нет.
 
-### D.7 P4 — решение (1–2 дня)
-
-- **Успех.**
-  - Вливание `essential`, переименования по A.2, `2.0.0`.
-  - LABS возвращаются по таблице пробелов и только как MCP- или CLI-возможность.
-  - `editor.pix3.dev` остаётся последней полной сборкой: там OPFS-проекты и recents. Миграция —
-    «Move Project to Folder» (`features/project/MoveProjectToFolderCommand.ts`), затем
-    `project_open {dir}`.
-  - Посадочная страница — отдельно (README / `pix3.dev`).
-- **Провал (а).** Онбординг и один повтор.
-- **Провал (б).** `essential` не вливается. Runtime, CLI и kit остаются внутренним инструментом.
-  Возврата к своему harness нет.
-
-**Итого:** P0 4 + P1a 9 + P1b 10 + P3 10 ≈ 33 рабочих дня, то есть **6–7 недель** до решения (C1
-идёт параллельно с P1b). Затем ~1 неделя до `2.0.0`.
+**Итого:** P0 3–4 + P1a 9–12 + P1b 7–10 + P3 10 + P4 1–2 = 30–38 рабочих дней, то есть **6–8 недель
+до решения** (C1 идёт параллельно с P1b). Затем P2 — ещё ~2 недели до `2.0.0`.
 
 ## E. Риски
 
 | Риск | Как снять |
 |---|---|
-| PATH и npm в GUI-процессе | `execPath`, `env.PATH`, предустановка (C.1), S1/S2 |
+| PATH/npm в GUI-процессе | `execPath`, `env.PATH`, предустановка; S1/S2 |
 | Нет Node | S3, портативный Node |
-| AGENTS.md не загружен в сессии создания | ответ `project_new` + `instructions`, проверяется в C1 |
-| Хост убит, правки в вкладке | W-OFF (C.2b), S1, S10, S14 |
-| Черновики в недоступном origin | `lastPort`, кросс-портовый слив (S15), предупреждение `doctor` |
-| Экспорт не того состояния | W-EXP (C.5b) |
-| Тест подтверждает удаляемое | hosted-scope с P1 + журнал пробелов |
-| Качество chroma-key | 10 спрайтов, иначе OpenAI `transparent` |
+| AGENTS.md не загружен в сессии создания | ответ `project_new` + `instructions`; C1 |
+| Сервер-сирота | idle 30 мин, `~/.pix3/servers/`, `doctor`, `serve --stop`; S16 |
+| Смерть сервера | W-OFF, S10 |
+| «Пиши JS» через CDP ненадёжен | порог S15, гибрид из 5 инструментов |
+| Агент подтверждает свою генерацию через CDP | подтверждение только во вкладке-держателе lease, лимит в прокси |
+| Экспорт не того состояния | W-EXP |
+| Тест подтверждает удаляемое | hosted-scope + журнал пробелов |
+| Анимация без UI | справочник `.pix3anim`, `character_compile`, учёт в пробелах |
 | Spine в пакете | два пути исключения + скан tarball |
 | Размер пакета, Safari | S9, S5 |
-| Carve-out ломает редактор | ветка + гейт D.4 |
-| Два MCP с именем `pix3` | S2, `doctor` |
-| Политика MY.GAMES | вопрос продюсеру и IT во время P0 |
+| Политика MY.GAMES | вопрос в P0 |
 
 ## F. Анти-скоуп
 
 1. Никакого чата, подсказчика или агентного статуса в редакторе.
-2. Никаких демонов, tray и Electron. Единственное исключение — ограниченный grace хоста (C.2).
-3. Никакого фреймворка плагинов. Возврат делается через `git checkout full -- <path>`.
-4. Не выносить сеть runtime. Публичный API `@pix3/runtime` не трогать (сигнал `#pix3-verify` в
-   player-entry к API не относится).
-5. Не добавлять мутирующие сцену MCP-инструменты. `game_controls`/`game_time` — только при
-   доказанной нужде в C1.
+2. Никаких tray, Electron и глобального демона на фиксированном порту. Отсоединённый сервер
+   проекта с idle-таймаутом (C.2) разрешён.
+3. Никакого фреймворка плагинов. Возврат — `git checkout full -- <path>`.
+4. Не выносить сеть runtime. Публичный API `@pix3/runtime` не трогать (`#pix3-verify` в player-entry
+   к API не относится).
+5. Никаких мутирующих сцену MCP-инструментов. `game_controls`/`game_time` — только при доказанной
+   нужде.
 6. Никакой серверной компиляции скриптов и headless-экспорта в CLI.
 7. Не переносить `src/templates/projects`, не переименовывать ради красоты.
-8. Никаких «lite»-редакторов.
-9. Никакого FSA-discovery и LNA.
-10. Setup только для `codex` и `claude`.
-11. Не выпускать bridge, не держать collab в `essential`.
+8. Никаких «lite»-редакторов, включая анимационный: формат и `character_compile` вместо UI.
+9. Никакого FSA-discovery и LNA. Никакой синхронизации черновиков между origin.
+10. Setup только для `codex` и `claude` (+ `chrome-devtools` при S15).
+11. Не выпускать bridge.
 12. Онбординг — одна setup-строка.
-13. В `full` не коммитить ничего, кроме security-фиксов collab.
-14. Carve-out на `main` не делать до P4. Offline-черновик не превращать в синхронизацию: только
-    слив и отказ при конфликте.
+13. В `full` — только security-фиксы collab.
+14. Физический carve-out — только после P4.
 
 ## G. Журнал ревью
 
@@ -557,28 +549,41 @@ CLI, `doctor`, `instructions`, kit (2); итерации с живым Codex (1�
 
 | Замечание | Решение | Где |
 |---|---|---|
-| R1 P2 вне критического пути, ветка `essential` | принято | §0, A.2, D |
-| R2 жизненный цикл хоста, grace, замер в S1 | принято; в ревизии 3 развито в W-OFF | C.2, C.2b, S1 |
-| R3 пропущенные швы; chroma-key — регрессия | принято, ~35 файлов | B.2, D.3 |
-| R4 браузерный гейт | принято; в ревизии 3 расширен | D.4 |
-| R5 `--tag next`, `workflow_dispatch`, A.2 против F.13 | принято | A.3, F.13 |
-| R6 знание агента в kit | принято | C.5 |
-| R7 `~/.claude.json`, TOML, PATH/TS, stdout, Windows | принято | C.1, C.2, S12 |
-| R8 ключ по `workspaceId`; origin от `Host`; лимит `tokens[]` | принято частично. В ревизии 3 сужение «Origin == Host» отменено: loopback с любым портом нужен для слива черновиков на новый порт (C.2b.6). Проброс по-прежнему работает | C.3, C.4 |
-| R9 skills, замена внешнего плана | принято | A.3, шапка |
-| R10 `editor.pix3.dev`, OPFS | принято | D.7 |
-| R11 Spine | принято; в ревизии 3 дополнено | C.3 |
-| R12 `projectTabs` вместо layout | принято | B.2, C.3 |
-| R13 сроки | принято; пересчитано заново в ревизии 3 | D |
-| Рек. 1–8 | приняты; `game_controls`/`game_time` отклонены до C1 (растёт поверхность) | A, B.3, B.4, C.1, C.3, D.6, F.5 |
+| R1 P2 вне критического пути | принято; в ревизии 4 — P2 после P4 | A.2, D.6 |
+| R2 жизненный цикл хоста | принято; в ревизии 4 — отсоединённый сервер | C.2 |
+| R3 швы, регрессия chroma-key | принято | B.2, D.3 |
+| R4 браузерный гейт | принято | D.4 |
+| R5 `--tag next`, `workflow_dispatch`, `full` | принято | A.3, F.13 |
+| R6 знания агента в kit | принято | C.5 |
+| R7 setup и Windows | принято | C.1, S12 |
+| R8 `workspaceId`; origin | `workspaceId` принят. Сужение «Origin == Host» отклонено: loopback с любым портом — решение §11.1 | C.3, C.4 |
+| R9 skills, замена плана | принято | A.3, шапка |
+| R10 `editor.pix3.dev`/OPFS | принято | D.6 |
+| R11 Spine | принято | C.3 |
+| R12 `projectTabs` | принято | B.2, C.3 |
+| R13 сроки | принято, пересчитано | D |
+| Рек. 1–8 | приняты, кроме `game_controls`/`game_time` (растёт поверхность) | A, B, C, D.5, F.5 |
 
 ### Ревью 2
 
 | Замечание | Решение | Где |
 |---|---|---|
-| 1. Offline-восстановление — новая работа; молчаливый уход в память; `clearServer` обнуляет порт; смена origin | принято: W-OFF с контрактом и тестами, `lastPort`, видимый fallback, кросс-портовый слив, S10/S14/S15 в P0 | C.2, C.2b, D.1, D.3 |
-| 2. Spine по второму пути (`?raw` в экспортёре) | принято: два пути, скан архива, явная ошибка и `spine_unavailable` | C.3 |
-| 3. MVP может подтвердить удаляемое | принято: hosted-scope в P1 (меню, контекстные действия, вкладки, панели), `hosted-gaps.jsonl`, подсчёт в P3 | C.3, D.6 |
-| 4. `export_playable` без контракта | принято: барьер, отказы с причиной, явный `entryScene`, ревизия входов, проверка через iframe по байтам с диска | C.5b |
-| 5. Метрика против kill | принято: исходы (а)/(б)/(в), форма продюсера «идея / прототип», время — только требованием владельца | D.6 |
-| 6. Гейт только для благополучного сценария; сроки P1 | принято: 8 сценариев с независимыми доказательствами; P1 разделён на P1a/P1b с зависимостью от спайков | D.2–D.4 |
+| 1. Offline-восстановление — новая работа | принято; в ревизии 4 упрощено до аварийного пути, потому что сервер больше не умирает вместе с MCP | C.2, C.2b |
+| 2. Spine по второму пути | принято | C.3 |
+| 3. MVP подтверждает удаляемое | принято: hosted-scope, журнал пробелов | C.3, D.5 |
+| 4. Контракт `export_playable` | принято; барьер заменён предусловием «файлы синхронизированы» (ревью 3) | C.5b |
+| 5. Метрика и kill | принято: (а)/(б)/(в) | D.5 |
+| 6. Гейт с негативными сценариями, сроки | принято | D.4, D.2–D.3 |
+
+### Ревью 3
+
+| Замечание | Решение | Где |
+|---|---|---|
+| 1. W-OFF — оверинжиниринг, ловушка origin; сервер как отсоединённый процесс | принято: W-SRV (idle 30 мин, `servers/`, `doctor`, `--stop`, S16), W-OFF ~1 день, без миграции и сканирования; discovery через JSON `/ws/hello` с CORS | C.2, C.2b, C.3 |
+| 1. «Удаление эха `Access-Control-Allow-Private-Network` сломает кросс-портовые loopback-запросы» | **отклонено**: PNA/LNA гейтит переход из более публичного адресного пространства в менее публичное, loopback→loopback не гейтится. Эхо убираем как ненужное | C.3 |
+| 2. Экспорт без вкладки; iframe; остановка play | принято: предусловие «файлы синхронизированы», проверка в отдельном контексте через `/verify`, iframe с WebGL снят; честное ограничение MVP, автономный путь — через S15 | C.5b |
+| 3. P2 параллельно P1 — парадокс | принято: P2 после P4, до него только бесконфликтные удаления | §0, A.2, D.6 |
+| 4. `.pix3anim` без UI, `character-compiler` в PLATFORM | принято: справочник формата со стражем, `character_compile` в CLI, учёт в пробелах | B.1, C.5, D.5 |
+| 5. Арт и greenlight | принято частично: плейсхолдеры и SVG уже есть; в форме арт не оценивается; asset-паков нет | D.5 |
+| 6. Уровни P0 | принято | D.1 |
+| Вопрос владельца: CDP вместо lane | добавлен S15 с правилом решения и вариантами A/Б | §0, B.3, C.5, D.1, D.2 |
