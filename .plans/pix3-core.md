@@ -1,6 +1,6 @@
 # pix3-core: редакция Pix3 как Vite-плагин + runtime + kit
 
-Дата: 2026-10-08, ревизия 5.2 (после ревью 1–5 и решения владельца о модели правки, журнал — §J). Статус: план, P0 можно начинать.
+Дата: 2026-10-08, ревизия 5.6 (после ревью 1–9 и решения владельца о модели правки, журнал — §J). Статус: план, P0 можно начинать.
 
 **Основа:** brief «pix3-core» (решения 1–6 не пересматриваются); coupling map; `.plans/essential-restructure.md` rev 4 (B.1/B.2 — «что портировать», D.5 — протокол MVP; серверная, hosted-, pair-, offline- и channel-часть отменена); ревью `.plans/pix3-core-review.md`.
 
@@ -89,26 +89,15 @@
 
 - **Версии.** Lockstep `2.0.0-alpha.N`, источник — корневой `package.json`.
 - **Гейт плагина.** Для пререлизов версии `@pix3/runtime` проекта и `editor-core` должны совпадать **точно**, для релизов — по minor. Иначе `/__pix3/` показывает «`npm i @pix3/runtime@X`».
-- **Публикация.**
-  - OIDC: trusted publisher для `@pix3/runtime` и `@pix3/cli` перерегистрируется на `pix3dev/pix3-core`.
-  - Три новых имени — первая публикация вручную с 2FA, затем OIDC.
-  - Пререлизы публикуются в `--tag next`.
-- **Лицензии.** `editor-core` инлайнит lit, valtio, golden-layout и yaml (MIT/BSD): сборка генерирует `THIRD_PARTY_NOTICES` в `dist`, `licenses:report` запускается в CI.
-- **CI:**
-  - lint, type-check, vitest;
-  - `npm pack` со сканом tarball на Spine;
-  - сборка DeepCore на runtime 2.x;
-  - браузерный гейт (с P2).
+- **Публикация:** OIDC trusted publisher для `@pix3/runtime`/`@pix3/cli` перерегистрируется на `pix3dev/pix3-core`; три новых имени — первая публикация вручную с 2FA; пререлизы — `--tag next`.
+- **Лицензии:** `editor-core` инлайнит lit, valtio, golden-layout, yaml — сборка пишет `THIRD_PARTY_NOTICES`, `licenses:report` в CI.
+- **CI:** lint, type-check, vitest; `npm pack` со сканом на Spine; сборка DeepCore на runtime 2.x; браузерный гейт (с P2).
 
 ### A.4 Миграция DeepCore (`^1.6.2` → 2.0)
 
-1. `@pix3/runtime@2`. Кода менять не нужно: удалённые player-шаблоны DeepCore не импортирует, у него свои `src/main.ts` и `register-project-scripts.ts`.
-2. `npx pix3 kit --migrate`:
-   - убирает `.mcp.json` (сейчас `@pix3/cli@1.6.2 mcp --workspace`) и `.claude/skills/pix3-verify`;
-   - чистит `metadata.agentKit` и `metadata.pix3Hybrid` в `pix3project.yaml`;
-   - ставит kit 2.0.
-3. По желанию: `pix3({ resRoot: 'src/assets', build: false })` — свои три build-плагина остаются. Проверить взаимодействие `resolve.alias ^three$ → build/three.module.js` с `dedupe` плагина (входит в S1).
-4. Позже — `build: 'html'`.
+1. `@pix3/runtime@2` — без изменений кода (у DeepCore свои `src/main.ts` и `register-project-scripts.ts`).
+2. `npx pix3 kit --migrate`: убирает `.mcp.json` (`@pix3/cli@1.6.2 mcp --workspace`) и `.claude/skills/pix3-verify`, чистит `metadata.agentKit`/`pix3Hybrid`, ставит kit 2.0.
+3. По желанию `pix3({ resRoot: 'src/assets', build: false })`; взаимодействие `alias ^three$` с `dedupe` проверяется в S1. Позже — `build: 'html'`.
 
 ### A.5 Отклонённые форм-факторы (brief)
 
@@ -139,7 +128,7 @@ Environment API (RC) не используется. Под Vite 8 опции и�
 ### B.1 Dev-сервер
 
 - **`/__pix3/`** — HTML редактора.
-  - Ассеты редактора отдаются с `/__pix3/assets/`: сегодня `ViewportAdornments.ts:63-77` грузит `/cam.png`, `/lamp.png`, `/particles.png` от корня, а в чужом проекте это указывает в его `public/`. В `editor-core` они переводятся на `new URL(…, import.meta.url)`.
+  - Ассеты редактора — с `/__pix3/assets/` через `new URL(…, import.meta.url)`: сейчас `ViewportAdornments.ts:63-77` грузит `/cam.png` и др. от корня, то есть из чужого `public/`.
   - `mountEditor` грузится из `virtual:pix3/editor-host`.
 - **Файловый API** `/__pix3/api/*` с контрактом `pix3 serve` (`packages/pix3-cli/README.md`):
   - `file` GET/HEAD/PUT с ETag = sha256 и `If-Match` / `If-None-Match:*`;
@@ -147,20 +136,13 @@ Environment API (RC) не используется. Под Vite 8 опции и�
   - **`changeset`** (C.4): preflight `If-Match` всех файлов, staging, intent-журнал, rename, групповое событие;
   - **`sync`** (B.3), `history`/`restore` (C.3), `build` (B.6).
 
-  Маршруты портируются из `serve/workspace-server.ts` (1 455), `paths.ts`, `scan.ts`, `content-type.ts` **уже в P0** (walking skeleton). Клиент — `WorkspaceClient.ts` (600) с базой `/__pix3/api`, без токена.
-- **Защита записи:**
-  - Host-check: loopback, плюс `server.allowedHosts`;
-  - мутации требуют `X-Pix3: 1` и `Origin`, равный origin сервера;
-  - с не-loopback адресов запись отклоняется без `allowRemote`.
+  Маршруты — порт `serve/workspace-server.ts` и соседей **уже в P0** (walking skeleton); клиент — `WorkspaceClient.ts` с базой `/__pix3/api`, без токена.
+- **Защита записи:** Host-check (loopback + `server.allowedHosts`); мутации требуют `X-Pix3: 1` и свой `Origin`; с не-loopback адресов — только при `allowRemote`.
 - **События.**
   - Watcher фильтрует `resRoot` и каталоги скриптов; стабилизация — два хеша через 300 мс (`STABILITY_INTERVAL_MS`).
   - Затем `pix3:fs {seq, path, op, sha, author, changeset?}`; `author=editor`, если sha совпал с последней записью плагина. Changeset даёт **одно** групповое событие после завершения.
-  - Отслеживаются сцены, ассеты, каталоги скриптов, bot-политики (`design/tests/bots/**`) и **транзитивные локальные исходники**, достижимые из корней `editor-scripts`/`bot-policies` по графу модулей Vite. Add/delete учитываются: они меняют состав glob-корня.
-  - Заменяет `WorkspaceEventsClient.ts` (863) и `FileWatchService.ts` (416).
-- **Обнаружение:**
-  - `.pix3/dev.json` `{url, editorUrl, port, pid, versions}` пишется на `listening` и удаляется на `close`;
-  - строка `Pix3 editor: …/__pix3/` в stdout;
-  - `/__open-in-editor` (встроен в Vite) заменяет Monaco.
+  - Отслеживаются сцены, ассеты, скрипты, bot-политики (`design/tests/bots/**`) и **транзитивные локальные исходники** корней `editor-scripts`/`bot-policies` по графу Vite, включая add/delete.
+- **Обнаружение:** `.pix3/dev.json` `{url, editorUrl, port, pid, versions}` (пишется на `listening`, удаляется на `close`) и строка `Pix3 editor: …/__pix3/` в stdout. `/__open-in-editor` (встроен в Vite) заменяет Monaco.
 - **Ключи генерации картинок** — в `~/.pix3/keys.json` (0600), подставляются прокси плагина `/__pix3/api/proxy/{gemini,openai}`; в localStorage их нет (origin = порт, его делят проекты и код игры). Ключи UI-состояния префиксуются `projectId`. Если песочница не даёт писать в `~` (S3) — `.pix3/local/keys.json` (gitignore).
 
 ### B.2 Один экземпляр runtime, скрипты, `full-reload`
@@ -194,13 +176,13 @@ Environment API (RC) не используется. Под Vite 8 опции и�
 - `ScriptCompilerService` (712), `ProjectDiagnosticsService` (337), `MonacoIntelliSenseService`, `CodeDocumentService`, `ui/code-editor`; `ProjectScriptLoaderService` 944 → ~200;
 - `runtime-import-map.ts`, `lazy-rapier.ts`, `__PIX3_RAPIER_EXPORT_KEYS__`, `vite-plugin-wasm`, esbuild.wasm (12 МБ).
 
-**Порог холодной загрузки.** Excluded-`dist` проходит importAnalysis при каждом холодном старте. Требования на эталонном ноутбуке (M1 / i5-11th): TTI ≤5 с при пустом `.vite`, ≤2 с при тёплом. Провал X → вариант Y: `dist` пред-бандлится один раз и кэшируется.
+**Порог холодной загрузки** (M1 / i5-11th): TTI ≤5 с при пустом `.vite`, ≤2 с при тёплом; провал X → вариант Y (`dist` пред-бандлится и кэшируется).
 
 ### B.3 Sync-барьер и play
 
 Проверено ревью 2 на Vite 7.3.2: `moduleGraph.onFileChange` плюс `?t=` на корне **не** меняют URL вложенных импортов. `lastHMRTimestamp` ставится только при HMR-инвалидации (`isHmr`), и ESM-кэш браузера отдаёт старые `middle`/`leaf`. Серверная инвалидация барьером не является.
 
-`pix3_sync` (страница) и `POST /__pix3/api/flush` (CLI, через WS к подключённым вкладкам) → **0. Flush**: редактор записывает грязные сцены (C.2). Если идёт жест, flush ждёт pointerup до `timeoutMs`, иначе `{ok:false, reason:'gesture_in_progress'}`. **Не-ok ответ барьером не является**: при `gesture_in_progress`, `expectMismatch`, `stale_modules` агент повторяет, при `stale` из-за play действует по правилу ниже. Затем `POST /__pix3/api/sync {expect?: {path: sha}}`:
+`pix3_sync` (страница) и `POST /__pix3/api/flush` (CLI, через WS к подключённым вкладкам) → **0. Flush**: редактор записывает грязные сцены (C.2). Если идёт жест, flush ждёт pointerup до `timeoutMs`, иначе `{ok:false, reason:'gesture_in_progress'}`. **Не-ok ответ барьером не является**: при `gesture_in_progress` и `stale_modules` агент повторяет; при `expectMismatch` перечитывает несовпавшие файлы (их изменил дизайнер или другой писатель), согласует свою правку, пересчитывает `expect` и делает новый sync; при `stale` из-за play — правило ниже. Затем `POST /__pix3/api/sync {expect?: {path: sha}}`:
 1. **Rescan.** Синхронный stat и хеш всего отслеживаемого набора (B.1, кэш по mtime+size), включая add/delete.
 2. **HMR-распространение.** Для изменённых модулей плагин запускает собственный HMR-путь Vite (`server.reloadModule(mod)`, при add/delete — по glob-корню). Так `lastHMRTimestamp` ставится по всей цепочке до корней, и при следующем запросе корня все промежуточные URL получают новый `?t=`. Наличие и семантика `reloadModule` на Vite 7 и 8 проверяются в S1.
 3. **Ответ** `{rev, seq, changed:{path: sha}, expectMismatch[]}`.
@@ -211,11 +193,11 @@ Environment API (RC) не используется. Под Vite 8 опции и�
 
    Иначе ответ `{ok:false, reason:'stale_modules', paths}`. В варианте А то же подтверждение шлёт accept-callback корня.
 
-**Во время play** внешние изменения откладываются (`ExternalChangeService.ts:336-339`), и это остаётся. Повтор sync здесь ничего не меняет, поэтому ответ указывает, **чья** сессия. Мост помнит сессии, запущенные `pix3_play start/restart` в этом подключении:
+**Во время play** внешние изменения откладываются (`ExternalChangeService.ts:336-339`), и это остаётся. Повтор sync здесь ничего не меняет, поэтому ответ указывает, **чья** сессия. Владелец хранится **в состоянии страницы**, не в CDP-подключении: при старте play записываются `playOwner: 'agent' | 'designer'` (`designer` — только старт из UI) и `startedAt`, так что новый тред Codex управляет сессией агента. Эвристики по бездействию нет.
 - `{ok:false, reason:'stale', playing:'agent', pending}` — агент делает `pix3_play restart` (stop → применить отложенное → start) или `stop`, затем снова sync;
 - `{ok:false, reason:'stale', playing:'designer', pending}` — play дизайнера агент **не останавливает**: ждёт и опрашивает или спрашивает пользователя.
 
-`pix3_play {action:'stop', force:true}` останавливает только собственную сессию агента; для сессии дизайнера — отказ.
+Любое подключение агента может остановить или перезапустить сессию с `playOwner:'agent'`; `pix3_play {action:'stop', force:true}` для `designer` отклоняется.
 
 ### B.4 Play в фазе 1
 
@@ -313,7 +295,7 @@ Environment API (RC) не используется. Под Vite 8 опции и�
 **Черновик.** `sessionStorage` не переживает закрытие окна (MDN), поэтому черновик пишется в **IndexedDB**: ключ `{projectId, scenePath, baseline.sha}`, содержимое — текст `patch(baseline.ast, pending)`.
 - Checkpoint — каждые 2 с, пока сцена грязная, плюс на `pagehide`/`visibilitychange`.
 - При открытии черновик предлагается, только если `sha` диска = `baseline.sha` черновика; иначе он уходит в журнал как `rejected-draft` с тостом.
-- Гарантия — **восстановление последнего подтверждённого checkpoint'а** (подтверждён = `transaction.oncomplete`). Транзакция в полёте может быть прервана при завершении браузера (MDN, «Warning about browser shutdown»), поэтому граница потерь при любом закрытии — интервал checkpoint (2 с) плюс текущий жест.
+- Гарантия — только **восстановление последней подтверждённой (`transaction.oncomplete`) ревизии checkpoint'а**. 2 с — целевой интервал, а не обещание: транзакция в полёте может быть прервана при завершении браузера (MDN, «Warning about browser shutdown»).
 
 Черновик — копия для восстановления, а не документ.
 
@@ -357,7 +339,15 @@ Fallback — полная сериализация с предупреждени
 
 **Затирание по устаревшему чтению.** Если E возвращает ключи последнего flush к значениям до него, — тост «Агент перезаписал вашу правку X [Вернуть]». Правило kit: начинать с успешного `pix3_sync`. Это регрессия относительно protected set: ловится только последний flush.
 
-**Две вкладки — Web Locks** (~50 строк). `navigator.locks.request('pix3:write:<projectId>')`: первая вкладка — писатель, остальные read-only с баннером и кнопкой «Перехватить управление». Перехват — `steal`; прежняя вкладка становится read-only и больше ничего не пишет. Это исключает пинг-понг 412 → слияние → очистка истории между двумя вкладками. `If-Match` остаётся страховкой для другого браузера или профиля.
+**Две вкладки — Web Locks** (~50 строк). `navigator.locks.request('pix3:write:<projectId>')`: первая вкладка — писатель, остальные read-only с баннером и кнопкой «Перехватить управление». Писатель держит блокировку внутри долгоживущего callback'а `request()` (он завершается только при закрытии вкладки или освобождении). **Авторитет — сервер, блокировка — сигнал UI.** У каждой вкладки есть `writerId`. Путь записи плагина (тот же mutex C.4) принимает changeset только от текущего писателя; остальным — `409 writer_superseded` независимо от `If-Match`. Первая вкладка делает claim при загрузке.
+
+Передача A → B:
+1. B: `request(…, {steal:true})`. Promise у A отклоняется с `AbortError` (callback не отменяется, `signal` отменяет только свой запрос). В `.catch` A перестаёт планировать flush, становится read-only, тост.
+2. B: `POST /__pix3/api/handover/claim {writerId}`. Claim обрабатывается **под тем же mutex**, что и записи: уже принятый changeset A завершается первым. Затем сервер переключает писателя на B и возвращает `{seq, hashes}` получившегося диска.
+3. Changeset A, пришедший после переключения, получает `writer_superseded`: A сообщает об этом и журналирует содержимое как `rejected-draft`.
+4. B до ответа на claim — read-only; после ответа перечитывает baseline из возвращённого состояния и включает запись.
+
+Клиентских таймаутов нет: упавшая A просто больше не пишет, её незавершённый changeset разбирает C.4. `BroadcastChannel` — только UX; `If-Match` — страховка для другого браузера.
 
 **Смерть dev-сервера:** баннер, правки продолжаются в памяти и в IndexedDB-черновике. После `npm run editor` — flush (или предложение черновика, если страница перезагрузилась).
 
@@ -381,20 +371,9 @@ Fallback — полная сериализация с предупреждени
 
 ### C.5 Что остаётся от машинерии
 
-| Компонент | Строк | Итог |
-|---|---|---|
-| `HistoryManager` | 202 | KEEP |
-| `OperationService` | 628 | KEEP без `Y.UndoManager` (~−50) |
-| `features/history` | 102 | KEEP; restore — в History |
-| `AutosaveService` | 413 | → `FlushService` ~350 + черновик IndexedDB ~150 |
-| `ProtectedSetService` | 409 | DROP, baseline переезжает во `FlushService` |
-| `RecoveryJournalService` + fallback | 294 + 139 | → плагин ~220, + changeset-tx ~250 |
-| `SceneDiskStateService` | 257 | поглощается baseline |
-| `ExternalChangeService` | 475 | → ~250: отсрочка на жест и play, своё эхо, слияние C.3 |
-| `ExternalMergeService` | 602 | DROP, кроме `restoreVersion`/`listVersions` |
-| `ProjectOwnership`, `Ack`, `MergeLog` | 681 | DROP |
-| `external-merge/*` | 2 056 | оставить `scene-doc`, `value-equality`, `hash`; DROP остальное |
-| `workspace/*` | 3 739 | оставить `WorkspaceClient`, `workspace-protocol`; `WorkspaceSessionService` → ~150; `AgentKeepaliveService` → ~60; DROP остальное |
+- **KEEP:** `HistoryManager` (202), `OperationService` (628, без `Y.UndoManager`), `features/history`; из `external-merge/` — `scene-doc`, `value-equality`, `hash`; из `workspace/` — `WorkspaceClient`, `workspace-protocol`.
+- **Переделка:** `AutosaveService` (413) → `FlushService` ~350 + черновик ~150; `ExternalChangeService` (475) → ~250; `RecoveryJournalService` (294) → плагин ~220 + changeset-tx ~250; `WorkspaceSessionService` → ~150; `AgentKeepaliveService` → ~60; `SceneDiskStateService` поглощается baseline.
+- **DROP:** `ProtectedSetService` (baseline → `FlushService`), `ExternalMergeService` (кроме `restoreVersion`/`listVersions`), `ProjectOwnership`, `Ack`, `MergeLog`, остальное `external-merge/` и `workspace/`, IndexedDB-fallback журнала.
 
 ## D. Транспорт агента: Chrome DevTools MCP
 
@@ -415,7 +394,7 @@ Fallback — полная сериализация с предупреждени
 | `pix3_status` | версии, проект, активная сцена, `scriptsStatus`, число ошибок |
 | `pix3_sync` | flush правок редактора → rescan → барьер (B.3), `{expect?, timeoutMs}`. Гарантия: диск отражает состояние редактора **на момент успешного sync**; последующие гонки обслуживает C.3. Дизайнеру не нужно помнить о сохранении |
 | `pix3_scene` | `{path?, maxDepth, nodeId?, find?}` → DTO |
-| `pix3_play` | `{action: start\|stop\|restart\|pause\|status, scenePath?, force?}`; `status` сообщает владельца (`agent`/`designer`); `stop`/`restart` с `force` — только для своей сессии (B.3) |
+| `pix3_play` | `{action: start\|stop\|restart\|pause\|status, scenePath?, force?}`; `status` возвращает `playOwner` и `startedAt` из состояния страницы; `stop`/`restart` — для любой `agent`-сессии, для `designer` отклоняется даже с `force` (B.3) |
 | `pix3_game_run` | `GameTestService.run(spec)`; `game.input` и `observe` — внутри spec |
 | `pix3_screenshot` | `{target: game\|viewport, maxSize}` → PNG в `.pix3/screens/`, возвращается путь |
 | `pix3_build` | `{format, compress, entryScene}` → `{path, bytes, sha}` |
@@ -458,7 +437,7 @@ Fallback — полная сериализация с предупреждени
    - macOS: `open -na "Google Chrome" --args …` — LaunchServices выводит Chrome из-под seatbelt.
    - Профиль: `~/.pix3/chrome`, если Chrome запущен вне песочницы; иначе `$TMPDIR/pix3-chrome` (S3).
    - Chrome ≥136 требует отдельный профиль.
-   - **Проверка 9333.** Перед запуском `GET /json/version`, затем проверка, что это наш профиль: в `/json/list` есть страница-маркер `/__pix3/` или `--user-data-dir` процесса совпадает. Чужой или мёртвый процесс на 9333 → пробуются 9334–9339, `agent-setup --repair` переписывает `--browserUrl` в MCP-конфиге, печатается диагностика «9333 занят процессом X; используем 9335; перезапустите тред агента».
+   - **Проверка 9333.** Перед запуском `GET /json/version`, затем проверка, что это наш профиль: в `/json/list` есть страница-маркер `/__pix3/` или `--user-data-dir` процесса совпадает. Чужой или мёртвый процесс на 9333 → пробуются 9334–9339, `agent-setup --repair` переписывает `--browserUrl` в MCP-конфиге, печатается диагностика «9333 занят процессом X; используем 9335. Запущенный Codex держит старый `--browserUrl` — перезапустите Codex или начните новый тред».
    - **Несколько проектов — не коллизия.** Все они делят один профиль и один порт: второй проект открывается новым app-окном (повторный `--app`) в том же Chrome, а D.3 различает проекты по порту Vite в URL.
 3. При `SSH_CONNECTION` Chrome не запускается (E.3).
 
@@ -476,29 +455,23 @@ Fallback — полная сериализация с предупреждени
 ### D.6 Разовая настройка
 
 `pix3 agent-setup [codex|claude]` запускает агент: AGENTS.md говорит «нет `pix3-browser` → запусти и попроси новый тред».
-- **Codex:** таблица `[mcp_servers.pix3-browser]`:
-  - `npx -y chrome-devtools-mcp@1.10.1 --categoryExperimentalThirdParty=true --browserUrl=…` (после P2 — `--wsEndpoint`/`--wsHeaders`);
-  - на Windows `cmd /c`;
-  - таймауты D.1;
-  - таблица заменяется целиком, бэкап, проверка `codex mcp list`.
-- **Claude:** `claude mcp add --scope user pix3-browser -- …`.
-- Песочницу Codex не трогаем молча, печатаем инструкцию.
+- **Codex:** таблица `[mcp_servers.pix3-browser]` — `npx -y chrome-devtools-mcp@1.10.1 --categoryExperimentalThirdParty=true --browserUrl=…` (после P2 — `--wsEndpoint`/`--wsHeaders`), на Windows `cmd /c`, таймауты D.1; таблица заменяется целиком, бэкап, проверка `codex mcp list`.
+- **Claude:** `claude mcp add --scope user pix3-browser -- …`. Песочницу Codex не трогаем молча — печатаем инструкцию.
 
 ## E. Поток пользователя
 
 ### E.1 Дизайнер в Codex desktop, без терминала
 
 1. **Онбординг** — одна фраза из вики MY.GAMES: «Сделай игру про X на Pix3: `npm create pix3@latest x-game -- --template recipe-tapper-2d --yes`, прочитай `x-game/AGENTS.md` и следуй ему». Для пустой папки треда — `create-pix3 .`.
-2. Агент запускает `npm install` и `npm run editor`. Одобрения песочницы перечислены в онбординге заранее (S3). Открывается app-окно с `entryScene`.
-3. Если инструментов `pix3-browser` нет: `npx pix3 agent-setup codex` → новый тред. Один раз на машину.
-4. **Цикл** (ревью 3, N10):
+2. Агент: `npm install`, `npm run editor` (одобрения песочницы — заранее в онбординге, S3) → app-окно с `entryScene`. Нет `pix3-browser` → `npx pix3 agent-setup codex` и новый тред (раз на машину).
+3. **Цикл** (ревью 3, N10):
    1. **успешный** `pix3_sync`, затем свежее чтение файлов;
    2. правки YAML/TS;
    3. `pix3_sync`;
    4. `npm run check` → `pix3_play restart` / `pix3_game_run` → `pix3_errors` → `pix3_screenshot`.
 
-   Не-ok sync — не барьер: повторить; при `playing:'agent'` — restart своего play и снова sync; при `playing:'designer'` — ждать или спросить пользователя. Дизайнер тем временем подстраивает в инспекторе; правки уходят на диск при простое, по Ctrl+S или по sync.
-5. **Playable:** успешный `pix3_sync` → `npm run build` (сам делает flush открытого редактора) → проверка (preview, `file://`, iframe) → путь к `dist/x-game.html`.
+   Не-ok sync — не барьер: повторить; при `expectMismatch` — перечитать несовпавшие файлы, согласовать, пересчитать `expect`, новый sync; при `playing:'agent'` — restart своего play и снова sync; при `playing:'designer'` — ждать или спросить пользователя. Правки дизайнера уходят на диск при простое, по Ctrl+S или по sync.
+4. **Playable:** успешный `pix3_sync` → `npm run build` (сам делает flush редактора) → проверка (preview, `file://`, iframe) → `dist/x-game.html`.
 
 ### E.2 Инженер в VS Code с Claude Code
 
@@ -545,17 +518,11 @@ B.2 rev 4 построчно, плюс:
 - `game-tab.ts:10,283`, `logs-panel.ts:4,110` → «Copy for agent»;
 - `pix3-lightbox.ts:9,11`.
 
-**Страж:** `optionalService`/`hasService` (`coauthoring/optional-service.ts`) тихо деградирует, если импорт пропал. Спек «после `mountEditor` зарегистрированы сервисы [список]».
+**Страж:** `optionalService`/`hasService` тихо деградирует без импорта — спек «после `mountEditor` зарегистрированы сервисы [список]».
 
 ### F.3 Отложить до dogfood (не блокирует компиляцию)
 
-- удаление мёртвых диалогов `ui/shared` (annotator, `composer-attachments`, `project-sync-dialog`, `auto-slice`);
-- неиспользуемые провайдеры image-gen;
-- остатки `external-merge`;
-- оставшийся код `services/export`;
-- knip-проход.
-
-Всё это — 1,5 дня в P2.
+Мёртвые диалоги `ui/shared`, лишние провайдеры image-gen, остатки `external-merge` и `services/export`, knip — 1,5 дня в P2.
 
 ### F.4 Новый код
 
@@ -570,7 +537,7 @@ B.2 rev 4 построчно, плюс:
 
 - **Удаляется:** `.mcp.json` с `pix3 mcp`, блок `mcp-tools` (правится `kit.spec.ts`), `pix3-verify`.
 - **Добавляется:**
-  - (а) skill `pix3-editor`: вкладка, 3p-инструменты, inline-fallback с `waitForStableDom:false`, цикл E.1 «sync → чтение → правка → sync», «не-ok sync = не барьер» с правилом владельца play (B.3), sync перед сборкой, «не переписывай сцену целиком»;
+  - (а) skill `pix3-editor`: вкладка, 3p-инструменты, inline-fallback с `waitForStableDom:false`, цикл E.1 «sync → чтение → правка → sync», «не-ok sync = не барьер» с правилами `expectMismatch` и владельца play (B.3), sync перед сборкой, «не переписывай сцену целиком»;
   - (б) справочник `.pix3anim` со стражем по интерфейсам `AnimationResource.ts`;
   - (в) `pix3 character-compile` (`character-compiler.ts`, 342) → `.pix3anim` + префаб `core:CharacterVisual2D`;
   - (г) `verify-and-fix.md`, `game-prototype.md` под CDP;
@@ -634,8 +601,12 @@ B.2 rev 4 построчно, плюс:
 | N4: контрпример S1 на реальном проекте | исполненное значение вложенного модуля новое к ответу sync; не-ok при play |
 | Правка скрипта при открытой `/` | поле в инспекторе, редактор не перезагружен |
 | Две вкладки, правка во второй | вторая read-only с баннером; ни одного 412; история первой цела; «Перехватить» передаёт запись |
-| N9: закрыть окно с несохранённым после подтверждённого checkpoint'а → `npm run editor` | предложен черновик этого checkpoint'а и записан; при изменённом диске — `rejected-draft` |
+| Changeset A задержан >5 с после preflight, B делает claim | либо A завершён до переключения (baseline B его содержит), либо A получил `writer_superseded`; запись A после первой записи B невозможна |
+| A падает посреди changeset'а | восстановление C.4; B делает claim и пишет нормально |
+| Sync агента с устаревшим `expect` | `expectMismatch` → перечитывание → новый sync ok |
+| N9: закрыть окно после подтверждённого (`oncomplete`) checkpoint'а → `npm run editor` | предложена ревизия этого checkpoint'а и записана; при изменённом диске — `rejected-draft` |
 | Play агента → правка файла → sync | `stale, playing:'agent'` → `pix3_play restart` → sync ok, новое значение в живой сцене |
+| Play агента → новый тред Codex (новое подключение) → sync | `stale, playing:'agent'`, restart из нового подключения разрешён |
 | Play дизайнера → sync | `stale, playing:'designer'`; play не остановлен; `stop` с `force` отклонён |
 
 **Артефакт:** dogfood C1 — Igor, локально, в Codex desktop.
@@ -682,11 +653,7 @@ B.2 rev 4 построчно, плюс:
 
 ### G.5 P4 — решение (1–2 дня)
 
-| Исход | Действие |
-|---|---|
-| Успех | `2.0.0` в `latest`; DeepCore мигрирует; LABS — по таблице пробелов; кандидат — VS Code-хост |
-| Провал (а) | один повтор онбординга |
-| Провал (б) | `pix3-core` остаётся внутренним (runtime + CLI + плагин для инженеров) |
+Успех → `2.0.0` в `latest`, миграция DeepCore, LABS по пробелам. Провал (а) → повтор онбординга; (б) → внутренний инструмент инженеров.
 
 ### G.6 Арифметика
 
@@ -705,7 +672,6 @@ B.2 rev 4 построчно, плюс:
 - C2 в конце P2 (−3): 81–92 = **16,2–18,4 недели**.
 - Плюс B.6.4 за P4 (ещё −3): 78–89 = 15,6–17,8 недели.
 
-Rev 5.2 добавила 1 день: Web Locks и проверка 9333.
 
 **Кратчайший путь до dogfood `alpha.1` (C1 Igor'я)** — выбор владельца:
 
@@ -726,7 +692,7 @@ Rev 5.2 добавила 1 день: Web Locks и проверка 9333.
 
 **Расчёт:** P1-кратчайший = 46–50,5 − 9,5 + 1 (маршруты W) = 37,5–42. **Итого 4,5 + 37,5–42 = 42–46,5 дня (8,4–9,3 недели) до C1.** Срезанное возвращается в P2 (+~9,5 дня).
 
-**Третий вариант — «питч на dogfood» (решение владельца, план не выбирает).** Питч MY.GAMES на dogfood-альфе по кратчайшему пути (8,4–9,3 недели): C1 Igor'я, записанное демо, измеренные цифры (время до играбельного, токены, размер playable, число вмешательств). Stranger-тест и P2 становятся следующей, уже профинансированной фазой.
+**Третий вариант — «питч на dogfood» (решает владелец).** Питч MY.GAMES на dogfood-альфе (8,4–9,3 недели): C1 Igor'я, записанное демо, замеры (время до играбельного, токены, размер playable, вмешательства). Stranger-тест и P2 — следующая, профинансированная фаза.
 - **Сохраняет:** доказательство формы продукта и адекватности прототипа на одном концепте; реальный playable; честные замеры инструмента.
 - **Теряет:** исход (а) — свидетельства самостоятельности дизайнера нет вовсе; время есть только для Igor'я, верхней границы результата, а не для целевого пользователя; (б) измерен на одном концепте вместо трёх; прокси CDP, полный экспорт и Windows ещё не сделаны, поэтому демо — только на машине Igor'я.
 
@@ -743,7 +709,7 @@ Rev 5.2 добавила 1 день: Web Locks и проверка 9333.
 | Гонка `sync`, устаревшие вложенные модули, два экземпляра runtime | барьер B.3 (`reloadModule` проверен ревью 3 на Vite 7.3.2); S1 на `npm pack` с контрпримером; план C |
 | `full-reload`/reconnect-reload | вариант Б; иначе А + черновик IndexedDB |
 | YAML-диф, ложные конфликты от дефолтов | S12; `norm` на всех сторонах; гейт P1 |
-| Окно потерь write-behind | flush по простою 1,5 с или ≤10 с; восстанавливается последний подтверждённый checkpoint IndexedDB; потеря ≤2 с + текущий жест |
+| Окно потерь write-behind | flush по простою 1,5 с или ≤10 с; checkpoint IndexedDB с целевым интервалом 2 с; гарантия — только последняя подтверждённая ревизия |
 | Слияние дельты теряет правку | `rejected-draft` до reload; тост с ключами; гейт N8 |
 | Агент читает до flush | цикл «sync → чтение», flush в `buildStart`/`check`/`smoke`; гейт N10 |
 | Затирание правки агентом, частичный changeset | C.3, C.4; внешние писатели не защищены — сказано явно |
@@ -775,26 +741,17 @@ Rev 5.2 добавила 1 день: Web Locks и проверка 9333.
 
 ## J. Журнал ревью
 
-Полные тексты — `.plans/pix3-core-review.md`.
+«Принято» = решение; подтверждает гейт.
 
 | Ревью | Главное | Итог | Где |
 |---|---|---|---|
-| 1 (рецензент + координатор) | R1 нет `sourcePath`; R2 гонка sync; R3 P0 зависит от P1; R4 `full-reload`, three, Spine, ассеты; R5–R7 saver, затирание, повтор; R8–R14 песочница, keepalive, швы, сборка, SSH, сроки, docs | приняты; **частично отклонено**: lane в S4 — по историческим замерам; **до решения владельца**: экспорт «npm-проект» | A–G |
-| 2 (Codex, rev 2.1) | N1 drag, N2 представления, N3 undo, N4 барьер, N5 структура, N6 атомарность, N7 `yaml` в player | приняты; N1/N3 закрыты write-behind | B.2–B.6, C |
-| Владелец | смена формата сцен (JSON/TSX) — **отклонено**; write-behind вместо коммита на жест — **принято** | | C.0, C |
-| 3 (Codex, rev 4) | N8 дельта состояния, N9 черновик IndexedDB, N10 sync до чтения и сборки, N11 barrel-импорты | приняты | B.3, B.6, C, E.1 |
-| 4 (Codex, rev 5) | цикл sync при play; гарантия черновика | приняты: владелец play в `stale`; последний подтверждённый checkpoint | B.3, C.1 |
-
-**Ревью 5** (Gemini, по rev 5.1; пометки координатора сверены с tarball)
-
-| Замечание | Решение | Где |
-|---|---|---|
-| 9333: зомби, чужой процесс, мультипроектность | **частично**: проверка профиля, 9334–9339, `--repair` возвращены (были потеряны при сжатии rev 2→5); мультипроектность коллизией не является | D.4, H |
-| 3p: рассинхрон через `tools/list` | **отклонено** по механизму: 3p-инструменты не идут через `tools/list`. Принято: `list_3p_developer_tools` после каждого `select_page` и перезагрузки | D.1 |
-| 3p: `params` как JSON-строка | принято: замер ошибок экранирования в S4, порог 5 %, провал → inline основной путь | D.1, G.1 |
-| Вариант Б — иллюзия | **частично**: А по умолчанию, Б — опция по итогу S1 | B.2 |
-| Две вкладки → пинг-понг очистки undo | принято: Web Locks + read-only + перехват; гейт | C.3, G.2 |
-| JSONC решает адресацию «из коробки» | **отклонено**: `modify` тоже адресует по индексу; слой id нужен в любом формате (уточнено C.0) | C.0 |
-| Арт и greenlight | **отклонено** как дубль: плейсхолдеры, форма продюсера, S6 | G.4 |
-| Сроки как организационная угроза | **частично**: добавлен вариант «питч на dogfood» с явными потерями; срезы с потерей комментариев — только для C1; выбор за владельцем | G.6, H |
-| «Принято» в §J ≠ подтверждено экспериментом | принято как оговорка: пункты R1–R14 — решения и спайки, подтверждение — в гейтах | J |
+| 1 (рецензент + координатор) | `sourcePath`, гонка sync, порядок P0, `full-reload`/three/Spine/ассеты, saver, затирание, песочница, keepalive, швы, сборка, SSH, сроки, docs | приняты; lane в S4 — по историческим замерам; экспорт «npm-проект» — за владельцем | A–G |
+| 2 (Codex, 2.1) | N1–N7: drag, представления, undo, барьер, структура, атомарность, `yaml` в player | приняты; N1/N3 закрыты write-behind | B, C |
+| Владелец | JSON/TSX-сцены — **отклонено**; write-behind — **принято** | | C |
+| 3 (Codex, 4) | N8 дельта, N9 IndexedDB, N10 sync до чтения/сборки, N11 barrel | приняты | B, C, E.1 |
+| 4 (Codex, 5) | sync при play; гарантия черновика | приняты | B.3, C.1 |
+| 5 (Gemini, 5.1) | 9333, `params`-строка, вариант Б, две вкладки, JSONC, арт, сроки | приняты 9333, порог 5 %, А по умолчанию, Web Locks; сроки — вариант «питч на dogfood»; **отклонены**: механизм `tools/list`, JSONC «из коробки», арт | B.2, C, D, G.6 |
+| 6 (Gemini, 5.2) | владелец play, `steal`, сообщение о порте | приняты | B.3, C.3, D |
+| 7 (Codex, 5.3) | механизм `steal`, `expectMismatch`, 2 с — цель | приняты, гейты | B.3, C, H |
+| 8 (Codex, 5.4) | `steal` и changeset в полёте | принято, заменено в 5.6 | C.3 |
+| 9 (Codex, 5.5) | таймаут 5 с пропускает позднюю запись A; упавшая A не подтверждает | принято: серверный `writerId`, claim под mutex записей, `409 writer_superseded`; клиентский таймаут и маркер удалены | C.3, G.2 |
