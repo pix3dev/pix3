@@ -79,7 +79,7 @@ any redistribution.
 
 This is why Spine is an optional, host-injected dependency rather than a hard
 one: the runtime never imports it (see
-`packages/pix3-runtime/src/core/spine/spine-module.ts`), and it is only loaded
+`@pix3/runtime/src/core/spine/spine-module.ts`), and it is only loaded
 when a host registers a loader. Projects that do not use `SpineSkeleton2D` never
 pull it in and take on no Spine obligation.
 

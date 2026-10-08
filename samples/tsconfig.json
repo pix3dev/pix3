@@ -5,7 +5,7 @@
   },
   "include": [
     "./**/*.ts",
-    "../packages/pix3-runtime/src/**/*.ts"
+    "../node_modules/@pix3/runtime/src/**/*.ts"
   ],
   "exclude": []
 }

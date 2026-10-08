@@ -70,14 +70,9 @@ export default [
   },
   js.configs.recommended,
   {
-    // The runtime package is in the root tsconfig's `include`, so typed linting covers it from
-    // here. The collab server has its own tsconfig and gets its own block below.
-    files: [
-      'src/**/*.ts',
-      'src/**/*.js',
-      'packages/pix3-runtime/src/**/*.ts',
-      'packages/pix3-runtime/src/**/*.js',
-    ],
+    // The editor. (`@pix3/runtime` and `@pix3/cli` come from npm; their sources live in
+    // pix3-core.) The collab server has its own tsconfig and gets its own block below.
+    files: ['src/**/*.ts', 'src/**/*.js'],
     languageOptions: {
       parser: tsparser,
       parserOptions: {
@@ -127,23 +122,6 @@ export default [
         ecmaVersion: 'latest',
         sourceType: 'module',
         project: './packages/pix3-collab-server/tsconfig.json',
-      },
-    },
-    plugins: {
-      '@typescript-eslint': tseslint,
-      prettier,
-    },
-    rules: typescriptRules,
-  },
-  {
-    // `@pix3/cli` is Node too, with its own tsconfig (NodeNext, `.ts` import extensions).
-    files: ['packages/pix3-cli/src/**/*.ts'],
-    languageOptions: {
-      parser: tsparser,
-      parserOptions: {
-        ecmaVersion: 'latest',
-        sourceType: 'module',
-        project: './packages/pix3-cli/tsconfig.json',
       },
     },
     plugins: {

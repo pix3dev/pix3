@@ -1,11 +1,10 @@
 /**
- * The agent kit, as the CLI generates it (`packages/pix3-cli/kit/` — `kit.json` + `files/**`),
- * bundled into the editor so "Work with your own agent" writes byte-for-byte what `pix3 kit` /
- * `pix3 new` write.
+ * The agent kit, as the CLI generates it (`kit.json` + `files/**`), bundled into the editor so
+ * "Work with your own agent" writes byte-for-byte what `pix3 kit` / `pix3 new` write.
  *
- * The folder is generated and gitignored: `scripts/ensure-agent-kit.mjs` (re)builds it when
- * `vite.config.ts` / `vitest.config.ts` load, and `bundled-kit.spec.ts` fails when what is bundled
- * here differs from a fresh generation. `exhaustive` is what lets the glob see `.claude/skills/**`
+ * Read from the published `@pix3/cli` package (`node_modules/@pix3/cli/kit/`, shipped in its
+ * tarball), so the editor carries exactly the kit of the CLI version it depends on. The CLI's
+ * source lives in pix3-core now. `exhaustive` is what lets the glob see `.claude/skills/**`
  * (import-glob skips dot-directories otherwise).
  *
  * Eager inside this module, lazy from the outside: only `AgentKitService` imports it, dynamically,
@@ -14,20 +13,20 @@
 
 import type { BundledAgentKit } from './agent-kit-install';
 
-const KIT_MANIFEST_MODULES = import.meta.glob('../../../../packages/pix3-cli/kit/kit.json', {
+const KIT_MANIFEST_MODULES = import.meta.glob('../../../../node_modules/@pix3/cli/kit/kit.json', {
   query: '?raw',
   import: 'default',
   eager: true,
 }) as Record<string, string>;
 
-const KIT_FILE_MODULES = import.meta.glob('../../../../packages/pix3-cli/kit/files/**/*', {
+const KIT_FILE_MODULES = import.meta.glob('../../../../node_modules/@pix3/cli/kit/files/**/*', {
   query: '?raw',
   import: 'default',
   eager: true,
   exhaustive: true,
 }) as Record<string, string>;
 
-const FILES_MARKER = '/pix3-cli/kit/files/';
+const FILES_MARKER = '/@pix3/cli/kit/files/';
 
 interface KitManifestJson {
   readonly version?: unknown;
@@ -38,7 +37,7 @@ const readManifest = (): { version: string; files: string[] } => {
   const raw = Object.values(KIT_MANIFEST_MODULES)[0];
   if (!raw) {
     throw new Error(
-      'The agent kit is missing from this build (packages/pix3-cli/kit/kit.json). Run `npm run build-kit -w packages/pix3-cli` and rebuild.'
+      'The agent kit is missing from this build (node_modules/@pix3/cli/kit/kit.json). Run `npm install` and rebuild.'
     );
   }
   const parsed = JSON.parse(raw) as KitManifestJson;

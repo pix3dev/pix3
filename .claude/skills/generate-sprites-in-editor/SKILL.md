@@ -46,7 +46,7 @@ For attaching, play-mode control, and inspection, see the sibling
 - The bridge is **dev-only** and the `assets` surface needs **v2+**: check
   `window.__PIX3_DEBUG__.version >= 2`. If `window.__PIX3_DEBUG__` is `undefined`
   you're on a prod build / wrong page.
-- The editor renders the **pix3 runtime from `packages/pix3-runtime/src`** (the
+- The editor renders the **pix3 runtime from `node_modules/@pix3/runtime/src`** (the
   `@pix3/runtime` alias), so any runtime feature you just wrote is live in the editor
   even before `yalc:publish`. Consumers like DeepCore only get it after
   `yalc publish` (in the package) **and** `yalc update` (in the consumer).

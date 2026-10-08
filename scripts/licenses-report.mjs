@@ -21,12 +21,12 @@ const read = path => {
 const SOURCES = [
   { file: 'package.json', label: 'editor', fields: ['dependencies'] },
   {
-    file: 'packages/pix3-runtime/package.json',
+    file: 'node_modules/@pix3/runtime/package.json',
     label: 'runtime',
     fields: ['dependencies', 'peerDependencies'],
   },
   { file: 'packages/pix3-collab-server/package.json', label: 'collab-server', fields: ['dependencies'] },
-  { file: 'packages/pix3-cli/package.json', label: 'cli', fields: ['dependencies'] },
+  { file: 'node_modules/@pix3/cli/package.json', label: 'cli', fields: ['dependencies'] },
 ];
 
 const NODE_MODULES = ['node_modules/', 'packages/pix3-collab-server/node_modules/'];

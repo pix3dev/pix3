@@ -101,7 +101,11 @@ export async function loadMonacoRuntimeLibs(): Promise<MonacoLib[]> {
   const [runtime, three] = await Promise.all([
     Promise.all(
       Object.entries(RUNTIME_SOURCE_LOADERS).map(async ([key, load]) => ({
-        filePath: remapAfter(key, 'packages/pix3-runtime/', 'file:///node_modules/@pix3/runtime/'),
+        filePath: remapAfter(
+          key,
+          'node_modules/@pix3/runtime/',
+          'file:///node_modules/@pix3/runtime/'
+        ),
         content: await load(),
       }))
     ),

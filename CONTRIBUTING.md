@@ -12,7 +12,7 @@ touches:
 | Path | Licence |
 |---|---|
 | `src/` — the editor | Apache-2.0 |
-| `packages/pix3-runtime/` — `@pix3/runtime` | Apache-2.0 |
+| `@pix3/runtime` (npm; source in pix3-core) | Apache-2.0 |
 | `packages/pix3-collab-server/` — `@pix3/collab-server` | Proprietary (see its LICENSE) |
 | `tools/pix3-agent-bridge/` | MIT |
 

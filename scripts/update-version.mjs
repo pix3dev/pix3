@@ -9,19 +9,14 @@ const publicVersionPath = resolve(projectRoot, 'public/version.json');
 const sourceVersionPath = resolve(projectRoot, 'src/version.ts');
 
 /**
- * Workspace packages that ride the editor's version, so `@pix3/runtime@X.Y.Z` is the engine that
- * shipped with editor X.Y.Z and nothing has to be cross-referenced to find out.
- *
- * The tradeoff is deliberate: a lockstep version is a *product* version, so the runtime's number
- * no longer promises anything about API compatibility — read the change log, not the minor digit.
+ * Workspace packages that ride the editor's version. `@pix3/runtime` and `@pix3/cli` used to be
+ * listed here too; since the 1.6.x freeze they are npm dependencies released from pix3-core.
  *
  * `tools/pix3-agent-bridge` is absent on purpose. It is not a workspace, ships on its own cadence
  * behind its own `bridge-v*` tag, and is useful against editors it was not built beside.
  */
 const workspacePackageJsonPaths = [
-  resolve(projectRoot, 'packages/pix3-runtime/package.json'),
   resolve(projectRoot, 'packages/pix3-collab-server/package.json'),
-  resolve(projectRoot, 'packages/pix3-cli/package.json'),
 ];
 
 function createDisplayVersion(version, build) {

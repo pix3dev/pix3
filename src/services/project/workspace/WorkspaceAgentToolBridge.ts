@@ -59,7 +59,7 @@ import type { ProjectScriptLoaderService } from '@/services/scripting/ProjectScr
  *   until it is switched on again.
  */
 
-/** The v1 tool surface. Keep in step with `packages/pix3-cli/src/workspace-agent/tools.ts`. */
+/** The v1 tool surface. Keep in step with `@pix3/cli` 1.6.x `src/workspace-agent/tools.ts` (pix3-core, `packages/cli/`). */
 export const WORKSPACE_AGENT_TOOLS: readonly string[] = [
   'project_status',
   'play_start',
@@ -102,7 +102,7 @@ export const HOLD_SAFETY_MS = 180_000;
  * How long a start may take before the game counts as not running. Sized for a heavy consumer game
  * (DeepCore's voxel world outlasted the previous 5 s and was playing seconds later); the answer
  * comes as soon as it runs. The MCP
- * side's call timeouts (`packages/pix3-cli/src/workspace-agent/agent-tools.ts`) are sized above it.
+ * side's call timeouts (`@pix3/cli` 1.6.x `src/workspace-agent/agent-tools.ts`) are sized above it.
  */
 export const RUNTIME_START_TIMEOUT_MS = 30_000;
 const RUNTIME_POLL_MS = 50;

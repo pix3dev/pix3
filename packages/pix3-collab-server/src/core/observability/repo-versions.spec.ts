@@ -72,7 +72,7 @@ describe('touchesDeployPaths', () => {
 
   it('does not let a sibling package under the same parent match', () => {
     expect(
-      touchesDeployPaths(['packages/pix3-runtime/src/fw/di.ts'], ['packages/pix3-collab-server/'])
+      touchesDeployPaths(['packages/pix3-other/src/fw/di.ts'], ['packages/pix3-collab-server/'])
     ).toBe(false);
   });
 

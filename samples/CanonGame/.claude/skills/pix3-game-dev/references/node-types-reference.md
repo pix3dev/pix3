@@ -687,7 +687,7 @@ A `THREE.InstancedMesh` wrapper for rendering many copies of one geometry/materi
 - **Instance buffers are NOT serialized** — only the node-level config above is saved. Repopulate buffers at runtime.
 - The `material` block IS serialized, and is what makes an instanced mesh authorable: before it existed the loader built no material at all, so a scene-authored instanced mesh always rendered with a shared white PBR default — unreachable from the inspector and past the project's mobile material policy. A `material` handed to the constructor in code still wins over the authored block.
 - Raycasts against an instanced mesh return the hit `instanceId`.
-- Backed by `ECSService` for project-managed ECS worlds; runtime lives in `packages/pix3-runtime/src/nodes/3D/InstancedMesh3D.ts` + `core/ECSService.ts`.
+- Backed by `ECSService` for project-managed ECS worlds; runtime lives in `node_modules/@pix3/runtime/src/nodes/3D/InstancedMesh3D.ts` + `core/ECSService.ts`.
 
 ---
 

@@ -1,5 +1,7 @@
 # Pix3 Editor
 
+> **Frozen at 1.6.x — security fixes only.** The engine (`@pix3/runtime`) and CLI (`@pix3/cli`) moved to [pix3-core](https://github.com/pix3dev/pix3-core); this editor consumes them from npm (`~1.6.4`). The current spec and Change Log (version of record from 2.0) are in pix3-core `docs/pix3-specification.md`.
+
 ### ▶ [Open the editor: **editor.pix3.dev**](https://editor.pix3.dev)
 
 Runs in the browser — nothing to install. Project site and feature tour: **[pix3.dev](https://pix3.dev)**.
@@ -238,24 +240,11 @@ cd pix3
 npm install
 ```
 
-### yalc workflow
-
-After changes in the runtime:
-```bash
-cd packages/pix3-runtime && npm run yalc:publish
-```
-In the target game project:
-```bash
-yalc update
-```
-Or simply use `npm install` — `yalc` will update automatically.
-
 ### Type Checking
 
 The project uses multiple `tsconfig` files to manage different scopes:
 - `tsconfig.json`: Main editor and core library configuration.
 - `samples/tsconfig.json`: Configuration for standalone sample scripts to ensure they resolve `@pix3/runtime` correctly without being part of the main build.
-- `packages/pix3-runtime/tsconfig.json`: Configuration for the runtime package.
 
 ### Run Dev Server
 
@@ -326,7 +315,7 @@ collaboration server is commercial.
 | Component | License |
 |---|---|
 | Pix3 editor (`src/`) | [Apache-2.0](LICENSE) |
-| `@pix3/runtime` (`packages/pix3-runtime/`) | [Apache-2.0](packages/pix3-runtime/LICENSE) |
+| `@pix3/runtime` (npm; source in [pix3-core](https://github.com/pix3dev/pix3-core)) | Apache-2.0 |
 | `@pix3/collab-server` (`packages/pix3-collab-server/`) | [Commercial](packages/pix3-collab-server/LICENSE) — free for evaluation and internal non-production use |
 | `@pix3/agent-bridge` (`tools/pix3-agent-bridge/`) | MIT |
 

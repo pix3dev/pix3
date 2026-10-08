@@ -16,7 +16,7 @@ import type {
  *   group's center origin, Figma-style.
  *
  * No DI, no ViewportRenderService dependency (the node-corner measurer is injected), so this module
- * can later be promoted into `packages/pix3-runtime` if a game ever needs runtime proportional
+ * can later be promoted into `@pix3/runtime` if a game ever needs runtime proportional
  * resize. All math is expressed against `@pix3/runtime` node types + `three` only.
  */
 

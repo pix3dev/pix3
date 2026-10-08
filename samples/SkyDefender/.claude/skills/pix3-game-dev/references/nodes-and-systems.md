@@ -43,9 +43,8 @@ yalc. It drives the engine itself with `SceneManager` + `SceneRunner` +
 difference is you own the loop and there is no inspector/command layer. It may
 register a debug provider via `registerGameDebug(...)` (see §6).
 
-> The runtime package (`packages/pix3-runtime`) is the contract shared by both.
-> After changing it: `cd packages/pix3-runtime && npm run yalc:publish`, then
-> `yalc update` in the consumer.
+> The runtime package (`@pix3/runtime`, npm; source in pix3-core `packages/runtime`)
+> is the contract shared by both.
 
 ---
 
@@ -98,7 +97,7 @@ tables: [node-types-reference.md](node-types-reference.md).
 Attach in the inspector or in YAML `components:`. These are the pre-built,
 designer-facing behaviors — prefer them over writing a script for the same
 effect. Registered in
-[packages/pix3-runtime/src/behaviors/register-behaviors.ts](../packages/pix3-runtime/src/behaviors/register-behaviors.ts).
+[node_modules/@pix3/runtime/src/behaviors/register-behaviors.ts](../node_modules/@pix3/runtime/src/behaviors/register-behaviors.ts).
 
 | Component id | Does |
 |---|---|
@@ -124,7 +123,7 @@ so a keyframe **event track** or a script `emit()` can fire them.
 **GeometryMesh shader effects** (added via the inspector "Add Effect" picker or
 `mesh.attachEffect(id)`): `core:dissolve`, `core:rim`, `core:uv-scroll`,
 `core:flash`. Params are keyframe-animatable. See
-[packages/pix3-runtime/src/shader-effects/](../packages/pix3-runtime/src/shader-effects/).
+[node_modules/@pix3/runtime/src/shader-effects/](../node_modules/@pix3/runtime/src/shader-effects/).
 
 ---
 
@@ -206,8 +205,8 @@ honored). **Use from scripts:**
 `raycast(x1, y1, x2, y2, group?)` → closest hit with entry point + distance (the
 sniper-laser / line-of-sight query). Coordinates are 2D world/design px (origin
 center, Y up). Broadphase is a linear scan — fine for hundreds of hitboxes.
-Lives in [../packages/pix3-runtime/src/core/Collision2DService.ts](../packages/pix3-runtime/src/core/Collision2DService.ts) +
-[../packages/pix3-runtime/src/behaviors/Hitbox2DBehavior.ts](../packages/pix3-runtime/src/behaviors/Hitbox2DBehavior.ts).
+Lives in [../node_modules/@pix3/runtime/src/core/Collision2DService.ts](../node_modules/@pix3/runtime/src/core/Collision2DService.ts) +
+[../node_modules/@pix3/runtime/src/behaviors/Hitbox2DBehavior.ts](../node_modules/@pix3/runtime/src/behaviors/Hitbox2DBehavior.ts).
 
 ### Input (`this.input`, `InputService`)
 Polled + per-frame input, unified across pointer/keyboard: `getAxis(name)`,
@@ -329,8 +328,8 @@ to expose inspector-editable params (see §6). `this.config` holds params.
 
 ## 8. Where things live
 
-- Runtime (nodes, systems, script APIs): `packages/pix3-runtime/src/` — public surface re-exported from its `index.ts`.
-- Built-in behaviors: `packages/pix3-runtime/src/behaviors/`; shader effects: `.../shader-effects/`; animation: `.../animation/`.
+- Runtime (nodes, systems, script APIs): `node_modules/@pix3/runtime/src/` — public surface re-exported from its `index.ts`.
+- Built-in behaviors: `node_modules/@pix3/runtime/src/behaviors/`; shader effects: `.../shader-effects/`; animation: `.../animation/`.
 - Editor features (commands/operations): `src/features/<area>/`; services: `src/services/`.
 - Asset Library: services `src/services/AssetLibraryService.ts`, `LibraryInsertService.ts`, `PublishToLibraryService.ts`, providers + model in `src/services/library/`; panel `src/ui/asset-library/`; builtin pack `public/library/`.
 - Demo scenes + example scripts: `samples/HelloWorld/`; `docs/example-scripts/`.

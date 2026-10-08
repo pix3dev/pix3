@@ -49,11 +49,3 @@ repomix-output.xml
 .yalc/
 yalc.lock
 
-# @pix3/cli: build-time copy of src/templates/projects (see packages/pix3-cli/scripts/copy-templates.mjs)
-packages/pix3-cli/templates/
-# @pix3/cli: generated agent kit and bundled runtime .d.ts (scripts/build-kit.mjs,
-# scripts/build-runtime-types.mjs); packages/pix3-runtime/tsconfig.types.json emits here first
-packages/pix3-cli/kit/
-packages/pix3-cli/kit.tmp-*/
-packages/pix3-cli/runtime-types/
-packages/pix3-runtime/dist-types/

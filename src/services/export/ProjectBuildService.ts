@@ -173,8 +173,8 @@ const templateFiles = import.meta.glob('../../templates/build/**/*.tpl', {
 
 const runtimeSourceFiles = import.meta.glob(
   [
-    '../../../packages/pix3-runtime/src/main.ts',
-    '../../../packages/pix3-runtime/src/register-project-scripts.ts',
+    '../../../node_modules/@pix3/runtime/src/main.ts',
+    '../../../node_modules/@pix3/runtime/src/register-project-scripts.ts',
   ],
   {
     query: '?raw',
@@ -1315,7 +1315,7 @@ export class ProjectBuildService {
   }
 
   private toRuntimeOutputPath(sourcePath: string): string | null {
-    const sourceMarker = '/packages/pix3-runtime/src/';
+    const sourceMarker = '/node_modules/@pix3/runtime/src/';
     if (sourcePath.includes(sourceMarker)) {
       const relativePath = sourcePath.split(sourceMarker)[1];
       // Skip placeholder generated files — the service writes scene-manifest itself.

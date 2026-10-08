@@ -1,18 +1,5 @@
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'path';
-import { execFileSync } from 'node:child_process';
-
-// The editor bundles the CLI's generated agent kit (`packages/pix3-cli/kit/`, gitignored) — make
-// sure it exists and is current before any spec globs it. Same step as `vite.config.ts`.
-try {
-  execFileSync(process.execPath, [resolve(__dirname, 'scripts/ensure-agent-kit.mjs')], {
-    stdio: ['ignore', 'ignore', 'inherit'],
-  });
-} catch (error) {
-  console.warn(
-    `[vitest] agent kit not regenerated: ${error instanceof Error ? error.message : String(error)}`
-  );
-}
 
 export default defineConfig({
   test: {
@@ -31,11 +18,8 @@ export default defineConfig({
     setupFiles: ['./vitest.setup.ts'],
     include: [
       'src/**/*.spec.ts',
-      'packages/pix3-runtime/src/**/*.spec.ts',
       // Server specs opt out of happy-dom per file via `// @vitest-environment node`.
       'packages/pix3-collab-server/src/**/*.spec.ts',
-      // CLI specs are Node too (`// @vitest-environment node`).
-      'packages/pix3-cli/src/**/*.spec.ts',
     ],
     // The default 'forks' pool reports "No test suite found" for every spec on
     // win32-arm64 (vitest 4.x); the threads pool runs them fine everywhere.
@@ -49,8 +33,8 @@ export default defineConfig({
     /**
      * One three.js, not two.
      *
-     * `packages/pix3-runtime` declares `three` as BOTH a peer and a dev dependency, and npm answers
-     * that by installing a second copy under `packages/pix3-runtime/node_modules/three` — same
+     * When `@pix3/runtime` was a workspace here, it declared `three` as BOTH a peer and a dev
+     * dependency, and npm answered that by installing a second copy nested under the package — same
      * version, different module identity. The editor's own modules then resolve the root copy while
      * every runtime node resolves the nested one, so `mesh instanceof THREE.Mesh` is false across
      * the seam: five specs failed with "expected MeshLambertMaterial to be an instance of
@@ -69,7 +53,7 @@ export default defineConfig({
       '@/state': resolve(__dirname, 'src/state'),
       '@/styles': resolve(__dirname, 'src/styles'),
       '@/fw': resolve(__dirname, 'src/fw'),
-      '@pix3/runtime': resolve(__dirname, 'packages/pix3-runtime/src'),
+      '@pix3/runtime': resolve(__dirname, 'node_modules/@pix3/runtime/src'),
     },
   },
 });

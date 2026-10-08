@@ -25,9 +25,9 @@
  */
 export const ENGINE_SOURCE_LOADERS = import.meta.glob(
   [
-    '../../packages/pix3-runtime/src/**/*.ts',
-    '../../packages/pix3-runtime/src/**/*.js',
-    '../../packages/pix3-runtime/src/**/*.json',
+    '../../node_modules/@pix3/runtime/src/**/*.ts',
+    '../../node_modules/@pix3/runtime/src/**/*.js',
+    '../../node_modules/@pix3/runtime/src/**/*.json',
   ],
   { query: '?raw', import: 'default' }
 ) as Record<string, () => Promise<string>>;
@@ -35,7 +35,7 @@ export const ENGINE_SOURCE_LOADERS = import.meta.glob(
 /** The prefix every agent-facing engine path carries. */
 export const ENGINE_PATH_PREFIX = '@pix3/runtime/';
 
-const PACKAGE_MARKER = 'packages/pix3-runtime/';
+const PACKAGE_MARKER = 'node_modules/@pix3/runtime/';
 
 /** Longest single line returned by a search hit — a minified or generated line can be enormous. */
 const MAX_SEARCH_LINE_CHARS = 240;

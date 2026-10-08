@@ -14,7 +14,6 @@ const MARKERS = ['__COPYRIGHT_HOLDER_TBD__', '__CONTACT_EMAIL_TBD__'];
 const FILES = [
   'LICENSE',
   'NOTICE',
-  'packages/pix3-runtime/LICENSE',
   'packages/pix3-collab-server/LICENSE',
 ];
 

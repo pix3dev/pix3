@@ -105,7 +105,7 @@ capability inventory is the catalog — start there every time.
    - **Headless** — `createHeadlessGame` from `@pix3/runtime/testing` boots a
      real scene, registers user scripts, advances fixed steps and hands back
      state, in about a second with no browser. See
-     `packages/pix3-runtime/src/testing/headless-game.spec.ts` for a worked
+     `packages/runtime/src/testing/headless-game.spec.ts` (pix3-core) for a worked
      example against `samples/Carrom`. Renders nothing, so it answers logic,
      physics, rules, signals and commands — not "does it look right".
    - **In the editor** — the **debug-running-game** skill (attach, `play.start()`,

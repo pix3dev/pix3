@@ -2,11 +2,9 @@ import { defineConfig, loadEnv, type HttpProxy } from 'vite';
 import { resolve } from 'path';
 import wasm from 'vite-plugin-wasm';
 import { VitePWA } from 'vite-plugin-pwa';
-import { execFileSync } from 'node:child_process';
 
 export default defineConfig(async ({ mode }) => {
   const env = loadEnv(mode, __dirname, '');
-  ensureAgentKit();
   const devBackends = resolveDevBackends(mode, env);
   const routeProxyToDevBackend = (proxy: HttpProxy.ProxyServer) =>
     routeToDevBackend(proxy, devBackends);
@@ -36,10 +34,10 @@ export default defineConfig(async ({ mode }) => {
       /**
        * One three.js, not two — see the same note in `vitest.config.ts`.
        *
-       * npm installs a second copy under `packages/pix3-runtime/node_modules/three` (the workspace
-       * declares `three` as both a peer and a dev dependency), and without this the editor's modules
-       * bundle the root copy while every runtime node bundles the nested one: ~500 KiB of duplicate
-       * three in the output, and an `instanceof` seam running right through the scene graph.
+       * A second three under `node_modules/@pix3/runtime/node_modules/three` (should npm ever nest
+       * one) would make the editor's modules bundle the root copy while every runtime node bundles
+       * the nested one: ~500 KiB of duplicate three in the output, and an `instanceof` seam running
+       * right through the scene graph.
        */
       dedupe: ['three'],
       alias: {
@@ -50,7 +48,7 @@ export default defineConfig(async ({ mode }) => {
         '@/services': resolve(__dirname, 'src/services'),
         '@/state': resolve(__dirname, 'src/state'),
         '@/fw': resolve(__dirname, 'src/fw'),
-        '@pix3/runtime': resolve(__dirname, 'packages/pix3-runtime/src'),
+        '@pix3/runtime': resolve(__dirname, 'node_modules/@pix3/runtime/src'),
       },
     },
     // `vite-plugin-wasm` handles `import * as wasm from "*.wasm"` used by
@@ -181,7 +179,7 @@ export default defineConfig(async ({ mode }) => {
             if (id.includes('?raw') || id.includes('?url')) return undefined;
             if (id.includes('node_modules/@dimforge/rapier3d')) return 'rapier';
             if (id.includes('node_modules/three/')) return 'three';
-            if (id.includes('packages/pix3-runtime/')) return 'pix3-runtime';
+            if (id.includes('node_modules/@pix3/runtime/')) return 'pix3-runtime';
             return undefined;
           },
           // `PlayableHtmlBuildService` embeds ~1500 vendor/runtime SOURCE FILES as raw text
@@ -206,7 +204,7 @@ export default defineConfig(async ({ mode }) => {
                 // editing would cost more than the whole editor shell.
                 id.includes('node_modules/postprocessing/') ||
                 id.includes('node_modules/@esotericsoftware/spine-threejs/') ||
-                id.includes('packages/pix3-runtime/'));
+                id.includes('node_modules/@pix3/runtime/'));
             return isPlayableExportVendorSource
               ? 'assets/export-vendor/[name]-[hash].js'
               : 'assets/[name]-[hash].js';
@@ -299,25 +297,6 @@ export default defineConfig(async ({ mode }) => {
     },
   };
 });
-
-/**
- * The agent kit the editor writes into a project ("Work with your own agent", File → Install Agent
- * Kit…) is the CLI's generated `packages/pix3-cli/kit/` (gitignored), bundled through
- * `src/services/project/agent-kit/bundled-kit.ts`. (Re)generate it before anything globs it, so
- * dev, build and the CLI all ship the same kit. A failure (e.g. a half-edited kit template) only
- * warns: the last generated kit stays in place, and `bundled-kit.spec.ts` reports the drift.
- */
-function ensureAgentKit(): void {
-  try {
-    execFileSync(process.execPath, [resolve(__dirname, 'scripts/ensure-agent-kit.mjs')], {
-      stdio: ['ignore', 'ignore', 'inherit'],
-    });
-  } catch (error) {
-    console.warn(
-      `[vite] agent kit not regenerated: ${error instanceof Error ? error.message : String(error)}`
-    );
-  }
-}
 
 type DevBackendId = 'local' | 'prod';
 

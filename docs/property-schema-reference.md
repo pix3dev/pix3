@@ -12,8 +12,8 @@ and `UpdateObjectPropertyOperation` all render/drive from that single declaratio
 - Editing goes through the mutation gateway (`UpdateObjectPropertyOperation`) — see `AGENTS.md`.
 
 **Source of truth (code):**
-`packages/pix3-runtime/src/fw/property-schema.ts` (types + `defineProperty`, `defineGroup`,
-`mergeSchemas`) and `packages/pix3-runtime/src/fw/property-schema-utils.ts`
+`node_modules/@pix3/runtime/src/fw/property-schema.ts` (types + `defineProperty`, `defineGroup`,
+`mergeSchemas`) and `node_modules/@pix3/runtime/src/fw/property-schema-utils.ts`
 (`getNodePropertySchema`, `getPropertiesByGroup`, `getPropertyDisplayValue`,
 `validatePropertyValue`, `setNodePropertyValue`). When this doc and the code disagree, the code wins.
 
@@ -91,7 +91,7 @@ are also width-capped in the Inspector — only text and resource pickers span t
 `getValue` — three's `ColorManagement` is enabled, so those two calls already do the sRGB ↔ linear
 conversion. Never add `convertSRGBToLinear()` / `convertLinearToSRGB()`; that applies the transfer
 function twice and renders the colour far too dark (see the colour entry in `CLAUDE.md`, guarded by
-`packages/pix3-runtime/src/core/color-convention.spec.ts`).
+`packages/runtime/src/core/color-convention.spec.ts` (pix3-core)).
 
 ```typescript
 interface PropertyDefinition {

@@ -2,9 +2,9 @@
  * The editor's `pix3 kit [--update]`: puts the agent kit into the open project through whatever
  * storage backs it (a local folder, or a `pix3 serve` workspace).
  *
- * A port of `packages/pix3-cli/src/kit/install.ts` (which is Node-only: `node:fs`, `node:crypto`)
- * with the same outcome file by file — `agent-kit-install.spec.ts` runs both on the same projects
- * and compares every byte, so the rules below cannot drift from the CLI's:
+ * A port of `@pix3/cli` 1.6.x `src/kit/install.ts` (Node-only: `node:fs`, `node:crypto`; source
+ * now in pix3-core, `packages/cli/`) with the same outcome file by file. The byte-for-byte parity
+ * spec against the CLI sources left with them at the 1.6.x freeze; the rules mirror the CLI's:
  * - kit files (`AGENTS.md`, `CLAUDE.md`, `.claude/skills/pix3-*`) are written when missing, left
  *   when identical, replaced only with `update` AND only while still the kit's (sha256 matches the
  *   one `.pix3/kit-manifest.json` recorded), and never when edited since (`skipped-edited`);

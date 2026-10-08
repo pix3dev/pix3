@@ -1,5 +1,5 @@
 /**
- * Editor-side view of the `pix3 serve` workspace protocol (`packages/pix3-cli/README.md` is the
+ * Editor-side view of the `pix3 serve` workspace protocol (the `@pix3/cli` README is the
  * source of truth — routes, headers and frames there; this file only mirrors their shapes).
  *
  * The editor does not import the CLI package: the CLI is a Node program and the two are versioned

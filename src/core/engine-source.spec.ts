@@ -37,7 +37,7 @@ const sources = new Map<string, string>([
 
 describe('engine source paths', () => {
   it('maps a build-time module key to the package-relative path an import would use', () => {
-    expect(toEnginePath('/repo/packages/pix3-runtime/src/core/JuiceApi.ts')).toBe(
+    expect(toEnginePath('/repo/node_modules/@pix3/runtime/src/core/JuiceApi.ts')).toBe(
       `${ENGINE_PATH_PREFIX}src/core/JuiceApi.ts`
     );
   });

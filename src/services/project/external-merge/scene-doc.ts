@@ -4,7 +4,7 @@
  * The merge works on the YAML document (`version`, `metadata`, `root: [...]`, each node an
  * `{ id, type, name, properties, components, children, ... }` map), never on the live Three.js
  * graph — see `docs/pix3-specification.md` → "Scene File Format" and
- * `packages/pix3-runtime/src/core/SceneLoader.ts` (`SceneNodeDefinition`).
+ * `@pix3/runtime/src/core/SceneLoader.ts` (`SceneNodeDefinition`).
  *
  * Property paths address a location inside ONE node object:
  *   - plain segments are object keys: `['properties', 'transform', 'position']`, `['name']`;

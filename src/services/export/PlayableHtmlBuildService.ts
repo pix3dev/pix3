@@ -156,9 +156,9 @@ interface RuntimeUsage {
 
 const RUNTIME_SOURCE_LOADERS = import.meta.glob(
   [
-    '../../../packages/pix3-runtime/src/**/*.ts',
-    '../../../packages/pix3-runtime/src/**/*.js',
-    '../../../packages/pix3-runtime/src/**/*.json',
+    '../../../node_modules/@pix3/runtime/src/**/*.ts',
+    '../../../node_modules/@pix3/runtime/src/**/*.js',
+    '../../../node_modules/@pix3/runtime/src/**/*.json',
   ],
   {
     query: '?raw',
@@ -922,7 +922,7 @@ export class PlayableHtmlBuildService {
 
     for (const candidatePath of this.getRuntimeSourceCandidates(filePath)) {
       const loader =
-        RUNTIME_SOURCE_LOADERS[`../../../packages/pix3-runtime/src/${candidatePath}`] ?? null;
+        RUNTIME_SOURCE_LOADERS[`../../../node_modules/@pix3/runtime/src/${candidatePath}`] ?? null;
 
       if (!loader) {
         continue;

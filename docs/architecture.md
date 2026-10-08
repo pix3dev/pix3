@@ -129,7 +129,7 @@ graph TD
   Operation -->|performs| Viewport
 ```
 
-Details, types, and authoring recipes: **[property-schema-reference.md](property-schema-reference.md)** (source: `packages/pix3-runtime/src/fw/`) and spec "Property Schema System". Editor-only note: Transform groups render via the `Vector2Editor`/`Vector3Editor`/`EulerEditor` web components (6-column grid, color-coded X/Y/Z axes).
+Details, types, and authoring recipes: **[property-schema-reference.md](property-schema-reference.md)** (source: `node_modules/@pix3/runtime/src/fw/`) and spec "Property Schema System". Editor-only note: Transform groups render via the `Vector2Editor`/`Vector3Editor`/`EulerEditor` web components (6-column grid, color-coded X/Y/Z axes).
 
 ## Command-Driven Menu System
 

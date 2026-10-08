@@ -38,7 +38,7 @@ interface RequestOptions {
 const MAX_CACHED_BODY_BYTES = 8 * 1024 * 1024;
 
 /**
- * HTTP client of one `pix3 serve` workspace (`packages/pix3-cli/README.md`, "Routes").
+ * HTTP client of one `pix3 serve` workspace (`@pix3/cli` README, "Routes").
  *
  * Owns three pieces of per-path memory, all in memory only and all dropped by {@link reset}:
  * - **known hash** — the sha256 of the bytes this editor last read or wrote. It is the `If-Match`

@@ -19,7 +19,7 @@ specific language governing permissions and limitations under the License.
 SCOPE
 
 The Apache-2.0 licence covers the Pix3 editor (`src/`) and the Pix3 runtime
-(`packages/pix3-runtime/`, published as `@pix3/runtime`).
+(published as `@pix3/runtime`; source in pix3-core).
 
 It does NOT cover `packages/pix3-collab-server/` (`@pix3/collab-server`), which
 is proprietary and licensed separately — see that directory's own LICENSE file.

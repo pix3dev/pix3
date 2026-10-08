@@ -20,7 +20,7 @@
  * entry has to be re-justified instead of quietly shipping a broken export.
  */
 export interface StrippableRuntimeModule {
-  /** Path under `packages/pix3-runtime/src`, without extension. */
+  /** Path under `@pix3/runtime/src`, without extension. */
   readonly modulePath: string;
   /**
    * Names that keep the module in the bundle when the project mentions any of
@@ -117,7 +117,14 @@ export const STRIPPABLE_RUNTIME_MODULES: readonly StrippableRuntimeModule[] = [
   },
 
   // --- node types ---
-  { modulePath: 'nodes/2D/ColorRect2D', keepWhenMentioned: ['ColorRect2D'] },
+  {
+    modulePath: 'nodes/2D/ColorRect2D',
+    keepWhenMentioned: ['ColorRect2D'],
+    // UIControl2D (1.6.3 modal click-through fix) uses it only in `instanceof` checks while
+    // picking a pointer target. Against the stub class those are always false — correct for a
+    // project with no ColorRect2D — and the stub's throwing constructor is never reached.
+    lazyValueImporters: ['nodes/2D/UI/UIControl2D'],
+  },
   { modulePath: 'nodes/2D/CanvasLayer2D', keepWhenMentioned: ['CanvasLayer2D'] },
   { modulePath: 'nodes/2D/TiledSprite2D', keepWhenMentioned: ['TiledSprite2D'] },
   { modulePath: 'nodes/2D/SpineSkeleton2D', keepWhenMentioned: ['SpineSkeleton2D'] },

@@ -1,15 +1,14 @@
 name: Publish packages
 
-# Publishes the npm packages via npm Trusted Publishing (OIDC) — no NPM_TOKEN needed.
+# Publishes @pix3/agent-bridge via npm Trusted Publishing (OIDC) — no NPM_TOKEN needed.
 # Two ways to trigger:
-#   1. Manual: Actions -> "Publish packages" -> Run workflow -> pick a package.
-#   2. Tag push: `runtime-vX.Y.Z` publishes @pix3/runtime AND @pix3/cli (both ride the editor's
-#      lockstep version: the CLI's kit, runtime types and validate/smoke bundles are built from this
-#      checkout's runtime sources, and the MCP config it writes pins `@pix3/cli@X.Y.Z`);
-#      `cli-vX.Y.Z` publishes @pix3/cli alone; `bridge-vX.Y.Z` publishes @pix3/agent-bridge.
-# In both cases it publishes whatever version is in the package's package.json;
-# npm rejects a version that already exists, so re-runs are safe.
-# Each package must have this repo + workflow registered as a Trusted Publisher on npmjs.com.
+#   1. Manual: Actions -> "Publish packages" -> Run workflow.
+#   2. Tag push: `bridge-vX.Y.Z`.
+# It publishes whatever version is in the package's package.json; npm rejects a version that
+# already exists, so re-runs are safe.
+#
+# @pix3/runtime and @pix3/cli are no longer published from this repo: since the 1.6.x freeze
+# their sources and releases live in pix3-core (github.com/pix3dev/pix3-core).
 
 on:
   workflow_dispatch:
@@ -18,17 +17,11 @@ on:
         description: Which package to publish
         type: choice
         required: true
-        default: both
+        default: bridge
         options:
-          - runtime
-          - cli
           - bridge
-          - both # runtime + bridge (kept for muscle memory)
-          - all
   push:
     tags:
-      - 'runtime-v*'
-      - 'cli-v*'
       - 'bridge-v*'
 
 # Never run two publishes of the same ref concurrently.
@@ -37,81 +30,11 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish-runtime:
-    name: Publish @pix3/runtime
-    if: >-
-      (github.event_name == 'workflow_dispatch' &&
-        (inputs.package == 'runtime' || inputs.package == 'both' || inputs.package == 'all')) ||
-      (github.event_name == 'push' && startsWith(github.ref_name, 'runtime-v'))
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # required for OIDC trusted publishing
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: 'https://registry.npmjs.org'
-      - name: Upgrade npm (OIDC trusted publishing needs npm >= 11.5.1)
-        run: npm install -g npm@latest
-      - name: Publish
-        working-directory: packages/pix3-runtime
-        run: npm publish --access public
-
-  publish-cli:
-    name: Publish @pix3/cli
-    if: >-
-      (github.event_name == 'workflow_dispatch' &&
-        (inputs.package == 'cli' || inputs.package == 'all')) ||
-      (github.event_name == 'push' &&
-        (startsWith(github.ref_name, 'runtime-v') || startsWith(github.ref_name, 'cli-v')))
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      id-token: write # required for OIDC trusted publishing
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          registry-url: 'https://registry.npmjs.org'
-      - name: Upgrade npm (OIDC trusted publishing needs npm >= 11.5.1)
-        run: npm install -g npm@latest
-      # The whole monorepo: `prepack` bundles the bin (MCP SDK, yaml, ws inlined — the package has
-      # no runtime dependencies), prebuilds validate/smoke from packages/pix3-runtime sources, emits
-      # the runtime .d.ts with the root TypeScript and copies src/templates/projects.
-      - name: Install deps
-        run: npm ci
-      - name: Check lockstep version
-        env:
-          REF_NAME: ${{ github.ref_name }}
-        run: |
-          root=$(node -p "require('./package.json').version")
-          cli=$(node -p "require('./packages/pix3-cli/package.json').version")
-          echo "root $root, @pix3/cli $cli, ref $REF_NAME"
-          if [ "$root" != "$cli" ]; then
-            echo "::error::@pix3/cli $cli is not the lockstep root version $root (run npm run version:sync)"; exit 1
-          fi
-          case "$REF_NAME" in
-            runtime-v*|cli-v*)
-              if [ "${REF_NAME#*-v}" != "$cli" ]; then
-                echo "::error::tag $REF_NAME does not match @pix3/cli $cli"; exit 1
-              fi ;;
-          esac
-      - name: Type-check
-        run: npx tsc --noEmit -p packages/pix3-cli && npx tsc --noEmit -p packages/pix3-cli/tsconfig.build.json
-      - name: Test
-        run: npx vitest run packages/pix3-cli
-      - name: Publish
-        working-directory: packages/pix3-cli
-        run: npm publish --access public
-
   publish-bridge:
     name: Publish @pix3/agent-bridge
     if: >-
       (github.event_name == 'workflow_dispatch' &&
-        (inputs.package == 'bridge' || inputs.package == 'both' || inputs.package == 'all')) ||
+        inputs.package == 'bridge') ||
       (github.event_name == 'push' && startsWith(github.ref_name, 'bridge-v'))
     runs-on: ubuntu-latest
     permissions:

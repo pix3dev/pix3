@@ -1,5 +1,7 @@
 # Pix3 Editor - AI Agent Guidelines
 
+> **Frozen at 1.6.x (security fixes only).** `@pix3/runtime` and `@pix3/cli` come from npm (`~1.6.4`); their sources, the current spec and Change Log live in `pix3-core` (`github.com/pix3dev/pix3-core`, `docs/pix3-specification.md`).
+
 Authoritative instructions for Pix3 development. These guidelines ensure consistent code generation and adherence to project architecture patterns.
 
 ## Project Overview
@@ -23,7 +25,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
   - Shadow DOM: `import styles from './component.ts.css?raw';` + `static styles = css`${unsafeCSS(styles)}`;`
 - **Accent Color**: Use CSS variables `--pix3-accent-color` (#ffcf33) and `--pix3-accent-rgb`.
 - **Icons**: Use **vector icons via `IconService`** (`@inject(IconService)` → `getIcon(name, IconSize.*)`), never emoji or Unicode symbol glyphs (📎🔑✕✓📄↻●⏸). Register a custom SVG in `IconService` if the icon isn't in Feather. Emoji belong only in user-authored content, never in UI chrome.
-- **Emoji are never artwork**, in editor chrome or in a generated game. A `label`/`text` that is **nothing but emoji** is a sprite substitute: platform-dependent glyph, no recolour, no atlas, no animation, hollow box where the font lacks it. `src/services/agent/emoji-as-art.ts` refuses it on `set_property`, `create_node`, `set_component_property` and every `.pix3scene` write; the detection itself is `packages/pix3-runtime/src/core/emoji-as-art.ts`, shared with `pix3 validate` (`E_EMOJI_AS_ART`). Use `ColorRect2D` for a placeholder and `generate_asset` + `Sprite2D` for real art. An emoji inside a sentence is ordinary text and is allowed.
+- **Emoji are never artwork**, in editor chrome or in a generated game. A `label`/`text` that is **nothing but emoji** is a sprite substitute: platform-dependent glyph, no recolour, no atlas, no animation, hollow box where the font lacks it. `src/services/agent/emoji-as-art.ts` refuses it on `set_property`, `create_node`, `set_component_property` and every `.pix3scene` write; the detection itself is `node_modules/@pix3/runtime/src/core/emoji-as-art.ts`, shared with `pix3 validate` (`E_EMOJI_AS_ART`). Use `ColorRect2D` for a placeholder and `generate_asset` + `Sprite2D` for real art. An emoji inside a sentence is ordinary text and is allowed.
 
 ### Dependency Injection
 
@@ -70,7 +72,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 
 ### Core & Runtime
 
-- `packages/pix3-runtime/src/`: Core engine logic (Nodes, SceneManager, Script base).
+- `node_modules/@pix3/runtime/src/` (npm `@pix3/runtime`, source in pix3-core): Core engine logic (Nodes, SceneManager, Script base).
 - `src/core/`: Editor-specific logic (HistoryManager, LayoutManager, Keybindings).
 - `src/fw/`: Framework utilities (DI, ComponentBase, Property Schema).
 
@@ -87,7 +89,7 @@ Authoritative instructions for Pix3 development. These guidelines ensure consist
 - `src/services/`: Injectable services, grouped into domain subdirectories: `core`, `scene`, `project`, `cloud`, `collab`, `assets`, `scripting`, `play`, `export`, `editor`, `animation`, `localization`, `image-gen`, `bg-removal`, `library`, `viewport`, `agent`, `llm`, `ao-bake`, `atlas`. A new service goes into the fitting domain folder; there are no loose files at the `src/services/` root.
 - `src/state/`: Valtio state definitions.
 
-**Imports**: `src/services` has no barrel — always deep-import a service directly from its domain folder (`@/services/<domain>/FooService`). `src/state/index.ts` is a real module (it owns the `appState` singleton), so import state from `@/state`. `packages/pix3-runtime/src/index.ts` is a published package boundary and stays.
+**Imports**: `src/services` has no barrel — always deep-import a service directly from its domain folder (`@/services/<domain>/FooService`). `src/state/index.ts` is a real module (it owns the `appState` singleton), so import state from `@/state`. `@pix3/runtime`'s `src/index.ts` is a published package boundary (npm, source in pix3-core).
 
 ## Critical Rules for AI Agents
 

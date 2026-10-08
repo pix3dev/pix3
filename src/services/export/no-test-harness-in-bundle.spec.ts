@@ -21,7 +21,7 @@ import { TRACE_DIRECTORY } from '@/services/agent/game-traces';
  * 1. **Code.** A playable bundle's roots are the runtime package's own entry files
  *    plus the project's scripts. The runtime is a separate package with no `@/` alias,
  *    so the only way harness code could enter is a module under
- *    `packages/pix3-runtime/src` mentioning it — which is what the first test scans
+ *    `@pix3/runtime/src` mentioning it — which is what the first test scans
  *    for, across the whole package rather than along one import chain, because a
  *    mention in a module a player *might* keep is already a mistake.
  *
@@ -39,7 +39,7 @@ import { TRACE_DIRECTORY } from '@/services/agent/game-traces';
  * them — and second-guessing an explicit include would be the wrong trade.
  */
 
-const RUNTIME_SRC = path.resolve(__dirname, '../../../packages/pix3-runtime/src');
+const RUNTIME_SRC = path.resolve(__dirname, '../../../node_modules/@pix3/runtime/src');
 const PROJECT_BUILD_SERVICE = path.resolve(__dirname, 'ProjectBuildService.ts');
 
 /**

@@ -43,9 +43,8 @@ yalc. It drives the engine itself with `SceneManager` + `SceneRunner` +
 difference is you own the loop and there is no inspector/command layer. It may
 register a debug provider via `registerGameDebug(...)` (see §6).
 
-> The runtime package (`packages/pix3-runtime`) is the contract shared by both.
-> After changing it: `cd packages/pix3-runtime && npm run yalc:publish`, then
-> `yalc update` in the consumer.
+> The runtime package (`@pix3/runtime`, npm; source in pix3-core `packages/runtime`)
+> is the contract shared by both.
 
 ---
 
@@ -134,7 +133,7 @@ cost is per skeleton per frame, so budget dozens, not hundreds. Full property ta
 Attach in the inspector or in YAML `components:`. These are the pre-built,
 designer-facing behaviors — prefer them over writing a script for the same
 effect. Registered in
-[packages/pix3-runtime/src/behaviors/register-behaviors.ts](../packages/pix3-runtime/src/behaviors/register-behaviors.ts).
+[node_modules/@pix3/runtime/src/behaviors/register-behaviors.ts](../node_modules/@pix3/runtime/src/behaviors/register-behaviors.ts).
 
 | Component id | Does |
 |---|---|
@@ -168,7 +167,7 @@ so a keyframe **event track** or a script `emit()` can fire them.
 (3D-only), `core:uv-scroll`, `core:flash`, `core:adjust`
 (brightness/contrast/saturation), `core:grayscale`, `core:tint`. Params are
 keyframe-animatable. See
-[packages/pix3-runtime/src/shader-effects/](../packages/pix3-runtime/src/shader-effects/).
+[node_modules/@pix3/runtime/src/shader-effects/](../node_modules/@pix3/runtime/src/shader-effects/).
 
 ---
 
@@ -231,7 +230,7 @@ call is a silent no-op that never throws. **In the scene:** `core:SfxOnSignal`
 (`{signal, preset, volume, pitch}`). An authored asset always beats the synth —
 use `scene.audio.play()` when the project has the clip; reach for `sfx()` when it
 doesn't (prototypes, jam builds, generated recipes).
-Source: [packages/pix3-runtime/src/core/SfxSynth.ts](../packages/pix3-runtime/src/core/SfxSynth.ts).
+Source: [node_modules/@pix3/runtime/src/core/SfxSynth.ts](../node_modules/@pix3/runtime/src/core/SfxSynth.ts).
 
 ### Shader effects (Construct 3-style, per-node)
 Registry-backed material effects with an `enabled` toggle (zero GPU cost while
@@ -321,7 +320,7 @@ Locale list/default live in `pix3project.yaml` (`localization:` block)
 or are auto-discovered from `locales/`; locale tables get their own **Locales**
 category in the asset browser's by-type view. Exports bake the config and embed
 the tables + localized sprites automatically. Lives in
-`packages/pix3-runtime/src/core/localization/`.
+`node_modules/@pix3/runtime/src/core/localization/`.
 
 ### Particles
 `Particles3D` — emission, trails, sub-emitters, world/local simulation space, and
@@ -350,8 +349,8 @@ honored). **Use from scripts:**
 `raycast(x1, y1, x2, y2, group?)` → closest hit with entry point + distance (the
 sniper-laser / line-of-sight query). Coordinates are 2D world/design px (origin
 center, Y up). Broadphase is a linear scan — fine for hundreds of hitboxes.
-Lives in [../packages/pix3-runtime/src/core/Collision2DService.ts](../packages/pix3-runtime/src/core/Collision2DService.ts) +
-[../packages/pix3-runtime/src/behaviors/Hitbox2DBehavior.ts](../packages/pix3-runtime/src/behaviors/Hitbox2DBehavior.ts).
+Lives in [../node_modules/@pix3/runtime/src/core/Collision2DService.ts](../node_modules/@pix3/runtime/src/core/Collision2DService.ts) +
+[../node_modules/@pix3/runtime/src/behaviors/Hitbox2DBehavior.ts](../node_modules/@pix3/runtime/src/behaviors/Hitbox2DBehavior.ts).
 
 ### Input (`this.input`, `InputService`)
 Polled + per-frame input, unified across pointer/keyboard: `getAxis(name)`,
@@ -599,8 +598,8 @@ play-mode hook, so the editor keeps running.
 
 ## 8. Where things live
 
-- Runtime (nodes, systems, script APIs): `packages/pix3-runtime/src/` — public surface re-exported from its `index.ts`.
-- Built-in behaviors: `packages/pix3-runtime/src/behaviors/`; shader effects: `.../shader-effects/`; animation: `.../animation/`.
+- Runtime (nodes, systems, script APIs): `node_modules/@pix3/runtime/src/` — public surface re-exported from its `index.ts`.
+- Built-in behaviors: `node_modules/@pix3/runtime/src/behaviors/`; shader effects: `.../shader-effects/`; animation: `.../animation/`.
 - Editor features (commands/operations): `src/features/<area>/`; services: `src/services/`.
 - Asset Library: services `src/services/library/AssetLibraryService.ts`, `LibraryInsertService.ts`, `PublishToLibraryService.ts`, providers + model in `src/services/library/`; panel `src/ui/asset-library/`; builtin pack `public/library/`.
 - Model Lab (3D generation): orchestrator + pipeline in `src/services/model-gen/` (`Model3DGenService`, `SculptSpec`, `ModelPreviewRenderer`, `ComparisonSheet`, `Model3DGenHistoryService`, `prompts/`); scene lane in `src/services/model-gen/scene/` (`Scene3DGenService`, `LevelSpec`, `scene-validate`, `SceneInventoryService`, `ScenePreviewRenderer`, `scene-scatter`, `prompts`); panel `src/ui/model-lab/`; agent tools `generate_model_3d` / `generate_scene_3d` (`src/services/agent/AgentToolRegistry.ts`); debug lanes `__PIX3_DEBUG__.model3d` / `.scene3d` (`src/core/debug-bridge.ts`).

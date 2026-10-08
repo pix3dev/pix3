@@ -8,7 +8,7 @@ import {
   STRIPPABLE_RUNTIME_MODULES,
 } from '@/services/export/strippable-runtime-modules';
 
-const RUNTIME_SRC = path.resolve(__dirname, '../../../packages/pix3-runtime/src');
+const RUNTIME_SRC = path.resolve(__dirname, '../../../node_modules/@pix3/runtime/src');
 
 const listRuntimeSources = (directory: string): string[] => {
   const found: string[] = [];

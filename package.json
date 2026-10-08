@@ -15,12 +15,12 @@
     "dev:collab:server": "npm run dev -w packages/pix3-collab-server",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "lint": "eslint src packages/pix3-runtime/src packages/pix3-collab-server/src packages/pix3-cli/src --ext .ts,.js",
-    "lint:fix": "eslint src packages/pix3-runtime/src packages/pix3-collab-server/src packages/pix3-cli/src --ext .ts,.js --fix",
+    "lint": "eslint src packages/pix3-collab-server/src --ext .ts,.js",
+    "lint:fix": "eslint src packages/pix3-collab-server/src --ext .ts,.js --fix",
     "format": "prettier --write src/**/*.{ts,css}",
     "format:check": "prettier --check src/**/*.{ts,css}",
     "test": "vitest run",
-    "type-check": "tsc --noEmit && tsc --noEmit -p packages/pix3-collab-server && tsc --noEmit -p packages/pix3-cli && tsc --noEmit -p packages/pix3-cli/tsconfig.build.json",
+    "type-check": "tsc --noEmit && tsc --noEmit -p packages/pix3-collab-server",
     "knip": "knip",
     "postinstall": "node -e \"require('fs').copyFileSync('node_modules/esbuild-wasm/esbuild.wasm', 'public/esbuild.wasm')\"",
     "licenses:report": "node scripts/licenses-report.mjs"
@@ -30,6 +30,7 @@
     "@esotericsoftware/spine-threejs": "~4.3.13",
     "@hocuspocus/provider": "^2.15.0",
     "@huggingface/transformers": "^4.2.0",
+    "@pix3/runtime": "~1.6.4",
     "@txt2sfx/agent": "^0.1.0",
     "@txt2sfx/analyzer": "^0.1.0",
     "@txt2sfx/core": "^0.1.0",
@@ -53,6 +54,7 @@
   "devDependencies": {
     "@dimforge/rapier3d-compat": "^0.19.3",
     "@eslint/js": "^9.36.0",
+    "@pix3/cli": "~1.6.4",
     "@types/feather-icons": "^4.29.4",
     "@types/node": "^24.5.2",
     "@types/qrcode": "^1.5.6",
@@ -77,8 +79,7 @@
   },
   "overrides": {},
   "workspaces": [
-    "packages/pix3-collab-server",
-    "packages/pix3-cli"
+    "packages/pix3-collab-server"
   ],
   "license": "Apache-2.0"
 }

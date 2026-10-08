@@ -198,7 +198,7 @@ import { registerGameDebug, type GameDebugProvider } from '@pix3/runtime';
 // in onDetach: this.dispose?.()
 ```
 Everything a provider returns must be JSON-serialisable. The contract lives in
-[packages/pix3-runtime/src/core/game-debug.ts](packages/pix3-runtime/src/core/game-debug.ts).
+[node_modules/@pix3/runtime/src/core/game-debug.ts](node_modules/@pix3/runtime/src/core/game-debug.ts).
 
 **DeepCore provider** exposes:
 - `inspect('droppables')` — resource items: `type, value, collected, isSleeping, bodyPos, spritePos`.
@@ -284,11 +284,9 @@ After a hard reload the page is fresh: the bridge is re-installed, play is
 handle persists in the profile's IndexedDB — no human gesture needed), and the
 game-debug provider re-registers only **after** `play.start()`.
 
-> Editing the runtime **package** (`@pix3/runtime`, e.g. the collider overlay) is
-> picked up by the editor on reload too (it's source-aliased), but to also reach a
-> **standalone** consumer build (DeepCore) run `cd packages/pix3-runtime &&
-> npx yalc publish --force` then `npx yalc update` in the consumer. (`yalc` isn't
-> global here — use `npx yalc`.)
+> The runtime **package** (`@pix3/runtime`, e.g. the collider overlay) comes from
+> npm (`node_modules/@pix3/runtime/src`, source-aliased); its source lives in
+> pix3-core. Runtime changes are made and released there, not in this repo.
 
 ### In-place hot-reload (in-person; flaky under MCP)
 

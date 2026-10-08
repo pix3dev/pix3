@@ -4,7 +4,7 @@
     "experimentalDecorators": true,
     "emitDecoratorMetadata": true,
     /* Set semantics, NOT define: Lit's `@property` decorators need it, and every editor
-       component is a Lit element. `packages/pix3-runtime/tsconfig.json` deliberately says
+       component is a Lit element. `@pix3/runtime`'s own `tsconfig.json` deliberately says
        `true` — it type-checks the runtime the way CONSUMERS compile it (the package ships
        TS sources, and `target: ES2022` alone turns define semantics on). The divergence is
        intentional and neither side can adopt the other; the hazard it creates — a subclass
@@ -49,10 +49,10 @@
         "./src/fw/*"
       ],
       "@pix3/runtime": [
-        "./packages/pix3-runtime/src"
+        "./node_modules/@pix3/runtime/src"
       ],
       "@pix3/runtime/*": [
-        "./packages/pix3-runtime/src/*"
+        "./node_modules/@pix3/runtime/src/*"
       ]
     },
     /* Linting */
@@ -63,8 +63,7 @@
     "noUncheckedSideEffectImports": true
   },
   "include": [
-    "src",
-    "packages/pix3-runtime/src"
+    "src"
   ],
   "exclude": [
     "samples",
