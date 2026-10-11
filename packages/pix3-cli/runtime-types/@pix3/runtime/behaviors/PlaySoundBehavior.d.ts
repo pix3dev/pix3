@@ -1,0 +1,32 @@
+import { Script } from '../core/ScriptComponent';
+import type { PropertySchema } from '../fw/property-schema';
+export declare class PlaySoundBehavior extends Script {
+    private readonly onNodeSignal;
+    constructor(id: string, type: string);
+    static getPropertySchema(): PropertySchema;
+    onStart(): void;
+    onDetach(): void;
+    private bindTrigger;
+    private unbindTrigger;
+    private playConfiguredSound;
+    private getAudioTrack;
+    private setAudioTrack;
+    private getTriggerEvent;
+    private setTriggerEvent;
+    private getVolume;
+    private setVolume;
+    private getLoop;
+    private setLoop;
+    private getBus;
+    private setBus;
+    private getPitchVariation;
+    private setPitchVariation;
+    private getVolumeVariation;
+    private setVolumeVariation;
+    private normalizeTrack;
+    private toTrimmedString;
+    private toBoolean;
+    private toVolume;
+    private toBus;
+    private toVariation;
+}

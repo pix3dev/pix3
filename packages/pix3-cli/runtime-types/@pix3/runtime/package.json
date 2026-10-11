@@ -1,0 +1,5 @@
+{
+  "name": "@pix3/runtime",
+  "version": "1.6.0",
+  "types": "index.d.ts"
+}

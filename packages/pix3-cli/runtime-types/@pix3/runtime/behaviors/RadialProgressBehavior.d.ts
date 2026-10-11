@@ -1,0 +1,32 @@
+import { Script } from '../core/ScriptComponent';
+import type { PropertySchema } from '../fw/property-schema';
+export declare class RadialProgressBehavior extends Script {
+    private _value;
+    private _currentValue;
+    private _animationSpeed;
+    private _startAngle;
+    private _clockwise;
+    private _opacity;
+    private _radialMaterial;
+    private _originalMaterial;
+    private _spriteMesh;
+    private _lastKnownTexture;
+    constructor(id: string, type: string);
+    static getPropertySchema(): PropertySchema;
+    onAttach(): void;
+    onUpdate(dt: number): void;
+    onDetach(): void;
+    getValue(): number;
+    setValue(v: number, immediate?: boolean): void;
+    setValueImmediate(v: number): void;
+    getAnimationSpeed(): number;
+    setAnimationSpeed(v: number): void;
+    getStartAngle(): number;
+    setStartAngle(radians: number): void;
+    getClockwise(): boolean;
+    setClockwise(v: boolean): void;
+    private _buildMaterial;
+    private _syncTexture;
+    private _updateUniforms;
+    private _updateAngleUniforms;
+}

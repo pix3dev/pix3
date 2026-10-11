@@ -1,0 +1,35 @@
+import { Script } from '../core/ScriptComponent';
+import type { PropertySchema } from '../fw/property-schema';
+export declare class FadeBehavior extends Script {
+    private fadeDirection;
+    private phase;
+    private pendingDestroy;
+    private delayRemaining;
+    private sequenceStarted;
+    constructor(id: string, type: string);
+    static getPropertySchema(): PropertySchema;
+    onStart(): void;
+    onUpdate(dt: number): void;
+    onDetach(): void;
+    fadeIn(): void;
+    fadeOut(): void;
+    private startFade;
+    private executeFade;
+    private onFadeComplete;
+    private stopFade;
+    private destroyNode;
+    private isNode2D;
+    private getFadeInTime;
+    private setFadeInTime;
+    private getFadeOutTime;
+    private setFadeOutTime;
+    private getFadeInDelay;
+    private setFadeInDelay;
+    private getFadeOutDelay;
+    private setFadeOutDelay;
+    private getDestroyOnFadeOut;
+    private setDestroyOnFadeOut;
+    private getFadeOnStart;
+    private setFadeOnStart;
+    private static toNonNegativeNumber;
+}

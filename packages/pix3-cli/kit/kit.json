@@ -1,0 +1,24 @@
+{
+  "format": 1,
+  "version": "1.6.2",
+  "inputsStamp": "7d606bc0162dc8852229dce9cc03d47e67e6ecc6bf62120e269d23de563a450f",
+  "files": [
+    ".claude/skills/pix3-nodes/SKILL.md",
+    ".claude/skills/pix3-nodes/reference.md",
+    ".claude/skills/pix3-scene-format/SKILL.md",
+    ".claude/skills/pix3-scene-format/reference.md",
+    ".claude/skills/pix3-scripts/SKILL.md",
+    ".claude/skills/pix3-scripts/reference.md",
+    ".claude/skills/pix3-verify/SKILL.md",
+    ".claude/skills/pix3-verify/reference.md",
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
+  "sources": [
+    "docs/node-types-reference.md",
+    "docs/nodes-and-systems.md",
+    "docs/pix3-specification.md",
+    "packages/pix3-cli/README.md",
+    "src/services/agent/agent-skills/engine-api-map.md"
+  ]
+}
