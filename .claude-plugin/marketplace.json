@@ -1,0 +1,23 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "pix3",
+  "description": "Pix3 — an HTML5 2D/3D game engine with a visual editor, built to be driven by coding agents.",
+  "owner": {
+    "name": "Igor Gritsenko",
+    "email": "igor@gritsenko.biz"
+  },
+  "plugins": [
+    {
+      "name": "pix3",
+      "description": "Create a Pix3 game project and hand over to a Claude Code session inside it: \"create a Pix3 project\".",
+      "category": "development",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/pix3dev/pix3-core.git",
+        "path": "claude-plugin",
+        "ref": "main"
+      },
+      "homepage": "https://pix3.dev"
+    }
+  ]
+}
