@@ -5,7 +5,7 @@ Pix3 is an HTML5 2D/3D game engine with a visual editor, made for working with a
 project, and you can open the Pix3 editor at any time to see the scenes, move things and press
 Play. The result is one HTML file you can put on any web portal.
 
-> **Status: alpha.** Pix3 2.0 is published under the `next` tag. Things change between versions.
+> **Status: alpha.** Pix3 2.0 is published as `2.0.0-alpha.N` (`npm create pix3@latest`; `@pix3/runtime` and `@pix3/cli` under `next`, their `latest` is the archived 1.x). Things change between versions.
 
 ## Start a game
 
@@ -27,7 +27,7 @@ Pix3 project."*
 **By hand:**
 
 ```bash
-npm create pix3@next my-game -- --template 2d
+npm create pix3@latest my-game -- --template 2d
 cd my-game
 npm install
 npx pix3 agent-setup claude    # or: codex

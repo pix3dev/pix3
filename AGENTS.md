@@ -6,7 +6,7 @@ the engine and not a game template: **do not clone it or build inside it.**
 To create a project (Node 24.15+ required):
 
 ```bash
-npm create --yes pix3@next <folder> -- --template <2d|3d> [--portrait] --yes
+npm create --yes pix3@latest <folder> -- --template <2d|3d> [--portrait] --yes
 cd <folder>
 npm install
 npx pix3 agent-setup <claude|codex>
